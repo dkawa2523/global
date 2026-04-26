@@ -1,0 +1,11 @@
+source_config: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs\case_zdp_pressure_200torr.yaml
+base_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs
+chamber_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs\chamber_zdp_pressure_200torr.yaml
+recipe_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\recipe_zdplaskin_example2.yaml
+chemistry_manifest: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\chemistry_zdplaskin_example2\chemistry_manifest.yaml
+chemistry_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\chemistry_zdplaskin_example2
+output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\zdp_pressure_200torr
+external_inputs:
+  comsol_anchor_yaml: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\external\comsol_anchor.yaml
+  power_waveform_h5: null
+  geometry_override_yaml: null

@@ -1,0 +1,62 @@
+recipe_id: argon_lxcat_icp_baseline
+description: >
+  Pure-argon ICP baseline using public BOLSIG/LXCat-style cross sections.
+  The wafer bias is kept off so the first comparison target is the public
+  argon GEC ICP class of examples rather than a mixed ICP/CCP process.
+
+steps:
+  - step_id: ignition
+    t_start_s: 0.0
+    t_end_s: 2.0e-4
+    gas_inlets:
+      showerhead:
+        Ar: 100.0
+    power_ports:
+      source_rf:
+        mode: absorbed_power
+        zone_id: source
+        value_W: 500.0
+        frequency_Hz: 1.356e7
+        waveform: cw
+      wafer_bias:
+        mode: absorbed_power
+        zone_id: process
+        value_W: 0.0
+        waveform: off
+
+  - step_id: production
+    t_start_s: 2.0e-4
+    t_end_s: 2.2e-3
+    gas_inlets:
+      showerhead:
+        Ar: 100.0
+    power_ports:
+      source_rf:
+        mode: absorbed_power
+        zone_id: source
+        value_W: 1500.0
+        frequency_Hz: 1.356e7
+        waveform: cw
+      wafer_bias:
+        mode: absorbed_power
+        zone_id: process
+        value_W: 0.0
+        waveform: off
+
+  - step_id: afterglow
+    t_start_s: 2.2e-3
+    t_end_s: 2.6e-3
+    gas_inlets:
+      showerhead:
+        Ar: 100.0
+    power_ports:
+      source_rf:
+        mode: absorbed_power
+        zone_id: source
+        value_W: 0.0
+        waveform: off
+      wafer_bias:
+        mode: absorbed_power
+        zone_id: process
+        value_W: 0.0
+        waveform: off

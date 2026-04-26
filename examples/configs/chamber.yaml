@@ -1,0 +1,108 @@
+chamber_id: demo_icp_bias_reactor
+description: >
+  Example reactor with source/process zones, wafer surface, wall surfaces, one inlet,
+  one pump, and two power ports. All unit-bearing keys include units in the key name.
+
+zones:
+  - zone_id: source
+    description: remote or upstream source zone
+    volume_m3: 0.010
+    pressure_Pa: 8.0
+    gas_temperature_K: 350.0
+    role: source
+  - zone_id: process
+    description: main wafer process zone
+    volume_m3: 0.030
+    pressure_Pa: 8.0
+    gas_temperature_K: 340.0
+    role: process
+
+edges:
+  - edge_id: source_to_process
+    from_zone: source
+    to_zone: process
+    conductance_m3_s: 0.020
+    notes: simple transport edge
+
+surfaces:
+  - surface_id: wafer
+    zone_id: process
+    kind: wafer
+    area_m2: 0.0314
+    material: SiO2_on_Si
+    temperature_K: 320.0
+    site_density_m2: 5.0e18
+    initial_coverages:
+      wafer:*: 1.0
+      wafer:F*: 0.0
+      wafer:poly*: 0.0
+    initial_inventory:
+      F_reservoir: 0.0
+    models:
+      neutral_loss: diffusion_surface_resistance
+      ion_loss: bohm_edge_loss
+      sticking_mode: coverage_dependent
+      return_species_mode: enabled
+
+  - surface_id: grounded_wall
+    zone_id: process
+    kind: wall
+    area_m2: 0.45
+    material: Anodized_Al
+    temperature_K: 330.0
+    site_density_m2: 3.0e18
+    initial_coverages:
+      wall:*: 1.0
+      wall:F*: 0.0
+    models:
+      neutral_loss: diffusion_surface_resistance
+      ion_loss: bohm_edge_loss
+
+  - surface_id: source_wall
+    zone_id: source
+    kind: wall
+    area_m2: 0.18
+    material: Quartz
+    temperature_K: 360.0
+    site_density_m2: 3.0e18
+    initial_coverages:
+      source:*: 1.0
+    models:
+      neutral_loss: diffusion_surface_resistance
+      ion_loss: bohm_edge_loss
+
+gas_inlets:
+  - inlet_id: showerhead
+    zone_id: process
+    flow_sccm:
+      Ar: 100.0
+      CF4: 30.0
+      O2: 5.0
+    temperature_K: 300.0
+
+pumps:
+  - pump_id: main_pump
+    zone_id: process
+    speed_m3_s: 0.150
+    target_pressure_Pa: 8.0
+
+power_ports:
+  - port_id: source_rf
+    kind: icp
+    zone_id: source
+    coupling_target: source
+    parameters:
+      frequency_Hz: 1.356e7
+      control_mode: absorbed_power
+  - port_id: wafer_bias
+    kind: ccp_bias
+    zone_id: process
+    coupling_target: wafer
+    parameters:
+      carrier_frequency_Hz: 2.0e6
+      control_mode: voltage
+
+metadata:
+  imported_geometry_tags:
+    comsol_volume_tag_source: source_volume
+    comsol_volume_tag_process: process_volume

@@ -1,0 +1,4 @@
+canonical_id,display_name,phase,charge,mass_amu,elements,aliases,state_tags,zones,surfaces
+e,e,gas,-1,0.00054858,,electron,electron,plasma,
+Ar,Ar,gas,0,39.948,Ar:1,argon,stable|parent,plasma,
+Ar_plus,Ar+,gas,1,39.948,Ar:1,Ar+|Ar(+),ion,plasma,

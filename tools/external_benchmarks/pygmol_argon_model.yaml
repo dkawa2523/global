@@ -1,0 +1,67 @@
+model:
+  id: pygmol_minimal_argon_arrhenius_surrogate
+  scope: external_benchmark_only
+  rate_alignment_with_local_case: intentionally_not_aligned
+  rate_source: PyGMol-compatible compact Arrhenius surrogate
+  purpose: Executable PyGMol sanity check for pure-Ar global-model behavior.
+  guardrails:
+    - Do not import this file from plasma_global core modules.
+    - Do not use these rates as production LXCat or BOLSIG+ replacement data.
+    - Compare order and trends only unless a separate same-rate parity case is explicitly created.
+
+species:
+  - id: Ar
+    charge: 0
+    mass_amu: 39.948
+    lj_sigma: 3.54
+    surface_sticking: 0.0
+  - id: Ar+
+    charge: 1
+    mass_amu: 39.948
+    lj_sigma: 3.54
+    surface_sticking: 1.0
+
+surface_return_matrix:
+  - [0.0, 1.0]
+  - [0.0, 0.0]
+
+reactions:
+  - id: Ar_ionization
+    equation: e + Ar -> 2e + Ar+
+    arrhenius:
+      a: 2.34e-14
+      b: 0.59
+      c_eV: 17.44
+    electron_energy_loss_eV: 15.76
+    elastic: false
+    electron_stoich:
+      lhs: 1
+      rhs: 2
+    species_stoich_lhs: [1, 0]
+    species_stoich_rhs: [0, 1]
+  - id: Ar_excitation_lumped
+    equation: e + Ar -> e + Ar, lumped excitation loss
+    arrhenius:
+      a: 1.0e-13
+      b: 0.0
+      c_eV: 11.6
+    electron_energy_loss_eV: 11.6
+    elastic: false
+    electron_stoich:
+      lhs: 1
+      rhs: 1
+    species_stoich_lhs: [1, 0]
+    species_stoich_rhs: [1, 0]
+  - id: Ar_elastic
+    equation: e + Ar -> e + Ar, elastic loss
+    arrhenius:
+      a: 3.0e-14
+      b: 0.0
+      c_eV: 0.0
+    electron_energy_loss_eV: 0.0
+    elastic: true
+    electron_stoich:
+      lhs: 1
+      rhs: 1
+    species_stoich_lhs: [1, 0]
+    species_stoich_rhs: [1, 0]

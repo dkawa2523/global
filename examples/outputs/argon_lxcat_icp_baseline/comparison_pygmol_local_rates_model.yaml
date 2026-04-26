@@ -1,0 +1,1255 @@
+model:
+  id: pygmol_argon_local_lxcat_rate_fit
+  scope: external_benchmark_only
+  rate_alignment_with_local_case: local_lxcat_arrhenius_fit
+  rate_source: Local Ar LXCat/two-term EEDF rates fitted to PyGMol Arrhenius form
+  purpose: Same-electron-collision-rate PyGMol comparison without changing plasma_global
+    core physics.
+  guardrails:
+  - Do not import this generated model from plasma_global core modules.
+  - Do not treat the fitted Arrhenius coefficients as production chemistry data.
+  - Use this only to isolate rate-physics differences from geometry, wall-loss, and
+    PyGMol equation-form differences.
+  fit_temperature_eV:
+    te_min: 0.3
+    te_max: 8.0
+    n: 72
+    pygmol_temperature_relation: local_mean_energy_eV = 1.5 * pygmol_Te_eV
+  fit_conditions:
+    pressure_Pa: 8.0
+    gas_temperature_K: 342.5
+    argon_density_m3: 1.691788733673558e+21
+  fit_summary:
+  - reaction_id: G_AR_ION
+    local_cross_section_id: xs_ar_ionization_zenodo
+    local_channel_kind: ionization
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.38419040253475256
+    max_abs_log10_error: 1.4164891510703117
+    min_rate_m3_s: 7.07464913979727e-27
+    max_rate_m3_s: 1.494793235054357e-14
+  - reaction_id: G_AR_EXC_01
+    local_cross_section_id: xs_ar_excitation_01_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1765686875997
+    max_abs_log10_error: 0.5958553878870816
+    min_rate_m3_s: 5.1560193370489076e-26
+    max_rate_m3_s: 4.1032120913296397e-16
+  - reaction_id: G_AR_EXC_02
+    local_cross_section_id: xs_ar_excitation_02_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2013188351355621
+    max_abs_log10_error: 0.6616797590000555
+    min_rate_m3_s: 4.2360470245479593e-26
+    max_rate_m3_s: 1.2950688164742128e-15
+  - reaction_id: G_AR_EXC_03
+    local_cross_section_id: xs_ar_excitation_03_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.21920981428925548
+    max_abs_log10_error: 0.740295458153831
+    min_rate_m3_s: 1.378136500923012e-28
+    max_rate_m3_s: 2.2684330072390497e-16
+  - reaction_id: G_AR_EXC_04
+    local_cross_section_id: xs_ar_excitation_04_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.24954543741338087
+    max_abs_log10_error: 0.8367296435411022
+    min_rate_m3_s: 3.9144935131651673e-29
+    max_rate_m3_s: 3.046741652980391e-16
+  - reaction_id: G_AR_EXC_05
+    local_cross_section_id: xs_ar_excitation_05_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2384366733671069
+    max_abs_log10_error: 0.8127311479119361
+    min_rate_m3_s: 2.8552740240683324e-29
+    max_rate_m3_s: 1.4338027593410787e-16
+  - reaction_id: G_AR_EXC_06
+    local_cross_section_id: xs_ar_excitation_06_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.20647327295213222
+    max_abs_log10_error: 0.7136729208413338
+    min_rate_m3_s: 6.042607239757536e-29
+    max_rate_m3_s: 6.691432793335561e-17
+  - reaction_id: G_AR_EXC_07
+    local_cross_section_id: xs_ar_excitation_07_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22891687664265337
+    max_abs_log10_error: 0.7870661061961977
+    min_rate_m3_s: 2.2373003234701846e-28
+    max_rate_m3_s: 2.1921172537149885e-15
+  - reaction_id: G_AR_EXC_08
+    local_cross_section_id: xs_ar_excitation_08_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17019250315851536
+    max_abs_log10_error: 0.6145018130562628
+    min_rate_m3_s: 1.3705756228008428e-26
+    max_rate_m3_s: 1.1373309906726355e-16
+  - reaction_id: G_AR_EXC_09
+    local_cross_section_id: xs_ar_excitation_09_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1765870447655809
+    max_abs_log10_error: 0.6376255258606547
+    min_rate_m3_s: 1.105566674016065e-27
+    max_rate_m3_s: 2.1577340368601907e-17
+  - reaction_id: G_AR_EXC_10
+    local_cross_section_id: xs_ar_excitation_10_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18249591856130368
+    max_abs_log10_error: 0.66023546344955
+    min_rate_m3_s: 1.837288729080042e-28
+    max_rate_m3_s: 4.0587047053014634e-17
+  - reaction_id: G_AR_EXC_11
+    local_cross_section_id: xs_ar_excitation_11_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1623854393456582
+    max_abs_log10_error: 0.5887139848059676
+    min_rate_m3_s: 2.7809038390080907e-27
+    max_rate_m3_s: 7.386914379203695e-17
+  - reaction_id: G_AR_EXC_12
+    local_cross_section_id: xs_ar_excitation_12_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22629550823776937
+    max_abs_log10_error: 0.794466942671428
+    min_rate_m3_s: 2.2614987248376584e-29
+    max_rate_m3_s: 1.031803157096924e-16
+  - reaction_id: G_AR_EXC_13
+    local_cross_section_id: xs_ar_excitation_13_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18620116411505658
+    max_abs_log10_error: 0.6674197226831635
+    min_rate_m3_s: 2.221070696331781e-28
+    max_rate_m3_s: 5.315661227824966e-17
+  - reaction_id: G_AR_EXC_14
+    local_cross_section_id: xs_ar_excitation_14_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17904259384913565
+    max_abs_log10_error: 0.6285695679497576
+    min_rate_m3_s: 1.1812477372324106e-27
+    max_rate_m3_s: 9.860221466918614e-17
+  - reaction_id: G_AR_EXC_15
+    local_cross_section_id: xs_ar_excitation_15_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.19550395288569333
+    max_abs_log10_error: 0.6946284980234885
+    min_rate_m3_s: 2.242429567681573e-28
+    max_rate_m3_s: 1.0763237528758615e-16
+  - reaction_id: G_AR_EXC_16
+    local_cross_section_id: xs_ar_excitation_16_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22298679083112133
+    max_abs_log10_error: 0.7843889761891605
+    min_rate_m3_s: 1.658117191795008e-29
+    max_rate_m3_s: 7.972883060969199e-17
+  - reaction_id: G_AR_EXC_17
+    local_cross_section_id: xs_ar_excitation_17_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2018607774368275
+    max_abs_log10_error: 0.7203393930095835
+    min_rate_m3_s: 1.988336439724187e-29
+    max_rate_m3_s: 2.811205189530558e-17
+  - reaction_id: G_AR_EXC_18
+    local_cross_section_id: xs_ar_excitation_18_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18778547244108412
+    max_abs_log10_error: 0.6604226580102831
+    min_rate_m3_s: 1.187473607905885e-27
+    max_rate_m3_s: 2.6164556449550465e-16
+  - reaction_id: G_AR_EXC_19
+    local_cross_section_id: xs_ar_excitation_19_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18059387486408632
+    max_abs_log10_error: 0.6481429340703598
+    min_rate_m3_s: 1.3004462730704903e-28
+    max_rate_m3_s: 2.053498837203117e-17
+  - reaction_id: G_AR_EXC_20
+    local_cross_section_id: xs_ar_excitation_20_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.19434145438565967
+    max_abs_log10_error: 0.6948088258130564
+    min_rate_m3_s: 3.553100465474785e-28
+    max_rate_m3_s: 1.516075392392126e-16
+  - reaction_id: G_AR_EXC_21
+    local_cross_section_id: xs_ar_excitation_21_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2014452602015637
+    max_abs_log10_error: 0.7208331969624652
+    min_rate_m3_s: 1.228323176199778e-28
+    max_rate_m3_s: 1.3139091113640855e-16
+  - reaction_id: G_AR_EXC_22
+    local_cross_section_id: xs_ar_excitation_22_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.25382424552174065
+    max_abs_log10_error: 0.8792501113701168
+    min_rate_m3_s: 4.9373937877882685e-30
+    max_rate_m3_s: 3.1756606482549447e-16
+  - reaction_id: G_AR_EXC_23
+    local_cross_section_id: xs_ar_excitation_23_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.20514904952806529
+    max_abs_log10_error: 0.7308685207792363
+    min_rate_m3_s: 1.2485637038008581e-29
+    max_rate_m3_s: 6.06932247194533e-17
+  - reaction_id: G_AR_EXC_24
+    local_cross_section_id: xs_ar_excitation_24_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17395948383485035
+    max_abs_log10_error: 0.6309860724147133
+    min_rate_m3_s: 1.7814508640645274e-28
+    max_rate_m3_s: 3.951787858461928e-17
+  - reaction_id: G_AR_EXC_25
+    local_cross_section_id: xs_ar_excitation_25_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22537559072154392
+    max_abs_log10_error: 0.7677383548470267
+    min_rate_m3_s: 1.0578515177246212e-29
+    max_rate_m3_s: 2.2775255759025238e-17
+  - reaction_id: G_AR_EXC_26
+    local_cross_section_id: xs_ar_excitation_26_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.20366220178823294
+    max_abs_log10_error: 0.7283744659403394
+    min_rate_m3_s: 1.4872793365027494e-29
+    max_rate_m3_s: 5.64111736230844e-17
+  - reaction_id: G_AR_EXC_27
+    local_cross_section_id: xs_ar_excitation_27_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.21059363722104527
+    max_abs_log10_error: 0.7343040648389538
+    min_rate_m3_s: 7.768652072106297e-29
+    max_rate_m3_s: 1.1473432238893233e-16
+  - reaction_id: G_AR_EXC_28
+    local_cross_section_id: xs_ar_excitation_28_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1803203774886164
+    max_abs_log10_error: 0.6409420890649697
+    min_rate_m3_s: 1.2071840294772626e-28
+    max_rate_m3_s: 3.762332459651945e-17
+  - reaction_id: G_AR_EXC_29
+    local_cross_section_id: xs_ar_excitation_29_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1763989669448705
+    max_abs_log10_error: 0.6349071584334953
+    min_rate_m3_s: 3.1229508872791687e-28
+    max_rate_m3_s: 5.714860051514159e-17
+  - reaction_id: G_AR_EXC_30
+    local_cross_section_id: xs_ar_excitation_30_zenodo
+    local_channel_kind: excitation
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17980919565364303
+    max_abs_log10_error: 0.6461764606810905
+    min_rate_m3_s: 4.784361105523877e-29
+    max_rate_m3_s: 1.1601499590700485e-17
+  - reaction_id: xs_ar_momentum_zenodo_elastic
+    local_cross_section_id: xs_ar_momentum_zenodo
+    local_channel_kind: elastic_momentum
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.044762507646371914
+    max_abs_log10_error: 0.11916657480561231
+    min_rate_m3_s: 4.015288550290164e-15
+    max_rate_m3_s: 8.520698953029355e-14
+species:
+- id: Ar
+  charge: 0
+  mass_amu: 39.948
+  lj_sigma: 3.54
+  surface_sticking: 0.0
+- id: Ar+
+  charge: 1
+  mass_amu: 39.948
+  lj_sigma: 3.54
+  surface_sticking: 1.0
+surface_return_matrix:
+- - 0.0
+  - 1.0
+- - 0.0
+  - 0.0
+reactions:
+- id: G_AR_ION
+  equation: e + Ar -> 2e + Ar+
+  arrhenius:
+    a: 4.897364350858075e-14
+    b: 0.2516791923503092
+    c_eV: 9.757307229489617
+  electron_energy_loss_eV: 15.76
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 2
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 0
+  - 1
+  local_reaction_id: G_AR_ION
+  local_cross_section_id: xs_ar_ionization_zenodo
+  local_channel_kind: ionization
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.38419040253475256
+    max_abs_log10_error: 1.4164891510703117
+    min_rate_m3_s: 7.07464913979727e-27
+    max_rate_m3_s: 1.494793235054357e-14
+- id: G_AR_EXC_01
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.010542578730567e-15
+    b: 0.11496286159510927
+    c_eV: 7.479706246680433
+  electron_energy_loss_eV: 11.62
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_01
+  local_cross_section_id: xs_ar_excitation_01_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1765686875997
+    max_abs_log10_error: 0.5958553878870816
+    min_rate_m3_s: 5.1560193370489076e-26
+    max_rate_m3_s: 4.1032120913296397e-16
+- id: G_AR_EXC_02
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 3.030669476143668e-15
+    b: 0.19183525250861866
+    c_eV: 7.8858595682714565
+  electron_energy_loss_eV: 11.83
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_02
+  local_cross_section_id: xs_ar_excitation_02_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2013188351355621
+    max_abs_log10_error: 0.6616797590000555
+    min_rate_m3_s: 4.2360470245479593e-26
+    max_rate_m3_s: 1.2950688164742128e-15
+- id: G_AR_EXC_03
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.3773414972367225e-15
+    b: -0.2006553692875972
+    c_eV: 9.563761820364402
+  electron_energy_loss_eV: 14.153
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_03
+  local_cross_section_id: xs_ar_excitation_03_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.21920981428925548
+    max_abs_log10_error: 0.740295458153831
+    min_rate_m3_s: 1.378136500923012e-28
+    max_rate_m3_s: 2.2684330072390497e-16
+- id: G_AR_EXC_04
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 2.182358076270002e-15
+    b: -0.22601644043000135
+    c_eV: 10.15520105458095
+  electron_energy_loss_eV: 14.3
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_04
+  local_cross_section_id: xs_ar_excitation_04_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.24954543741338087
+    max_abs_log10_error: 0.8367296435411022
+    min_rate_m3_s: 3.9144935131651673e-29
+    max_rate_m3_s: 3.046741652980391e-16
+- id: G_AR_EXC_05
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.296576782669054e-15
+    b: -0.36299604616248615
+    c_eV: 10.126551307121368
+  electron_energy_loss_eV: 14.09
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_05
+  local_cross_section_id: xs_ar_excitation_05_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2384366733671069
+    max_abs_log10_error: 0.8127311479119361
+    min_rate_m3_s: 2.8552740240683324e-29
+    max_rate_m3_s: 1.4338027593410787e-16
+- id: G_AR_EXC_06
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 5.901182243991935e-16
+    b: -0.40952520133766157
+    c_eV: 9.613881951893681
+  electron_energy_loss_eV: 14.255
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_06
+  local_cross_section_id: xs_ar_excitation_06_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.20647327295213222
+    max_abs_log10_error: 0.7136729208413338
+    min_rate_m3_s: 6.042607239757536e-29
+    max_rate_m3_s: 6.691432793335561e-17
+- id: G_AR_EXC_07
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 2.7369135790586427e-14
+    b: -0.5246157675752947
+    c_eV: 10.464498609104362
+  electron_energy_loss_eV: 15.0
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_07
+  local_cross_section_id: xs_ar_excitation_07_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22891687664265337
+    max_abs_log10_error: 0.7870661061961977
+    min_rate_m3_s: 2.2373003234701846e-28
+    max_rate_m3_s: 2.1921172537149885e-15
+- id: G_AR_EXC_08
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.464258978064807e-15
+    b: -0.7099509075515398
+    c_eV: 8.299277641694786
+  electron_energy_loss_eV: 11.55
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_08
+  local_cross_section_id: xs_ar_excitation_08_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17019250315851536
+    max_abs_log10_error: 0.6145018130562628
+    min_rate_m3_s: 1.3705756228008428e-26
+    max_rate_m3_s: 1.1373309906726355e-16
+- id: G_AR_EXC_09
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 3.213770188358785e-16
+    b: -0.7627102567295694
+    c_eV: 8.63459765734256
+  electron_energy_loss_eV: 11.72
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_09
+  local_cross_section_id: xs_ar_excitation_09_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1765870447655809
+    max_abs_log10_error: 0.6376255258606547
+    min_rate_m3_s: 1.105566674016065e-27
+    max_rate_m3_s: 2.1577340368601907e-17
+- id: G_AR_EXC_10
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 9.83474871191806e-16
+    b: -0.9658791543864425
+    c_eV: 9.597537785724613
+  electron_energy_loss_eV: 12.91
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_10
+  local_cross_section_id: xs_ar_excitation_10_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18249591856130368
+    max_abs_log10_error: 0.66023546344955
+    min_rate_m3_s: 1.837288729080042e-28
+    max_rate_m3_s: 4.0587047053014634e-17
+- id: G_AR_EXC_11
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.2039365378832525e-15
+    b: -0.8204361925043866
+    c_eV: 8.741156599239247
+  electron_energy_loss_eV: 13.08
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_11
+  local_cross_section_id: xs_ar_excitation_11_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1623854393456582
+    max_abs_log10_error: 0.5887139848059676
+    min_rate_m3_s: 2.7809038390080907e-27
+    max_rate_m3_s: 7.386914379203695e-17
+- id: G_AR_EXC_12
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.6179451937449831e-15
+    b: -0.6554600707326674
+    c_eV: 10.355941301884817
+  electron_energy_loss_eV: 13.09
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_12
+  local_cross_section_id: xs_ar_excitation_12_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22629550823776937
+    max_abs_log10_error: 0.794466942671428
+    min_rate_m3_s: 2.2614987248376584e-29
+    max_rate_m3_s: 1.031803157096924e-16
+- id: G_AR_EXC_13
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 8.542241445456839e-16
+    b: -0.7572083209828602
+    c_eV: 9.427951232478499
+  electron_energy_loss_eV: 13.15
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_13
+  local_cross_section_id: xs_ar_excitation_13_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18620116411505658
+    max_abs_log10_error: 0.6674197226831635
+    min_rate_m3_s: 2.221070696331781e-28
+    max_rate_m3_s: 5.315661227824966e-17
+- id: G_AR_EXC_14
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 7.103326714664504e-16
+    b: -0.38010925023856856
+    c_eV: 8.70822122441529
+  electron_energy_loss_eV: 13.17
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_14
+  local_cross_section_id: xs_ar_excitation_14_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17904259384913565
+    max_abs_log10_error: 0.6285695679497576
+    min_rate_m3_s: 1.1812477372324106e-27
+    max_rate_m3_s: 9.860221466918614e-17
+- id: G_AR_EXC_15
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.5492123855053044e-15
+    b: -0.6812144976836638
+    c_eV: 9.595019375896092
+  electron_energy_loss_eV: 13.27
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_15
+  local_cross_section_id: xs_ar_excitation_15_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.19550395288569333
+    max_abs_log10_error: 0.6946284980234885
+    min_rate_m3_s: 2.242429567681573e-28
+    max_rate_m3_s: 1.0763237528758615e-16
+- id: G_AR_EXC_16
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.3560492759960672e-15
+    b: -0.6990069859717565
+    c_eV: 10.404837557396615
+  electron_energy_loss_eV: 13.3
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_16
+  local_cross_section_id: xs_ar_excitation_16_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22298679083112133
+    max_abs_log10_error: 0.7843889761891605
+    min_rate_m3_s: 1.658117191795008e-29
+    max_rate_m3_s: 7.972883060969199e-17
+- id: G_AR_EXC_17
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 6.169346348205234e-16
+    b: -0.8683456704092354
+    c_eV: 10.131002427564663
+  electron_energy_loss_eV: 13.33
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_17
+  local_cross_section_id: xs_ar_excitation_17_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2018607774368275
+    max_abs_log10_error: 0.7203393930095835
+    min_rate_m3_s: 1.988336439724187e-29
+    max_rate_m3_s: 2.811205189530558e-17
+- id: G_AR_EXC_18
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 2.2637300946906898e-15
+    b: -0.4476910961989393
+    c_eV: 9.100768287975212
+  electron_energy_loss_eV: 13.48
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_18
+  local_cross_section_id: xs_ar_excitation_18_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18778547244108412
+    max_abs_log10_error: 0.6604226580102831
+    min_rate_m3_s: 1.187473607905885e-27
+    max_rate_m3_s: 2.6164556449550465e-16
+- id: G_AR_EXC_19
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 4.039937843049281e-16
+    b: -0.8665921090915027
+    c_eV: 9.39009015593207
+  electron_energy_loss_eV: 13.84
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_19
+  local_cross_section_id: xs_ar_excitation_19_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.18059387486408632
+    max_abs_log10_error: 0.6481429340703598
+    min_rate_m3_s: 1.3004462730704903e-28
+    max_rate_m3_s: 2.053498837203117e-17
+- id: G_AR_EXC_20
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 3.3396961663703545e-15
+    b: -0.8927509018543116
+    c_eV: 9.763910910723357
+  electron_energy_loss_eV: 13.84
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_20
+  local_cross_section_id: xs_ar_excitation_20_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.19434145438565967
+    max_abs_log10_error: 0.6948088258130564
+    min_rate_m3_s: 3.553100465474785e-28
+    max_rate_m3_s: 1.516075392392126e-16
+- id: G_AR_EXC_21
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 3.582734827149104e-15
+    b: -0.9782734499599766
+    c_eV: 10.15250312124031
+  electron_energy_loss_eV: 13.9
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_21
+  local_cross_section_id: xs_ar_excitation_21_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.2014452602015637
+    max_abs_log10_error: 0.7208331969624652
+    min_rate_m3_s: 1.228323176199778e-28
+    max_rate_m3_s: 1.3139091113640855e-16
+- id: G_AR_EXC_22
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 5.7322613441929e-15
+    b: -0.6545967981735803
+    c_eV: 11.250214146396628
+  electron_energy_loss_eV: 13.98
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_22
+  local_cross_section_id: xs_ar_excitation_22_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.25382424552174065
+    max_abs_log10_error: 0.8792501113701168
+    min_rate_m3_s: 4.9373937877882685e-30
+    max_rate_m3_s: 3.1756606482549447e-16
+- id: G_AR_EXC_23
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.9956177942914616e-15
+    b: -1.048508066893362
+    c_eV: 10.695123984143782
+  electron_energy_loss_eV: 14.01
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_23
+  local_cross_section_id: xs_ar_excitation_23_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.20514904952806529
+    max_abs_log10_error: 0.7308685207792363
+    min_rate_m3_s: 1.2485637038008581e-29
+    max_rate_m3_s: 6.06932247194533e-17
+- id: G_AR_EXC_24
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.4380459569057113e-15
+    b: -1.1766261185761397
+    c_eV: 9.776696482200714
+  electron_energy_loss_eV: 14.06
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_24
+  local_cross_section_id: xs_ar_excitation_24_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17395948383485035
+    max_abs_log10_error: 0.6309860724147133
+    min_rate_m3_s: 1.7814508640645274e-28
+    max_rate_m3_s: 3.951787858461928e-17
+- id: G_AR_EXC_25
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.85677136206969e-16
+    b: -0.33781380912681236
+    c_eV: 9.80121207319303
+  electron_energy_loss_eV: 14.09
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_25
+  local_cross_section_id: xs_ar_excitation_25_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.22537559072154392
+    max_abs_log10_error: 0.7677383548470267
+    min_rate_m3_s: 1.0578515177246212e-29
+    max_rate_m3_s: 2.2775255759025238e-17
+- id: G_AR_EXC_26
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 2.0897293141550162e-15
+    b: -1.112718486446962
+    c_eV: 10.677931297939994
+  electron_energy_loss_eV: 14.21
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_26
+  local_cross_section_id: xs_ar_excitation_26_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.20366220178823294
+    max_abs_log10_error: 0.7283744659403394
+    min_rate_m3_s: 1.4872793365027494e-29
+    max_rate_m3_s: 5.64111736230844e-17
+- id: G_AR_EXC_27
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.3814644514133518e-15
+    b: -0.5566424098705358
+    c_eV: 9.861065604268678
+  electron_energy_loss_eV: 14.23
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_27
+  local_cross_section_id: xs_ar_excitation_27_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.21059363722104527
+    max_abs_log10_error: 0.7343040648389538
+    min_rate_m3_s: 7.768652072106297e-29
+    max_rate_m3_s: 1.1473432238893233e-16
+- id: G_AR_EXC_28
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 4.704961818419048e-16
+    b: -0.6351482953723462
+    c_eV: 9.369562004678931
+  electron_energy_loss_eV: 14.24
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_28
+  local_cross_section_id: xs_ar_excitation_28_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1803203774886164
+    max_abs_log10_error: 0.6409420890649697
+    min_rate_m3_s: 1.2071840294772626e-28
+    max_rate_m3_s: 3.762332459651945e-17
+- id: G_AR_EXC_29
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 1.3347754980285177e-15
+    b: -0.9551131709157534
+    c_eV: 9.508634702880258
+  electron_energy_loss_eV: 14.07
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_29
+  local_cross_section_id: xs_ar_excitation_29_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.1763989669448705
+    max_abs_log10_error: 0.6349071584334953
+    min_rate_m3_s: 3.1229508872791687e-28
+    max_rate_m3_s: 5.714860051514159e-17
+- id: G_AR_EXC_30
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 2.7343933710650566e-16
+    b: -0.9516682529478135
+    c_eV: 9.602346691019601
+  electron_energy_loss_eV: 14.241
+  elastic: false
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: G_AR_EXC_30
+  local_cross_section_id: xs_ar_excitation_30_zenodo
+  local_channel_kind: excitation
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.17980919565364303
+    max_abs_log10_error: 0.6461764606810905
+    min_rate_m3_s: 4.784361105523877e-29
+    max_rate_m3_s: 1.1601499590700485e-17
+- id: xs_ar_momentum_zenodo_elastic
+  equation: e + Ar -> e + Ar
+  arrhenius:
+    a: 4.262351912473676e-14
+    b: 0.4291555710016808
+    c_eV: 0.6359989567783347
+  electron_energy_loss_eV: 0.0
+  elastic: true
+  electron_stoich:
+    lhs: 1
+    rhs: 1
+  species_stoich_lhs:
+  - 1
+  - 0
+  species_stoich_rhs:
+  - 1
+  - 0
+  local_reaction_id: null
+  local_cross_section_id: xs_ar_momentum_zenodo
+  local_channel_kind: elastic_momentum
+  fit_metrics:
+    sample_count: 72
+    te_min_eV: 0.3
+    te_max_eV: 8.0
+    rms_log10_error: 0.044762507646371914
+    max_abs_log10_error: 0.11916657480561231
+    min_rate_m3_s: 4.015288550290164e-15
+    max_rate_m3_s: 8.520698953029355e-14

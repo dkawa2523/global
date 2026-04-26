@@ -1,0 +1,20 @@
+recipe_id: zdplaskin_example2_surrogate
+description: >
+  ZDPlaskin example2-inspired Ar discharge recipe. The source example uses a
+  1000 V / 100 kOhm voltage-resistor circuit; this local case now uses the
+  internal DC series-circuit backend and an external E/N-rate table instead of
+  a fixed absorbed-power surrogate. The circuit parameters live on the chamber
+  power port so they are visible in one place.
+
+steps:
+  - step_id: dc_series_circuit
+    t_start_s: 0.0
+    t_end_s: 1.0e-3
+    gas_inlets:
+      initial_argon_seed:
+        Ar: 1.0e-30
+    power_ports:
+      dc_series_drive:
+        mode: voltage
+        zone_id: plasma
+        waveform: cw

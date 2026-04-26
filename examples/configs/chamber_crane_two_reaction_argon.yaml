@@ -1,0 +1,24 @@
+chamber_id: crane_two_reaction_argon
+description: >
+  Zero-transport single-zone chamber for reproducing CRANE tutorials/TwoReactionArgon.
+  The explicit species initial densities are converted from CRANE cm^-3 input.
+
+zones:
+  - zone_id: plasma
+    description: single scalar global zone matching the CRANE ODE tutorial
+    volume_m3: 1.0
+    pressure_Pa: 103548.675
+    gas_temperature_K: 300.0
+    role: process
+    initial_densities_m3:
+      Ar: 2.5e25
+      Ar_plus: 1.0e6
+
+edges: []
+surfaces: []
+gas_inlets: []
+pumps: []
+power_ports: []
+metadata:
+  source: CRANE tutorials/TwoReactionArgon
+  source_repository: https://github.com/lcpp-org/crane

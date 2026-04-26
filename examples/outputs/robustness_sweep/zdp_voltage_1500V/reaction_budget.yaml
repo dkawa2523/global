@@ -1,0 +1,126 @@
+time_s: 0.001
+step_id: dc_series_circuit
+included_processes:
+- gas_reactions
+- ion_wall_loss
+zones:
+  plasma:
+    species:
+      Ar_star:
+        density_m3: 5.361116953237999e+17
+        production_m3_s: 7.811607329967927e+22
+        loss_m3_s: 7.811607241420195e+22
+        net_m3_s: 885477318066176.0
+        top_production:
+        - process_id: ZDP_AR_EXC
+          contribution_m3_s: 7.095987289179821e+22
+          signed_m3_s: 7.095987289179821e+22
+        - process_id: ZDP_AR2PLUS_DISS_RECOMB
+          contribution_m3_s: 7.156200407881057e+21
+          signed_m3_s: 7.156200407881057e+21
+        top_loss:
+        - process_id: ZDP_ARSTAR_THREE_BODY_QUENCH
+          contribution_m3_s: 7.776416862006082e+22
+          signed_m3_s: -7.776416862006082e+22
+        - process_id: ZDP_ARSTAR_POOLING
+          contribution_m3_s: 3.4489889983555056e+20
+          signed_m3_s: -3.4489889983555056e+20
+        - process_id: ZDP_ARSTAR_ION
+          contribution_m3_s: 7.004894305576622e+18
+          signed_m3_s: -7.004894305576622e+18
+      Ar_plus:
+        density_m3: 3360608266138059.5
+        production_m3_s: 7.845090345008411e+21
+        loss_m3_s: 7.845090338895182e+21
+        net_m3_s: 6113228011520.0
+        top_production:
+        - process_id: ZDP_AR_ION
+          contribution_m3_s: 7.838085450702832e+21
+          signed_m3_s: 7.838085450702832e+21
+        - process_id: ZDP_ARSTAR_ION
+          contribution_m3_s: 7.004894305576622e+18
+          signed_m3_s: 7.004894305576622e+18
+        - process_id: ZDP_AR2PLUS_CONVERSION
+          contribution_m3_s: 2140893.078257422
+          signed_m3_s: 2140893.078257422
+        top_loss:
+        - process_id: ZDP_ARPLUS_CLUSTERING
+          contribution_m3_s: 7.834235555297879e+21
+          signed_m3_s: -7.834235555297879e+21
+        - process_id: ion_wall_loss:ambipolar_diffusion
+          contribution_m3_s: 1.0854764699625933e+19
+          signed_m3_s: -1.0854764699625933e+19
+        - process_id: ZDP_ARPLUS_THREE_BODY_RECOMB
+          contribution_m3_s: 18897678208356.29
+          signed_m3_s: -18897678208356.29
+      Ar2_plus:
+        density_m3: 2.633078889642835e+17
+        production_m3_s: 8.006685005215654e+21
+        loss_m3_s: 8.006684889235694e+21
+        net_m3_s: 115979959664640.0
+        top_production:
+        - process_id: ZDP_ARPLUS_CLUSTERING
+          contribution_m3_s: 7.834235555297879e+21
+          signed_m3_s: 7.834235555297879e+21
+        - process_id: ZDP_ARSTAR_POOLING
+          contribution_m3_s: 1.7244944991777528e+20
+          signed_m3_s: 1.7244944991777528e+20
+        top_loss:
+        - process_id: ZDP_AR2PLUS_DISS_RECOMB
+          contribution_m3_s: 7.156200407881057e+21
+          signed_m3_s: -7.156200407881057e+21
+        - process_id: ion_wall_loss:ambipolar_diffusion
+          contribution_m3_s: 8.504844813546357e+20
+          signed_m3_s: -8.504844813546357e+20
+        - process_id: ZDP_AR2PLUS_CONVERSION
+          contribution_m3_s: 2140893.078257422
+          signed_m3_s: -2140893.078257422
+    reactions:
+      ZDP_AR_ION:
+        rate_m3_s: 7.838085450702832e+21
+        net_species_m3_s:
+          Ar: -7.838085450702832e+21
+          Ar_plus: 7.838085450702832e+21
+      ZDP_AR_EXC:
+        rate_m3_s: 7.095987289179821e+22
+        net_species_m3_s:
+          Ar: -7.095987289179821e+22
+          Ar_star: 7.095987289179821e+22
+      ZDP_ARSTAR_ION:
+        rate_m3_s: 7.004894305576622e+18
+        net_species_m3_s:
+          Ar_star: -7.004894305576622e+18
+          Ar_plus: 7.004894305576622e+18
+      ZDP_AR2PLUS_DISS_RECOMB:
+        rate_m3_s: 7.156200407881057e+21
+        net_species_m3_s:
+          Ar: 7.156200407881057e+21
+          Ar_star: 7.156200407881057e+21
+          Ar2_plus: -7.156200407881057e+21
+      ZDP_AR2PLUS_CONVERSION:
+        rate_m3_s: 2140893.078257422
+        net_species_m3_s:
+          Ar: 2140893.078257422
+          Ar_plus: 2140893.078257422
+          Ar2_plus: -2140893.078257422
+      ZDP_ARSTAR_POOLING:
+        rate_m3_s: 1.7244944991777528e+20
+        net_species_m3_s:
+          Ar_star: -3.4489889983555056e+20
+          Ar2_plus: 1.7244944991777528e+20
+      ZDP_ARPLUS_THREE_BODY_RECOMB:
+        rate_m3_s: 18897678208356.29
+        net_species_m3_s:
+          Ar: 18897678208356.29
+          Ar_plus: -18897678208356.29
+      ZDP_ARSTAR_THREE_BODY_QUENCH:
+        rate_m3_s: 7.776416862006082e+22
+        net_species_m3_s:
+          Ar: 7.776416862006082e+22
+          Ar_star: -7.776416862006082e+22
+      ZDP_ARPLUS_CLUSTERING:
+        rate_m3_s: 7.834235555297879e+21
+        net_species_m3_s:
+          Ar: -7.834235555297879e+21
+          Ar_plus: -7.834235555297879e+21
+          Ar2_plus: 7.834235555297879e+21

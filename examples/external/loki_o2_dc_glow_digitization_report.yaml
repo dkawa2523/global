@@ -1,0 +1,336 @@
+tool: loki_o2_dc_glow_digitization
+scope: external_candidate_only
+spec_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_candidate.yaml
+digitization_root: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized
+schema_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized\schema.yaml
+readme_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized\README.md
+passed: true
+summary:
+  files_expected: 14
+  files_present: 14
+  files_with_correct_header: 14
+  files_with_data_rows: 14
+  primary_required_files_complete: 5/5
+  secondary_pressure_sweep_files_complete: 3/3
+  diagnostic_profile_files_started: 6/6
+  runnable_primary_pressure_benchmark: true
+  runnable_extended_species_benchmark: true
+  runnable_full_diagnostic_benchmark: true
+  readiness_stage: runnable_full_diagnostic_benchmark
+evaluation:
+  execution_mode: readiness_check
+  physics_parity_executed: false
+  physics_parity_status: digitized_reference_ready_for_local_case_comparison
+  assessment: The digitization scaffold and CSV schemas are valid.
+  next_actions: []
+datasets:
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig05a_avg_temperatures_vs_pressure.csv
+  priority: primary_required
+  schema_name: pressure_sweep
+  source_figure: 5a
+  exists: true
+  header_matches_schema: true
+  data_row_count: 44
+  expected_row_count: 44
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_gas_temperature
+    symbol: Tg,av
+    unit: K
+  - quantity_id: near_wall_temperature
+    symbol: Tnw
+    unit: K
+  expected_metric_ids: []
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig05b_avg_reduced_field_vs_pressure.csv
+  priority: primary_required
+  schema_name: pressure_sweep
+  source_figure: 5b
+  exists: true
+  header_matches_schema: true
+  data_row_count: 22
+  expected_row_count: 22
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_reduced_electric_field
+    symbol: E_over_N
+    unit: Td
+  expected_metric_ids: []
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig06_molar_fractions_vs_pressure.csv
+  priority: primary_required
+  schema_name: pressure_sweep
+  source_figure: '6'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 44
+  expected_row_count: 44
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_molar_fraction_atomic_oxygen
+    symbol: '[O]/ng'
+    unit: '1'
+  - quantity_id: average_molar_fraction_molecular_oxygen
+    symbol: '[O2]/ng'
+    unit: '1'
+  expected_metric_ids: []
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig07a_main_charged_species_vs_pressure.csv
+  priority: primary_required
+  schema_name: pressure_sweep
+  source_figure: 7a
+  exists: true
+  header_matches_schema: true
+  data_row_count: 66
+  expected_row_count: 66
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_electron_density
+    symbol: ne
+    unit: m^-3
+  - quantity_id: average_negative_ion_density
+    symbol: O_minus
+    unit: m^-3
+  - quantity_id: average_positive_ion_density
+    symbol: O2_plus
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig08_atomic_excited_states_vs_pressure.csv
+  priority: secondary_pressure_sweep
+  schema_name: pressure_sweep
+  source_figure: '8'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 66
+  expected_row_count: 66
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_atomic_excited_state_density
+    symbol: O(3P)
+    unit: m^-3
+  - quantity_id: average_atomic_excited_state_density
+    symbol: O(1D)
+    unit: m^-3
+  - quantity_id: average_atomic_excited_state_density
+    symbol: O(1S)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig09a_molecular_states_vs_pressure.csv
+  priority: secondary_pressure_sweep
+  schema_name: pressure_sweep
+  source_figure: 9a
+  exists: true
+  header_matches_schema: true
+  data_row_count: 66
+  expected_row_count: 66
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_molecular_state_density
+    symbol: O2(X)
+    unit: m^-3
+  - quantity_id: average_molecular_state_density
+    symbol: O2(a)
+    unit: m^-3
+  - quantity_id: average_molecular_state_density
+    symbol: O2(b)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig09b_ozone_and_herzberg_vs_pressure.csv
+  priority: secondary_pressure_sweep
+  schema_name: pressure_sweep
+  source_figure: 9b
+  exists: true
+  header_matches_schema: true
+  data_row_count: 44
+  expected_row_count: 44
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_molecular_state_density
+    symbol: O2(Hz)
+    unit: m^-3
+  - quantity_id: average_molecular_state_density
+    symbol: O3
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/acceptance_envelope_reference/fig11_relative_difference_envelope_vs_pressure.csv
+  priority: primary_required
+  schema_name: acceptance_envelope
+  source_figure: '11'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 36
+  expected_row_count: 36
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series: []
+  expected_quantities: []
+  expected_metric_ids:
+  - avg_gas_temperature_relative_difference
+  - near_wall_temperature_relative_difference
+  - electron_temperature_relative_difference
+  - avg_reduced_electric_field_relative_difference
+  - avg_charged_species_relative_difference
+  - avg_neutral_species_relative_difference
+  expected_profile_groups: []
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig01_gas_temperature_profiles.csv
+  priority: diagnostic_profile
+  schema_name: profile_curve
+  source_figure: '1'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 44
+  expected_row_count: null
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: gas_temperature_profile
+    symbol: Tg(r)
+    unit: K
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig02_reduced_field_profiles.csv
+  priority: diagnostic_profile
+  schema_name: profile_curve
+  source_figure: '2'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 44
+  expected_row_count: null
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: reduced_electric_field_profile
+    symbol: E_over_N(r)
+    unit: Td
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig03_electron_density_profiles.csv
+  priority: diagnostic_profile
+  schema_name: profile_curve
+  source_figure: '3'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 44
+  expected_row_count: null
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: electron_density_profile
+    symbol: ne(r)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig04_atomic_oxygen_profiles.csv
+  priority: diagnostic_profile
+  schema_name: profile_curve
+  source_figure: '4'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 44
+  expected_row_count: null
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: atomic_oxygen_density_profile
+    symbol: O(3P)(r)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig07b_charged_species_profiles_10Torr.csv
+  priority: diagnostic_profile
+  schema_name: profile_curve
+  source_figure: 7b
+  exists: true
+  header_matches_schema: true
+  data_row_count: 66
+  expected_row_count: null
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: electron_density_profile
+    symbol: e(r)
+    unit: m^-3
+  - quantity_id: negative_ion_density_profile
+    symbol: O_minus(r)
+    unit: m^-3
+  - quantity_id: positive_ion_density_profile
+    symbol: O2_plus(r)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 10Torr
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig10_ozone_reactant_profiles_10Torr.csv
+  priority: diagnostic_profile
+  schema_name: profile_curve
+  source_figure: '10'
+  exists: true
+  header_matches_schema: true
+  data_row_count: 110
+  expected_row_count: null
+  complete_for_expected_grid: true
+  status: digitized_complete
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: ozone_reactant_profile
+    symbol: digitized_reactant
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 10Torr

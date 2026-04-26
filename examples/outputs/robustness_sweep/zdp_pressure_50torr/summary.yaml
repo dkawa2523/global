@@ -1,0 +1,78 @@
+success: true
+status: 0
+message: The solver successfully reached the end of the integration interval.
+n_times: 200
+t_start_s: 0.0
+t_end_s: 0.001
+nfev: 3243
+njev: 40
+nlu: 239
+final_electron_density_m3: 3.3643856670070464e+17
+final_mean_electron_energy_eV: 0.9617199362425506
+final_self_bias_V: 0.0
+final_plasma_potential_V: 1.5882265318865003
+final_port_dc_series_drive_absorbed_power_W: 0.30755545231094716
+final_port_dc_series_drive_current_A: 0.0096823546936227
+final_port_dc_series_drive_delivered_power_W: 0.30755545231094716
+final_port_dc_series_drive_gap_voltage_V: 31.764530637730005
+final_port_dc_series_drive_plasma_resistance_ohm: 3280.661744260595
+final_port_dc_series_drive_reduced_field_Td: 4.9341758406976535
+final_port_dc_series_drive_source_voltage_V: 1000.0
+step_summary:
+  dc_series_circuit:
+    n_points: 200
+    t_start_s: 0.0
+    t_end_s: 0.001
+    mean_electron_density_m3: 3.345675718537856e+17
+    final_electron_density_m3: 3.3643856670070464e+17
+    min_electron_density_m3: 2000000000000.0002
+    max_electron_density_m3: 3.3643856670070464e+17
+    mean_mean_electron_energy_eV: 0.9722109366072794
+    final_mean_electron_energy_eV: 0.9617199362425506
+    min_mean_electron_energy_eV: 0.9617198950773584
+    max_mean_electron_energy_eV: 3.0
+    mean_self_bias_V: 0.0
+    final_self_bias_V: 0.0
+    min_self_bias_V: 0.0
+    max_self_bias_V: 0.0
+    mean_plasma_potential_V: 1.8311189479672867
+    final_plasma_potential_V: 1.5882265318865003
+    min_plasma_potential_V: 1.5882265318865003
+    max_plasma_potential_V: 49.9909415459916
+    mean_port_dc_series_drive_absorbed_power_W: 0.3061912301979891
+    final_port_dc_series_drive_absorbed_power_W: 0.30755545231094716
+    min_port_dc_series_drive_absorbed_power_W: 0.0018113625793235067
+    max_port_dc_series_drive_absorbed_power_W: 0.3186511925391346
+    mean_port_dc_series_drive_current_A: 0.009633776210406543
+    final_port_dc_series_drive_current_A: 0.0096823546936227
+    min_port_dc_series_drive_current_A: 1.8116908016795956e-06
+    max_port_dc_series_drive_current_A: 0.0096823546936227
+    mean_port_dc_series_drive_delivered_power_W: 0.3061912301979891
+    final_port_dc_series_drive_delivered_power_W: 0.30755545231094716
+    min_port_dc_series_drive_delivered_power_W: 0.0018113625793235067
+    max_port_dc_series_drive_delivered_power_W: 0.3186511925391346
+    mean_port_dc_series_drive_gap_voltage_V: 36.62237895934573
+    final_port_dc_series_drive_gap_voltage_V: 31.764530637730005
+    min_port_dc_series_drive_gap_voltage_V: 31.764530637730005
+    max_port_dc_series_drive_gap_voltage_V: 999.8188309198321
+    mean_port_dc_series_drive_plasma_resistance_ohm: 2762618.972149769
+    final_port_dc_series_drive_plasma_resistance_ohm: 3280.661744260595
+    min_port_dc_series_drive_plasma_resistance_ohm: 3280.661744260595
+    max_port_dc_series_drive_plasma_resistance_ohm: 551870567.534434
+    mean_port_dc_series_drive_reduced_field_Td: 5.688770272172158
+    final_port_dc_series_drive_reduced_field_Td: 4.9341758406976535
+    min_port_dc_series_drive_reduced_field_Td: 4.934175536896206
+    max_port_dc_series_drive_reduced_field_Td: 155.3076448072895
+    mean_port_dc_series_drive_source_voltage_V: 1000.0
+    final_port_dc_series_drive_source_voltage_V: 1000.0
+    min_port_dc_series_drive_source_voltage_V: 1000.0
+    max_port_dc_series_drive_source_voltage_V: 1000.0
+    count_warning_debye_ratio_plasma: 1
+    count_warning_high_electronegativity_plasma: 0
+    count_warning_ion_ion_afterglow_plasma: 0
+    count_warning_pressure_deviation_plasma: 0
+warning_counts:
+  warning_debye_ratio_plasma: 1
+  warning_high_electronegativity_plasma: 0
+  warning_ion_ion_afterglow_plasma: 0
+  warning_pressure_deviation_plasma: 0

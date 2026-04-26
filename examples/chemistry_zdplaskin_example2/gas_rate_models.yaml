@@ -1,0 +1,29 @@
+rate_models:
+  RM_AR2PLUS_DISS_RECOMB_ZDP:
+    backend: te_power_law
+    A: 8.5e-13
+    Tref_K: 300.0
+    alpha: -0.67
+    electron_temperature_factor: 0.6666666666666666
+  RM_AR2PLUS_CONVERSION_ZDP:
+    backend: arrhenius
+    A: 2.02e-14
+    beta: -1.0
+    Ea_eV: 1.3038025225625385
+  RM_ARSTAR_POOLING_ZDP:
+    backend: constant
+    value: 6.0e-16
+  RM_ARPLUS_THREE_BODY_RECOMB_ZDP:
+    backend: te_power_law
+    A: 8.749999999999999e-39
+    Tref_K: 11600.0
+    alpha: -4.5
+    electron_temperature_factor: 0.6666666666666666
+  RM_ARSTAR_THREE_BODY_QUENCH_ZDP:
+    backend: constant
+    value: 1.4e-44
+  RM_ARPLUS_CLUSTERING_ZDP:
+    backend: arrhenius
+    A: 2.25e-43
+    beta: -0.4
+    Ea_eV: 0.0

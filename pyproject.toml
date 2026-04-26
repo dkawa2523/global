@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plasma-global-model"
+version = "0.1.0"
+description = "YAML-driven low-pressure plasma global model research platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+io = ["h5py>=3.10"]
+plot = ["matplotlib>=3.7"]
+compare = ["pygmol>=1.1,<2"]
+dev = ["pytest>=8.0", "ruff>=0.5", "h5py>=3.10"]
+
+[project.scripts]
+plasma-global = "plasma_global.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["plasma_global*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

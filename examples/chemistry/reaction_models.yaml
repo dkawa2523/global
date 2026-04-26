@@ -1,0 +1,87 @@
+rate_models:
+  RM_E_AR_ION:
+    backend: electron_impact_xsec
+    cross_section_id: xs_ar_ionization
+    branching_yield: 1.0
+  RM_E_CF4_DISS:
+    backend: electron_impact_xsec
+    cross_section_id: xs_cf4_dissociation
+    branching_yield: 1.0
+  RM_E_O2_DISS:
+    backend: electron_impact_xsec
+    cross_section_id: xs_o2_dissociation
+    branching_yield: 1.0
+  RM_E_O2_ATTACH:
+    backend: electron_impact_xsec
+    cross_section_id: xs_o2_attachment
+    branching_yield: 1.0
+
+  EM_E_AR_ION:
+    backend: constant_event_loss
+    energy_loss_eV: 15.8
+  EM_E_CF4_DISS:
+    backend: constant_event_loss
+    energy_loss_eV: 12.5
+  EM_E_O2_DISS:
+    backend: constant_event_loss
+    energy_loss_eV: 6.0
+  EM_E_O2_ATTACH:
+    backend: constant_event_loss
+    energy_loss_eV: 4.5
+
+  RM_S_F_WAFER_STICK:
+    backend: sticking
+    sticking_value: 0.02
+    coverage_factor:
+      kind: site_blocking
+      site_species: wafer:*
+      exponent: 1.0
+
+  RM_S_CF3_POLYMERIZE:
+    backend: sticking
+    sticking_value: 0.01
+    coverage_factor:
+      kind: site_blocking
+      site_species: wafer:*
+      exponent: 1.0
+
+  RM_S_F_WALL_STICK:
+    backend: sticking
+    sticking_value: 0.005
+    coverage_factor:
+      kind: site_blocking
+      site_species: wall:*
+      exponent: 1.0
+
+  RM_S_F_SOURCE_RECOMB:
+    backend: sticking
+    sticking_value: 0.10
+    coverage_factor:
+      kind: constant
+
+  RM_NEUTRAL_RECOMB:
+    backend: arrhenius
+    A: 1.0e-19
+    beta: 0.0
+    Ea_eV: 0.0
+
+  RM_S_AR_ION_DESORB:
+    backend: ion_assisted
+    yield_value: 0.25
+    threshold_eV: 15.0
+    reference_energy_eV: 120.0
+    energy_exponent: 1.0
+    coverage_factor:
+      kind: species_power
+      species: wafer:F*
+      exponent: 1.0
+
+  RM_S_F_DESORB:
+    backend: desorption
+    nu0_s_inv: 2.0e4
+    Ea_eV: 0.25
+
+  RM_S_F_LH_RECOMB:
+    backend: langmuir_hinshelwood
+    A_m2_s_inv: 5.0e3
+    Ea_eV: 0.05

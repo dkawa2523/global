@@ -1,0 +1,46 @@
+source:
+  repository: https://github.com/Hemadityamalla/ZDPlaskin
+  example_path: example2
+  committed_output_file: Ar2Reac_1000V_100kOhm_100t_0.4d_0.4r.dat
+  note: >
+    This summary was extracted from the committed ZDPlaskin example2 output.
+    The local Windows environment did not have gfortran and cannot link the
+    Linux bolsig_x86_64.so library, so the Fortran executable was not rerun.
+case:
+  description: Ar plasma with diffusion and external circuit
+  pressure_torr: 100.0
+  pressure_Pa: 13332.0
+  gas_temperature_K: 300.0
+  gap_length_cm: 0.40
+  radius_cm: 0.40
+  approximate_volume_m3: 2.01e-7
+  voltage_V: 1000.0
+  resistance_ohm: 1.0e5
+  initial_electron_density_cm3: 1.0e6
+  chemistry:
+    species_count: 8
+    reaction_count: 13
+    evolved_positive_ions: [Ar_plus, Ar2_plus]
+    evolved_excited_species: [Ar_star]
+saved_output:
+  final_saved_time_s: 7.520833e-4
+  final_saved_reduced_field_Td: 2.561342
+  final_saved_voltage_V: 33.22250
+  final_saved_current_A: 9.667775e-3
+  final_saved_electron_density_cm3: 3.170363e11
+  final_saved_electron_density_m3: 3.170363e17
+  final_saved_Ar_star_density_cm3: 2.014270e11
+  final_saved_Ar_star_density_m3: 2.014270e17
+  final_saved_Ar_plus_density_cm3: 2.079332e9
+  final_saved_Ar_plus_density_m3: 2.079332e15
+  final_saved_Ar2_plus_density_cm3: 3.149570e11
+  final_saved_Ar2_plus_density_m3: 3.149570e17
+  peak_saved_electron_density_cm3: 3.571898e11
+  peak_saved_electron_density_m3: 3.571898e17
+  peak_saved_electron_density_time_s: 1.151027e-5
+comparison_note: >
+  Electron density is the same broad order as the local Ar LXCat production
+  case, but the regimes differ strongly: ZDPlaskin example2 is a high-pressure,
+  tiny-volume external-circuit discharge with Ar* and Ar2+ chemistry, while the
+  local baseline is a low-pressure two-zone absorbed-power ICP model with no
+  evolved Ar* or Ar2+ state.

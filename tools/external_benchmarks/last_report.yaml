@@ -1,0 +1,19 @@
+tool: external_benchmarks
+benchmark_count: 1
+passed: true
+benchmarks:
+- id: pygmol_argon_global_model_sanity
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+  rate_mode: local-table
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline
+  comparison_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_local_rate_table_summary.csv
+  generated_model_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_local_rate_table_model.yaml
+  passed: true
+  summary:
+    powered_step_count: 2
+    powered_ne_ratio_min_pygmol_over_local: 4.916481606465375
+    powered_ne_ratio_max_pygmol_over_local: 19.229731356957384
+    rate_alignment_with_local_case: local_lxcat_rate_table
+    rate_table_sample_count: 96
+    rate_fit_rms_log10_error_max: null
+    rate_fit_max_abs_log10_error_max: null

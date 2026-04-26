@@ -1,0 +1,48 @@
+include: base_case.yaml
+
+case:
+  name: crane_two_reaction_argon
+  description: >
+    Executable local reproduction of the public CRANE tutorials/TwoReactionArgon
+    chemistry benchmark. The comparison is restricted to the scalar ODE
+    chemistry because the CRANE tutorial does not solve wall losses, circuit
+    coupling, or electron energy.
+  tags: [argon, crane, two_reaction_argon, benchmark, executable_comparison]
+
+files:
+  chamber: chamber_crane_two_reaction_argon.yaml
+  recipe: recipe_crane_two_reaction_argon.yaml
+  chemistry:
+    manifest: ../chemistry_crane_two_reaction_argon/chemistry_manifest.yaml
+  output_dir: ../outputs/crane_two_reaction_argon
+
+physics:
+  electrical_backend: direct_power
+  eedf_backend: maxwell
+  enable_gas_temperature: false
+  enable_surface_coverages: false
+  enable_wall_inventory: false
+  enable_ied_proxy: false
+
+numerics:
+  rtol: 1.0e-8
+  atol: 1.0e-3
+  first_step: 1.0e-12
+  max_step: 1.0e-9
+  positivity:
+    clip_negative: true
+    floor_density_m3: 1.0
+    floor_energy_J_m3: 1.0e-30
+
+outputs:
+  diagnostics:
+    reaction_budget:
+      enabled: true
+      filename: reaction_budget.yaml
+      species: [Ar, Ar_plus]
+      max_reactions_per_species: 4
+    state_manifest:
+      enabled: true
+      filename: state_manifest.yaml
+  plots:
+    enabled: false

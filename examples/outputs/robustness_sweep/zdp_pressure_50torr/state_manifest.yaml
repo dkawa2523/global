@@ -1,0 +1,160 @@
+state_count: 6
+zones:
+- plasma
+state_groups:
+  gas_densities:
+    start: 0
+    stop: 4
+    size: 4
+  electron_energy:
+    start: 4
+    stop: 5
+    size: 1
+  film_thickness:
+    start: 5
+    stop: 6
+    size: 1
+electron_density:
+  species: e
+  state_status: algebraic_not_state_variable
+  closure: quasi_neutral
+  quasi_neutrality: algebraic
+  formula: ne = max(sum(charge_i * n_i for gas-state species), floor_density)
+  floor_density_m3: 1.0
+  profile: null
+species_catalog:
+- species: Ar
+  display_name: Ar
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - parent
+  - stable
+  state_status: solved_gas_density
+- species: Ar2_plus
+  display_name: Ar2+
+  phase: gas
+  charge: 1
+  mass_amu: 79.896
+  elements:
+    Ar: 2.0
+  tags:
+  - ion
+  - molecular_ion
+  state_status: solved_gas_density
+- species: Ar_plus
+  display_name: Ar+
+  phase: gas
+  charge: 1
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - ion
+  state_status: solved_gas_density
+- species: Ar_star
+  display_name: Ar*
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - excited
+  - metastable
+  - radical
+  state_status: solved_gas_density
+- species: e
+  display_name: e
+  phase: gas
+  charge: -1
+  mass_amu: 0.00054858
+  elements: {}
+  tags:
+  - electron
+  state_status: algebraic_density_from_quasi_neutrality
+states:
+- index: 0
+  label: n[plasma,Ar]
+  kind: gas_density
+  zone: plasma
+  unit: m^-3
+  source: chemistry species.csv
+  state_status: solved_gas_density
+  species: Ar
+  display_name: Ar
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - parent
+  - stable
+- index: 1
+  label: n[plasma,Ar_star]
+  kind: gas_density
+  zone: plasma
+  unit: m^-3
+  source: chemistry species.csv
+  state_status: solved_gas_density
+  species: Ar_star
+  display_name: Ar*
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - excited
+  - metastable
+  - radical
+- index: 2
+  label: n[plasma,Ar_plus]
+  kind: gas_density
+  zone: plasma
+  unit: m^-3
+  source: chemistry species.csv
+  state_status: solved_gas_density
+  species: Ar_plus
+  display_name: Ar+
+  phase: gas
+  charge: 1
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - ion
+- index: 3
+  label: n[plasma,Ar2_plus]
+  kind: gas_density
+  zone: plasma
+  unit: m^-3
+  source: chemistry species.csv
+  state_status: solved_gas_density
+  species: Ar2_plus
+  display_name: Ar2+
+  phase: gas
+  charge: 1
+  mass_amu: 79.896
+  elements:
+    Ar: 2.0
+  tags:
+  - ion
+  - molecular_ion
+- index: 4
+  label: We[plasma]
+  kind: electron_energy_density
+  zone: plasma
+  unit: J m^-3
+  source: electron energy equation
+- index: 5
+  label: film[wall]
+  kind: film_thickness
+  surface: wall
+  zone: plasma
+  unit: m
+  source: surface film model

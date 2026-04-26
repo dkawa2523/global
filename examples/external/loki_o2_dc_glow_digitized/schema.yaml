@@ -1,0 +1,339 @@
+tool: loki_o2_dc_glow_digitization_schema
+scope: external_candidate_only
+source_spec: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_candidate.yaml
+digitization_root: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized
+schema_definitions:
+  pressure_sweep:
+    columns:
+    - pressure_Torr
+    - series_id
+    - quantity_id
+    - symbol
+    - value
+    - unit
+    - source_figure
+    - source_panel
+    - digitization_method
+    - note
+    required_nonempty_columns:
+    - pressure_Torr
+    - series_id
+    - quantity_id
+    - value
+    - unit
+    - source_figure
+    description: Pressure-sweep digitization points for paired 1D and 0D curves.
+  profile_curve:
+    columns:
+    - pressure_Torr
+    - radius_mm
+    - series_id
+    - quantity_id
+    - symbol
+    - value
+    - unit
+    - source_figure
+    - source_panel
+    - digitization_method
+    - note
+    required_nonempty_columns:
+    - pressure_Torr
+    - radius_mm
+    - series_id
+    - quantity_id
+    - value
+    - unit
+    - source_figure
+    description: Radial-profile digitization points at one pressure or a small pressure
+      set.
+  acceptance_envelope:
+    columns:
+    - pressure_Torr
+    - metric_id
+    - value_percent
+    - source_figure
+    - source_panel
+    - digitization_method
+    - note
+    required_nonempty_columns:
+    - pressure_Torr
+    - metric_id
+    - value_percent
+    - source_figure
+    description: Relative-difference envelope from the paper-level acceptance summary.
+datasets:
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig05a_avg_temperatures_vs_pressure.csv
+  schema_name: pressure_sweep
+  priority: primary_required
+  source_figure: 5a
+  expected_row_count: 44
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_gas_temperature
+    symbol: Tg,av
+    unit: K
+  - quantity_id: near_wall_temperature
+    symbol: Tnw
+    unit: K
+  expected_metric_ids: []
+  expected_profile_groups: []
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig05b_avg_reduced_field_vs_pressure.csv
+  schema_name: pressure_sweep
+  priority: primary_required
+  source_figure: 5b
+  expected_row_count: 22
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_reduced_electric_field
+    symbol: E_over_N
+    unit: Td
+  expected_metric_ids: []
+  expected_profile_groups: []
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig06_molar_fractions_vs_pressure.csv
+  schema_name: pressure_sweep
+  priority: primary_required
+  source_figure: '6'
+  expected_row_count: 44
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_molar_fraction_atomic_oxygen
+    symbol: '[O]/ng'
+    unit: '1'
+  - quantity_id: average_molar_fraction_molecular_oxygen
+    symbol: '[O2]/ng'
+    unit: '1'
+  expected_metric_ids: []
+  expected_profile_groups: []
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig07a_main_charged_species_vs_pressure.csv
+  schema_name: pressure_sweep
+  priority: primary_required
+  source_figure: 7a
+  expected_row_count: 66
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_electron_density
+    symbol: ne
+    unit: m^-3
+  - quantity_id: average_negative_ion_density
+    symbol: O_minus
+    unit: m^-3
+  - quantity_id: average_positive_ion_density
+    symbol: O2_plus
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig08_atomic_excited_states_vs_pressure.csv
+  schema_name: pressure_sweep
+  priority: secondary_pressure_sweep
+  source_figure: '8'
+  expected_row_count: 66
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_atomic_excited_state_density
+    symbol: O(3P)
+    unit: m^-3
+  - quantity_id: average_atomic_excited_state_density
+    symbol: O(1D)
+    unit: m^-3
+  - quantity_id: average_atomic_excited_state_density
+    symbol: O(1S)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig09a_molecular_states_vs_pressure.csv
+  schema_name: pressure_sweep
+  priority: secondary_pressure_sweep
+  source_figure: 9a
+  expected_row_count: 66
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_molecular_state_density
+    symbol: O2(X)
+    unit: m^-3
+  - quantity_id: average_molecular_state_density
+    symbol: O2(a)
+    unit: m^-3
+  - quantity_id: average_molecular_state_density
+    symbol: O2(b)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig09b_ozone_and_herzberg_vs_pressure.csv
+  schema_name: pressure_sweep
+  priority: secondary_pressure_sweep
+  source_figure: 9b
+  expected_row_count: 44
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: average_molecular_state_density
+    symbol: O2(Hz)
+    unit: m^-3
+  - quantity_id: average_molecular_state_density
+    symbol: O3
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups: []
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/acceptance_envelope_reference/fig11_relative_difference_envelope_vs_pressure.csv
+  schema_name: acceptance_envelope
+  priority: primary_required
+  source_figure: '11'
+  expected_row_count: 36
+  expected_series: []
+  expected_quantities: []
+  expected_metric_ids:
+  - avg_gas_temperature_relative_difference
+  - near_wall_temperature_relative_difference
+  - electron_temperature_relative_difference
+  - avg_reduced_electric_field_relative_difference
+  - avg_charged_species_relative_difference
+  - avg_neutral_species_relative_difference
+  expected_profile_groups: []
+  pressure_grid_override_Torr:
+  - 0.5
+  - 1.0
+  - 2.0
+  - 4.0
+  - 7.5
+  - 10.0
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig01_gas_temperature_profiles.csv
+  schema_name: profile_curve
+  priority: diagnostic_profile
+  source_figure: '1'
+  expected_row_count: null
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: gas_temperature_profile
+    symbol: Tg(r)
+    unit: K
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig02_reduced_field_profiles.csv
+  schema_name: profile_curve
+  priority: diagnostic_profile
+  source_figure: '2'
+  expected_row_count: null
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: reduced_electric_field_profile
+    symbol: E_over_N(r)
+    unit: Td
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig03_electron_density_profiles.csv
+  schema_name: profile_curve
+  priority: diagnostic_profile
+  source_figure: '3'
+  expected_row_count: null
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: electron_density_profile
+    symbol: ne(r)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig04_atomic_oxygen_profiles.csv
+  schema_name: profile_curve
+  priority: diagnostic_profile
+  source_figure: '4'
+  expected_row_count: null
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: atomic_oxygen_density_profile
+    symbol: O(3P)(r)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 1Torr
+  - 10Torr
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig07b_charged_species_profiles_10Torr.csv
+  schema_name: profile_curve
+  priority: diagnostic_profile
+  source_figure: 7b
+  expected_row_count: null
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: electron_density_profile
+    symbol: e(r)
+    unit: m^-3
+  - quantity_id: negative_ion_density_profile
+    symbol: O_minus(r)
+    unit: m^-3
+  - quantity_id: positive_ion_density_profile
+    symbol: O2_plus(r)
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 10Torr
+  pressure_grid_override_Torr: []
+  note: null
+- file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig10_ozone_reactant_profiles_10Torr.csv
+  schema_name: profile_curve
+  priority: diagnostic_profile
+  source_figure: '10'
+  expected_row_count: null
+  expected_series:
+  - 1D_fluid
+  - 0D_LoKI
+  expected_quantities:
+  - quantity_id: ozone_reactant_profile
+    symbol: digitized_reactant
+    unit: m^-3
+  expected_metric_ids: []
+  expected_profile_groups:
+  - 10Torr
+  pressure_grid_override_Torr: []
+  note: Figure 10 contains several reactant curves. Use quantity_id and symbol to
+    distinguish them when digitizing.

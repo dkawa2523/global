@@ -1,0 +1,32 @@
+reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_filter,enabled,notes
+G_AR_ION,gas,e + Ar -> Ar_plus + e + e,RM_E_AR_ION,EM_E_AR_ION,source|process,,true,Ground-state argon ionization from the Zenodo/LXCat-derived BOLSIG+ data file
+G_AR_EXC_01,gas,e + Ar -> Ar + e,RM_E_AR_EXC_01,EM_E_AR_EXC_01,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_02,gas,e + Ar -> Ar + e,RM_E_AR_EXC_02,EM_E_AR_EXC_02,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_03,gas,e + Ar -> Ar + e,RM_E_AR_EXC_03,EM_E_AR_EXC_03,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_04,gas,e + Ar -> Ar + e,RM_E_AR_EXC_04,EM_E_AR_EXC_04,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_05,gas,e + Ar -> Ar + e,RM_E_AR_EXC_05,EM_E_AR_EXC_05,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_06,gas,e + Ar -> Ar + e,RM_E_AR_EXC_06,EM_E_AR_EXC_06,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_07,gas,e + Ar -> Ar + e,RM_E_AR_EXC_07,EM_E_AR_EXC_07,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_08,gas,e + Ar -> Ar + e,RM_E_AR_EXC_08,EM_E_AR_EXC_08,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_09,gas,e + Ar -> Ar + e,RM_E_AR_EXC_09,EM_E_AR_EXC_09,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_10,gas,e + Ar -> Ar + e,RM_E_AR_EXC_10,EM_E_AR_EXC_10,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_11,gas,e + Ar -> Ar + e,RM_E_AR_EXC_11,EM_E_AR_EXC_11,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_12,gas,e + Ar -> Ar + e,RM_E_AR_EXC_12,EM_E_AR_EXC_12,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_13,gas,e + Ar -> Ar + e,RM_E_AR_EXC_13,EM_E_AR_EXC_13,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_14,gas,e + Ar -> Ar + e,RM_E_AR_EXC_14,EM_E_AR_EXC_14,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_15,gas,e + Ar -> Ar + e,RM_E_AR_EXC_15,EM_E_AR_EXC_15,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_16,gas,e + Ar -> Ar + e,RM_E_AR_EXC_16,EM_E_AR_EXC_16,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_17,gas,e + Ar -> Ar + e,RM_E_AR_EXC_17,EM_E_AR_EXC_17,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_18,gas,e + Ar -> Ar + e,RM_E_AR_EXC_18,EM_E_AR_EXC_18,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_19,gas,e + Ar -> Ar + e,RM_E_AR_EXC_19,EM_E_AR_EXC_19,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_20,gas,e + Ar -> Ar + e,RM_E_AR_EXC_20,EM_E_AR_EXC_20,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_21,gas,e + Ar -> Ar + e,RM_E_AR_EXC_21,EM_E_AR_EXC_21,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_22,gas,e + Ar -> Ar + e,RM_E_AR_EXC_22,EM_E_AR_EXC_22,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_23,gas,e + Ar -> Ar + e,RM_E_AR_EXC_23,EM_E_AR_EXC_23,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_24,gas,e + Ar -> Ar + e,RM_E_AR_EXC_24,EM_E_AR_EXC_24,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_25,gas,e + Ar -> Ar + e,RM_E_AR_EXC_25,EM_E_AR_EXC_25,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_26,gas,e + Ar -> Ar + e,RM_E_AR_EXC_26,EM_E_AR_EXC_26,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_27,gas,e + Ar -> Ar + e,RM_E_AR_EXC_27,EM_E_AR_EXC_27,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_28,gas,e + Ar -> Ar + e,RM_E_AR_EXC_28,EM_E_AR_EXC_28,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_29,gas,e + Ar -> Ar + e,RM_E_AR_EXC_29,EM_E_AR_EXC_29,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved
+G_AR_EXC_30,gas,e + Ar -> Ar + e,RM_E_AR_EXC_30,EM_E_AR_EXC_30,source|process,,true,Argon excitation represented as an electron-energy-loss channel; no excited-state density is evolved

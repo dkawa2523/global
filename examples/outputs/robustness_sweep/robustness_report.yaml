@@ -1,0 +1,442 @@
+tool: robustness_sweep
+scope: External references are strict where available. Pressure/electrical stress
+  cases without external reference check solver health and closure range only; they
+  are not accuracy validation.
+passed: true
+external_reference_results:
+- id: zdplaskin_example2_same_footing
+  axis: pressure_electrical_chemistry_base_point
+  scope: external_reference
+  passed: true
+  summary:
+    current_local_run_matches_zdplaskin: true
+    current_run_EoverN_matches_zdplaskin: true
+    forced_zdplaskin_voltage_formula_check_matches: true
+    composition_matches_zdplaskin: true
+    plain_language: The local case is on the same practical footing for this benchmark
+      when power, E/N, and final composition all match within the configured tolerances.
+      This is a ZDPlaskin parity case, not a claim that unrelated production cases
+      are validated.
+    what_matches:
+    - geometry
+    - pressure
+    - gas_temperature
+    - E/N unit formula check
+    - absorbed_power
+    - E/N used by the local run
+    - uses an internal circuit backend
+    - species composition within factor 2
+    what_does_not_match: []
+  outputs:
+    zdplaskin_comparison: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\zdplaskin_example2_surrogate\comparison_zdplaskin_example2.yaml
+    zdplaskin_eovern_comparison: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\zdplaskin_example2_surrogate\comparison_zdplaskin_eovern.yaml
+    crane_comparison: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\crane_two_reaction_argon\comparison_crane_two_reaction_argon.yaml
+- id: crane_two_reaction_argon_ode_parity
+  axis: chemistry
+  scope: external_reference
+  passed: true
+  summary:
+    final_electron_density_relative_error: 2.366088494351468e-06
+    final_Ar_plus_density_relative_error: 2.366088494351468e-06
+    final_Ar_density_relative_error: 2.0442344114842075e-12
+stress_results:
+- id: zdp_pressure_50torr
+  axis: pressure
+  scope: stress_no_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs\case_zdp_pressure_50torr.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\zdp_pressure_50torr
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 3.3643856670070464e+17
+    final_mean_electron_energy_eV: 0.9617199362425506
+    final_self_bias_V: 0.0
+    final_plasma_potential_V: 1.5882265318865003
+    final_port_dc_series_drive_absorbed_power_W: 0.30755545231094716
+    final_port_dc_series_drive_current_A: 0.0096823546936227
+    final_port_dc_series_drive_gap_voltage_V: 31.764530637730005
+    final_port_dc_series_drive_reduced_field_Td: 4.9341758406976535
+    warning_counts:
+      warning_debye_ratio_plasma: 1
+      warning_high_electronegativity_plasma: 0
+      warning_ion_ion_afterglow_plasma: 0
+      warning_pressure_deviation_plasma: 0
+    peak_electron_density_m3: 3.3643856670070464e+17
+    max_absorbed_power_W: 0.3186511925391346
+    max_reduced_field_Td: 155.3076448072895
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 3.3643856670070464e+17
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 0.9617199362425506
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage:
+    rate_table_EoverN_range_Td:
+      min: 0.5
+      max: 250.0
+    observed_EoverN_range_Td:
+      min: 4.934175536896206
+      max: 155.3076448072895
+    inside_table_range: true
+  notes:
+  - Uses the wide diagnostic ZDPlaskin-cross-section E/N table; no external 50 torr
+    reference target.
+  warnings: []
+- id: zdp_pressure_200torr
+  axis: pressure
+  scope: stress_no_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs\case_zdp_pressure_200torr.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\zdp_pressure_200torr
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 9.523083515933243e+16
+    final_mean_electron_energy_eV: 0.832628934906715
+    final_self_bias_V: 0.0
+    final_plasma_potential_V: 5.193184094577043
+    final_port_dc_series_drive_absorbed_power_W: 0.9307601747547366
+    final_port_dc_series_drive_current_A: 0.008961363181084592
+    final_port_dc_series_drive_gap_voltage_V: 103.86368189154085
+    final_port_dc_series_drive_reduced_field_Td: 4.033437132133044
+    warning_counts:
+      warning_debye_ratio_plasma: 1
+      warning_high_electronegativity_plasma: 0
+      warning_ion_ion_afterglow_plasma: 0
+      warning_pressure_deviation_plasma: 0
+    peak_electron_density_m3: 9.523083515933243e+16
+    max_absorbed_power_W: 0.9935979348634689
+    max_reduced_field_Td: 38.82691120185857
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 9.523083515933243e+16
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 0.832628934906715
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage:
+    rate_table_EoverN_range_Td:
+      min: 0.5
+      max: 250.0
+    observed_EoverN_range_Td:
+      min: 4.033437091721488
+      max: 38.82691120185857
+    inside_table_range: true
+  notes:
+  - Uses the wide diagnostic ZDPlaskin-cross-section E/N table; no external 200 torr
+    reference target.
+  warnings: []
+- id: zdp_voltage_500V
+  axis: dc_source_voltage
+  scope: stress_no_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs\case_zdp_voltage_500V.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\zdp_voltage_500V
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 8.923327322681858e+16
+    final_mean_electron_energy_eV: 0.8683054768539208
+    final_self_bias_V: 0.0
+    final_plasma_potential_V: 2.7519038583398174
+    final_port_dc_series_drive_absorbed_power_W: 0.24489848645179943
+    final_port_dc_series_drive_current_A: 0.004449619228332037
+    final_port_dc_series_drive_gap_voltage_V: 55.03807716679634
+    final_port_dc_series_drive_reduced_field_Td: 4.274692391618552
+    warning_counts:
+      warning_debye_ratio_plasma: 1
+      warning_high_electronegativity_plasma: 0
+      warning_ion_ion_afterglow_plasma: 0
+      warning_pressure_deviation_plasma: 0
+    peak_electron_density_m3: 8.923327322681858e+16
+    max_absorbed_power_W: 0.2639161914747306
+    max_reduced_field_Td: 38.82691120184649
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 8.923327322681858e+16
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 0.8683054768539208
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage:
+    rate_table_EoverN_range_Td:
+      min: 0.5
+      max: 250.0
+    observed_EoverN_range_Td:
+      min: 4.2746922728801415
+      max: 38.82691120184649
+    inside_table_range: true
+  notes:
+  - Uses the wide diagnostic ZDPlaskin-cross-section E/N table; no external 500 V
+    reference target.
+  warnings: []
+- id: zdp_voltage_1500V
+  axis: dc_source_voltage
+  scope: stress_no_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs\case_zdp_voltage_1500V.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\zdp_voltage_1500V
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 2.6666849723042154e+17
+    final_mean_electron_energy_eV: 0.919324868970757
+    final_self_bias_V: 0.0
+    final_plasma_potential_V: 2.980872303118001
+    final_port_dc_series_drive_absorbed_power_W: 0.8587192921854162
+    final_port_dc_series_drive_current_A: 0.0144038255393764
+    final_port_dc_series_drive_gap_voltage_V: 59.61744606236002
+    final_port_dc_series_drive_reduced_field_Td: 4.630364286179828
+    warning_counts:
+      warning_debye_ratio_plasma: 1
+      warning_high_electronegativity_plasma: 0
+      warning_ion_ion_afterglow_plasma: 0
+      warning_pressure_deviation_plasma: 0
+    peak_electron_density_m3: 2.6668784423326163e+17
+    max_absorbed_power_W: 0.8842322663603397
+    max_reduced_field_Td: 116.48073360553948
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 2.6666849723042154e+17
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 0.919324868970757
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage:
+    rate_table_EoverN_range_Td:
+      min: 0.5
+      max: 250.0
+    observed_EoverN_range_Td:
+      min: 4.630039323544826
+      max: 116.48073360553948
+    inside_table_range: true
+  notes:
+  - Uses the wide diagnostic ZDPlaskin-cross-section E/N table; no external 1500 V
+    reference target.
+  warnings: []
+- id: argon_lxcat_pressure_16Pa
+  axis: pressure
+  scope: stress_no_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\_generated_configs\case_argon_lxcat_pressure_16Pa.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\argon_lxcat_pressure_16Pa
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 487036675434367.2
+    final_mean_electron_energy_eV: 0.8447429162854851
+    final_self_bias_V: 0.0
+    final_plasma_potential_V: 5.0
+    final_port_source_rf_absorbed_power_W: 0.0
+    final_port_wafer_bias_absorbed_power_W: 0.0
+    warning_counts:
+      warning_debye_ratio_process: 1
+      warning_debye_ratio_source: 1
+      warning_high_electronegativity_process: 0
+      warning_high_electronegativity_source: 0
+      warning_ion_ion_afterglow_process: 0
+      warning_ion_ion_afterglow_source: 0
+      warning_pressure_deviation_process: 0
+      warning_pressure_deviation_source: 0
+      warning_site_depletion_grounded_wall: 0
+      warning_site_depletion_source_wall: 0
+      warning_site_depletion_wafer: 0
+      warning_site_overfill_grounded_wall: 0
+      warning_site_overfill_source_wall: 0
+      warning_site_overfill_wafer: 0
+    peak_electron_density_m3: 2.409829761731695e+17
+    max_absorbed_power_W: 1131.6608435510045
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 487036675434367.2
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 0.8447429162854851
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage: null
+  notes:
+  - Pure-Ar LXCat/two-term ICP pressure perturbation; no external reference target.
+  warnings: []
+- id: argon_lxcat_icp_baseline
+  axis: electrical_backend_and_chemistry
+  scope: production_baseline_no_strict_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 418033350741352.1
+    final_mean_electron_energy_eV: 0.8839174015298619
+    final_self_bias_V: 0.0
+    final_plasma_potential_V: 5.0
+    final_port_source_rf_absorbed_power_W: 0.0
+    final_port_wafer_bias_absorbed_power_W: 0.0
+    warning_counts:
+      warning_debye_ratio_process: 1
+      warning_debye_ratio_source: 1
+      warning_high_electronegativity_process: 0
+      warning_high_electronegativity_source: 0
+      warning_ion_ion_afterglow_process: 0
+      warning_ion_ion_afterglow_source: 0
+      warning_pressure_deviation_process: 0
+      warning_pressure_deviation_source: 0
+      warning_site_depletion_grounded_wall: 0
+      warning_site_depletion_source_wall: 0
+      warning_site_depletion_wafer: 0
+      warning_site_overfill_grounded_wall: 0
+      warning_site_overfill_source_wall: 0
+      warning_site_overfill_wafer: 0
+    peak_electron_density_m3: 2.4132407623199094e+17
+    max_absorbed_power_W: 1094.8703358974387
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 418033350741352.1
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 0.8839174015298619
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage: null
+  notes:
+  - Pure Ar, direct absorbed-power ICP/CCP-style backend, public LXCat-style cross
+    sections.
+  warnings: []
+- id: argon_rf_envelope_calibration
+  axis: electrical_backend
+  scope: stress_no_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_rf_envelope_calibration.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_rf_envelope_calibration
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 275406033100939.0
+    final_mean_electron_energy_eV: 0.8851764155013421
+    final_self_bias_V: 0.0
+    final_plasma_potential_V: 0.0
+    final_port_source_rf_absorbed_power_W: 0.0
+    final_port_source_rf_reduced_field_Td: 0.0
+    final_port_wafer_bias_absorbed_power_W: 0.0
+    final_port_wafer_bias_reduced_field_Td: 0.0
+    warning_counts:
+      warning_debye_ratio_process: 1
+      warning_debye_ratio_source: 1
+      warning_high_electronegativity_process: 0
+      warning_high_electronegativity_source: 0
+      warning_ion_ion_afterglow_process: 0
+      warning_ion_ion_afterglow_source: 0
+      warning_pressure_deviation_process: 0
+      warning_pressure_deviation_source: 0
+      warning_site_depletion_grounded_wall: 0
+      warning_site_depletion_source_wall: 0
+      warning_site_depletion_wafer: 0
+      warning_site_overfill_grounded_wall: 0
+      warning_site_overfill_source_wall: 0
+      warning_site_overfill_wafer: 0
+    peak_electron_density_m3: 2.1099939865324224e+17
+    max_absorbed_power_W: 975.0
+    max_reduced_field_Td: 49.97999199359361
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 275406033100939.0
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 0.8851764155013421
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage: null
+  notes:
+  - HF/LF RF-envelope backend with calibrated coefficients.
+  warnings: []
+- id: cf4_o2_smoke_swarm
+  axis: chemistry
+  scope: smoke_no_external_reference
+  case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_smoke.yaml
+  output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\smoke_swarm
+  status: pass
+  passed: true
+  summary:
+    success: true
+    final_electron_density_m3: 320074385631984.4
+    final_mean_electron_energy_eV: 2.4083241689741204
+    final_self_bias_V: -62.722215231823135
+    final_plasma_potential_V: 24.566711521794797
+    final_port_source_rf_absorbed_power_W: 55.487908598829115
+    final_port_wafer_bias_absorbed_power_W: 0.007578006524567824
+    warning_counts:
+      warning_debye_ratio_process: 49
+      warning_debye_ratio_source: 26
+      warning_high_electronegativity_process: 0
+      warning_high_electronegativity_source: 0
+      warning_ion_ion_afterglow_process: 0
+      warning_ion_ion_afterglow_source: 0
+      warning_pressure_deviation_process: 0
+      warning_pressure_deviation_source: 0
+      warning_site_depletion_grounded_wall: 0
+      warning_site_depletion_source_wall: 0
+      warning_site_depletion_wafer: 0
+      warning_site_overfill_grounded_wall: 0
+      warning_site_overfill_source_wall: 0
+      warning_site_overfill_wafer: 0
+    peak_electron_density_m3: 320074385631984.4
+    max_absorbed_power_W: 55.487908598829115
+  checks:
+    solver_success:
+      passed: true
+    positive_final_electron_density:
+      passed: true
+      value: 320074385631984.4
+    finite_reasonable_mean_energy:
+      passed: true
+      value: 2.4083241689741204
+    finite_selected_summary_values:
+      passed: true
+      bad_keys: []
+  rate_table_coverage: null
+  notes:
+  - Mixed Ar/CF4/O2 chemistry smoke test with surfaces and multiple zones.
+  warnings: []
+warning_cases: []
+conclusion:
+  external_reference_count: 2
+  stress_case_count: 8
+  failed_cases: []
+  main_limitation: The ZDPlaskin parity table remains tied to one saved discharge.
+    Wide-table stress cases now avoid immediate E/N range clipping, but they still
+    need external reference outputs before they can be accuracy benchmarks.

@@ -1,0 +1,35 @@
+include: base_case.yaml
+
+case:
+  name: argon_lxcat_icp_baseline
+  description: >
+    Pure Ar production baseline using public BOLSIG/LXCat-style cross sections
+    from the Zenodo CC-BY dataset 10.5281/zenodo.8192503. This is intended for
+    comparison against public argon ICP/global-model examples before moving to
+    mixed-gas process chemistry.
+  tags: [argon, lxcat, benchmark, icp, production_baseline]
+
+files:
+  chamber: chamber_argon_icp.yaml
+  recipe: recipe_argon_lxcat.yaml
+  chemistry:
+    manifest: ../chemistry_argon_lxcat/chemistry_manifest.yaml
+  output_dir: ../outputs/argon_lxcat_icp_baseline
+
+physics:
+  enable_gas_temperature: false
+
+swarm:
+  model_name: boltzmann_2term
+  closure: auto
+  mixture_key_species: [Ar]
+  cache:
+    max_entries: 4
+    fraction_decimals: 4
+
+numerics:
+  max_step: 2.0e-6
+
+outputs:
+  plots:
+    enabled: false

@@ -1,0 +1,271 @@
+tool: external_benchmark_candidate_spec
+benchmark:
+  id: loki_o2_dc_glow_positive_column
+  status: candidate_spec_prepared
+  scope: external_only
+  purpose: >
+    Prepare a code-independent benchmark contract for the public LoKI oxygen
+    DC glow comparison paper before any local implementation or curve
+    digitization is attempted.
+  source:
+    paper_title: Comparison between 1D radial and 0D global models for low-pressure oxygen DC glow discharges
+    doi: 10.1088/1361-6595/acbb9c
+    article_url: https://doi.org/10.1088/1361-6595/acbb9c
+    pdf_url: https://scholar.tecnico.ulisboa.pt/api/records/LXiblFxRGiXcAKQN2nn27jBtjJwO2AChGG-7/file/9ca5cce5d0e473605dffb39d91e89fa2b547540b87d7e085d80179f459f4eaf1.pdf
+    loki_site: https://nprime.tecnico.ulisboa.pt/loki/
+    data_availability_statement: The data that support the findings of this study are available upon reasonable request from the authors.
+  independence:
+    depends_on_core_solver: false
+    intended_location: examples/external
+    notes:
+      - This file must remain a benchmark-candidate contract only.
+      - It does not prescribe any plasma_global chemistry bundle, closure, or solver setting.
+      - Future local benchmark cases should consume this spec, not the other way around.
+  discharge_definition:
+    discharge_type: positive_column_dc_glow
+    working_gas: O2
+    geometry:
+      tube_inner_radius_cm: 1.0
+      benchmark_radius_cm: 1.0
+      paper_radius_sensitivity_cm:
+        - 0.5
+        - 1.0
+        - 2.0
+    operating_conditions:
+      discharge_current_mA: 30.0
+      pressure_range_Torr:
+        min: 0.5
+        max: 10.0
+      wall_temperature_C: 50.0
+    pressure_grid_Torr:
+      source: Table 2 pressure list from the paper, used here as the default digitization grid until raw curve data are obtained.
+      values:
+        - 0.5
+        - 0.75
+        - 1.0
+        - 1.5
+        - 2.0
+        - 3.0
+        - 4.0
+        - 6.0
+        - 7.5
+        - 8.0
+        - 10.0
+  benchmark_observables:
+    primary_pressure_sweep:
+      description: >
+        These are the first quantities to digitize and compare, because they
+        correspond to the paper's main discharge-parameter claims and
+        pressure-sweep conclusions.
+      targets:
+        - id: figure5a_avg_gas_temperature
+          figure: 5a
+          quantity: average_gas_temperature
+          symbol: Tg,av
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: K
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+          rationale: Main discharge parameter explicitly highlighted in the abstract and conclusions.
+        - id: figure5b_avg_reduced_electric_field
+          figure: 5b
+          quantity: average_reduced_electric_field
+          symbol: E_over_N
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: Td
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+          rationale: Main discharge parameter explicitly highlighted in the abstract and conclusions.
+        - id: figure6_atomic_oxygen_molar_fraction
+          figure: 6
+          quantity: average_molar_fraction_atomic_oxygen
+          symbol: '[O]/ng'
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: '1'
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+          rationale: Pressure-dependent dissociation fraction proxy.
+        - id: figure6_molecular_oxygen_molar_fraction
+          figure: 6
+          quantity: average_molar_fraction_molecular_oxygen
+          symbol: '[O2]/ng'
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: '1'
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+          rationale: Companion dissociation-fraction quantity from the same figure.
+        - id: figure7a_avg_electron_density
+          figure: 7a
+          quantity: average_electron_density
+          symbol: ne
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: m^-3
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+          rationale: Main charged-particle quantity and one of the abstract's headline agreement metrics.
+    secondary_pressure_sweep:
+      description: >
+        These curves should be digitized after the primary set. They diagnose
+        where species-level differences emerge as pressure increases.
+      targets:
+        - id: figure5a_near_wall_temperature
+          figure: 5a
+          quantity: near_wall_temperature
+          symbol: Tnw
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: K
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+        - id: figure7a_avg_O_minus_density
+          figure: 7a
+          quantity: average_negative_ion_density
+          symbol: O_minus
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: m^-3
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+        - id: figure7a_avg_O2_plus_density
+          figure: 7a
+          quantity: average_positive_ion_density
+          symbol: O2_plus
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: m^-3
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+        - id: figure8_atomic_excited_states
+          figure: 8
+          quantity: average_atomic_excited_state_densities
+          symbols:
+            - O(3P)
+            - O(1D)
+            - O(1S)
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: m^-3
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+        - id: figure9a_molecular_states
+          figure: 9a
+          quantity: average_molecular_state_densities
+          symbols:
+            - O2(X)
+            - O2(a)
+            - O2(b)
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: m^-3
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+        - id: figure9b_ozone_and_herzberg
+          figure: 9b
+          quantity: average_molecular_state_densities
+          symbols:
+            - O2(Hz)
+            - O3
+          x_quantity: pressure
+          x_unit: Torr
+          y_unit: m^-3
+          series:
+            - 1D_fluid
+            - 0D_LoKI
+          note: O3 is the known outlier; the paper reports up to about a factor 3 difference at 10 Torr.
+    profile_assumption_diagnostics:
+      description: >
+        These figures are not the first parity targets. They are support
+        diagnostics for checking whether a later local case uses the same
+        profile assumptions and dimensionality arguments as the paper.
+      targets:
+        - id: figure1_gas_temperature_profiles
+          figure: 1
+          quantities:
+            - Tg(r) at 1 Torr
+            - Tg(r) at 10 Torr
+        - id: figure2_reduced_field_profiles
+          figure: 2
+          quantities:
+            - E_over_N(r) at 1 Torr
+            - E_over_N(r) at 10 Torr
+        - id: figure3_electron_density_profiles
+          figure: 3
+          quantities:
+            - ne(r) at 1 Torr
+            - ne(r) at 10 Torr
+        - id: figure4_atomic_oxygen_profiles
+          figure: 4
+          quantities:
+            - O(3P)(r) at 1 Torr
+            - O(3P)(r) at 10 Torr
+        - id: figure7b_charged_species_profiles
+          figure: 7b
+          quantities:
+            - e(r) at 10 Torr
+            - O_minus(r) at 10 Torr
+            - O2_plus(r) at 10 Torr
+        - id: figure10_ozone_reactant_profiles
+          figure: 10
+          quantities:
+            - main_O3_source_and_loss_reactant_profiles_at_10_Torr
+    acceptance_envelope_reference:
+      description: >
+        Figure 11 is not the main parity dataset; it is the paper-level
+        acceptance envelope that later benchmark reports should check against.
+      figure: 11
+      digitized_pressure_grid_Torr:
+        - 0.5
+        - 1.0
+        - 2.0
+        - 4.0
+        - 7.5
+        - 10.0
+      qualitative_targets:
+        - Average temperatures and reduced electric field should stay within about 5 percent between 0.5 Torr and 10 Torr.
+        - Average charged-species and neutral-species differences are expected to stay below about 20 percent near 1 Torr.
+        - Average charged-species and neutral-species differences can rise to about 50 to 60 percent near 10 Torr.
+        - O3 should be treated as a known high-sensitivity outlier rather than the primary success metric.
+  digitization_plan:
+    status: pending
+    destination_dir: examples/external/loki_o2_dc_glow_digitized
+    first_wave_outputs:
+      - fig05a_avg_temperatures_vs_pressure.csv
+      - fig05b_avg_reduced_field_vs_pressure.csv
+      - fig06_molar_fractions_vs_pressure.csv
+      - fig07a_main_charged_species_vs_pressure.csv
+      - fig08_atomic_excited_states_vs_pressure.csv
+      - fig09a_molecular_states_vs_pressure.csv
+      - fig09b_ozone_and_herzberg_vs_pressure.csv
+      - fig11_relative_difference_envelope_vs_pressure.csv
+    second_wave_outputs:
+      - fig01_gas_temperature_profiles.csv
+      - fig02_reduced_field_profiles.csv
+      - fig03_electron_density_profiles.csv
+      - fig04_atomic_oxygen_profiles.csv
+      - fig07b_charged_species_profiles_10Torr.csv
+      - fig10_ozone_reactant_profiles_10Torr.csv
+    method_notes:
+      - Keep raw digitized 1D and 0D curves separated by figure and panel.
+      - Store axis-unit metadata with each digitized file; do not infer units later from plotting scripts.
+      - Do not collapse O and O2 molar fractions into a single dissociation scalar at the raw-data stage.
+      - Keep figure 11 as an acceptance-envelope dataset, not as the only benchmark target.
+  paper_level_findings_to_preserve:
+    - The paper states that the same reaction scheme, electron-impact cross sections, rate coefficients, thermal data, and EBE solvers are used in the two compared models.
+    - The paper concludes that the main discharge parameters agree within about 5 percent over 0.5 Torr to 10 Torr.
+    - Species-density agreement degrades with pressure because radial profiles narrow as pressure increases.
+    - For the studied positive column, the paper recommends volume-averaged models up to about 10 Torr for radii between 0.5 cm and 2 cm.

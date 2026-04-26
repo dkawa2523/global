@@ -1,0 +1,95 @@
+state_count: 3
+zones:
+- plasma
+state_groups:
+  gas_densities:
+    start: 0
+    stop: 2
+    size: 2
+  electron_energy:
+    start: 2
+    stop: 3
+    size: 1
+  film_thickness:
+    start: 3
+    stop: 3
+    size: 0
+electron_density:
+  species: e
+  state_status: algebraic_not_state_variable
+  closure: quasi_neutral
+  quasi_neutrality: algebraic
+  formula: ne = max(sum(charge_i * n_i for gas-state species), floor_density)
+  floor_density_m3: 1.0
+  profile: null
+species_catalog:
+- species: Ar
+  display_name: Ar
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - parent
+  - stable
+  state_status: solved_gas_density
+- species: Ar_plus
+  display_name: Ar+
+  phase: gas
+  charge: 1
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - ion
+  state_status: solved_gas_density
+- species: e
+  display_name: e
+  phase: gas
+  charge: -1
+  mass_amu: 0.00054858
+  elements: {}
+  tags:
+  - electron
+  state_status: algebraic_density_from_quasi_neutrality
+states:
+- index: 0
+  label: n[plasma,Ar]
+  kind: gas_density
+  zone: plasma
+  unit: m^-3
+  source: chemistry species.csv
+  state_status: solved_gas_density
+  species: Ar
+  display_name: Ar
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - parent
+  - stable
+- index: 1
+  label: n[plasma,Ar_plus]
+  kind: gas_density
+  zone: plasma
+  unit: m^-3
+  source: chemistry species.csv
+  state_status: solved_gas_density
+  species: Ar_plus
+  display_name: Ar+
+  phase: gas
+  charge: 1
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  tags:
+  - ion
+- index: 2
+  label: We[plasma]
+  kind: electron_energy_density
+  zone: plasma
+  unit: J m^-3
+  source: electron energy equation

@@ -1,0 +1,43 @@
+success: true
+status: 0
+message: The solver successfully reached the end of the integration interval.
+n_times: 200
+t_start_s: 0.0
+t_end_s: 7.5e-07
+nfev: 1639
+njev: 1
+nlu: 88
+final_electron_density_m3: 2.1735225936808305e+19
+final_mean_electron_energy_eV: 1.3802479020563305e-13
+final_self_bias_V: -0.0
+final_plasma_potential_V: 0.0
+step_summary:
+  transient:
+    n_points: 200
+    t_start_s: 0.0
+    t_end_s: 7.5e-07
+    mean_electron_density_m3: 5.385077183131261e+18
+    final_electron_density_m3: 2.1735225936808305e+19
+    min_electron_density_m3: 1000000.0
+    max_electron_density_m3: 2.1735225936808305e+19
+    mean_mean_electron_energy_eV: 0.08099778296670473
+    final_mean_electron_energy_eV: 1.3802479020563305e-13
+    min_mean_electron_energy_eV: 1.3802479020563305e-13
+    max_mean_electron_energy_eV: 3.0000000000000004
+    mean_self_bias_V: 0.0
+    final_self_bias_V: -0.0
+    min_self_bias_V: -0.0
+    max_self_bias_V: -0.0
+    mean_plasma_potential_V: 0.0
+    final_plasma_potential_V: 0.0
+    min_plasma_potential_V: 0.0
+    max_plasma_potential_V: 0.0
+    count_warning_debye_ratio_plasma: 0
+    count_warning_high_electronegativity_plasma: 0
+    count_warning_ion_ion_afterglow_plasma: 0
+    count_warning_pressure_deviation_plasma: 0
+warning_counts:
+  warning_debye_ratio_plasma: 0
+  warning_high_electronegativity_plasma: 0
+  warning_ion_ion_afterglow_plasma: 0
+  warning_pressure_deviation_plasma: 0

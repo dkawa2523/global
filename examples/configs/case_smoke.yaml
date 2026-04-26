@@ -1,0 +1,18 @@
+include: base_case.yaml
+
+case:
+  name: smoke_swarm
+  description: >
+    Short smoke test case for validation of configuration, mechanism loading,
+    and end-to-end integration.
+
+files:
+  recipe: recipe_smoke.yaml
+  output_dir: ../outputs/smoke_swarm
+
+outputs:
+  plots:
+    enabled: false
+
+numerics:
+  max_step: 1.0e-7

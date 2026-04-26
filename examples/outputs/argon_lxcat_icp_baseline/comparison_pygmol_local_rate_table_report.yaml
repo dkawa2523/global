@@ -1,0 +1,74 @@
+tool: pygmol_argon
+case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+rate_mode: local-table
+output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline
+comparison_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_local_rate_table_summary.csv
+solution_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_local_rate_table_solution.csv
+metadata_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_local_rate_table_metadata.yaml
+generated_model_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_local_rate_table_model.yaml
+passed: true
+summary:
+  powered_step_count: 2
+  powered_ne_ratio_min_pygmol_over_local: 4.916481606465375
+  powered_ne_ratio_max_pygmol_over_local: 19.229731356957384
+  rate_alignment_with_local_case: local_lxcat_rate_table
+  rate_table_sample_count: 96
+  rate_fit_rms_log10_error_max: 0.38419040253475256
+  rate_fit_max_abs_log10_error_max: 1.4164891510703117
+rows:
+- step_id: ignition
+  t_start_s: 0.0
+  t_end_s: 0.0002
+  local_final_ne_m3: 7.826435992375635e+16
+  pygmol_final_ne_m3: 3.8478528600693395e+17
+  local_mean_ne_m3: 5.5321698224471784e+16
+  pygmol_mean_ne_m3: 4.793213780736677e+16
+  local_final_mean_energy_eV: 1.664451713571195
+  pygmol_final_Te_eV: 0.9946359916027738
+  pygmol_final_mean_energy_equiv_eV: 1.4919539874041607
+  local_mean_absorbed_power_W: 333.6391345557527
+  pygmol_mean_absorbed_power_W: 505.19629781465335
+  local_final_wafer_ion_flux_m2_s: 4.089398865112433e+19
+  pygmol_final_cylinder_wall_Arplus_flux_m2_s: 2.0994372877483356e+19
+  ratio_final_ne_pygmol_over_local: 4.916481606465375
+  ratio_mean_ne_pygmol_over_local: 0.8664256403134745
+  ratio_final_mean_energy_equiv_pygmol_over_local: 0.8963636344866212
+- step_id: production
+  t_start_s: 0.0002
+  t_end_s: 0.0022
+  local_final_ne_m3: 2.4107268447347296e+17
+  pygmol_final_ne_m3: 4.635762959925436e+18
+  local_mean_ne_m3: 2.3705756101978787e+17
+  pygmol_mean_ne_m3: 1.643547032267251e+18
+  local_final_mean_energy_eV: 1.662612635192909
+  pygmol_final_Te_eV: 0.8835371579580076
+  pygmol_final_mean_energy_equiv_eV: 1.3253057369370114
+  local_mean_absorbed_power_W: 1094.0823474742563
+  pygmol_mean_absorbed_power_W: 1500.0
+  local_final_wafer_ion_flux_m2_s: 1.2669029679693693e+20
+  pygmol_final_cylinder_wall_Arplus_flux_m2_s: 2.3767941013236895e+20
+  ratio_final_ne_pygmol_over_local: 19.229731356957384
+  ratio_mean_ne_pygmol_over_local: 6.933113734896055
+  ratio_final_mean_energy_equiv_pygmol_over_local: 0.7971223776867541
+- step_id: afterglow
+  t_start_s: 0.0022
+  t_end_s: 0.0026
+  local_final_ne_m3: 418033350741352.1
+  pygmol_final_ne_m3: 3.734071192151243e+18
+  local_mean_ne_m3: 3.885939924586786e+16
+  pygmol_mean_ne_m3: 4.389606241902363e+18
+  local_final_mean_energy_eV: 0.8839174015298619
+  pygmol_final_Te_eV: 0.2798431673012724
+  pygmol_final_mean_energy_equiv_eV: 0.41976475095190857
+  local_mean_absorbed_power_W: 0.0
+  pygmol_mean_absorbed_power_W: 0.0
+  local_final_wafer_ion_flux_m2_s: 2.4849111237958995e+17
+  pygmol_final_cylinder_wall_Arplus_flux_m2_s: 9.161165433017726e+19
+  ratio_final_ne_pygmol_over_local: 8932.47197987705
+  ratio_mean_ne_pygmol_over_local: 112.96124816878468
+  ratio_final_mean_energy_equiv_pygmol_over_local: 0.4748913758518504
+assessment: PyGMol is treated as an executable global-model benchmark. Passing means
+  powered-step electron densities are within three orders of magnitude. In local-table
+  mode, electron-impact rates are interpolated from local tables; in local-fit mode
+  they are aligned through PyGMol Arrhenius fits. Geometry, wall loss, flow, and equation-form
+  differences remain.

@@ -1,0 +1,9 @@
+species_file: species.csv
+gas_reactions_file: gas_reactions.csv
+surface_reactions_file: surface_reactions.csv
+aliases_file: aliases.yaml
+cross_sections_manifest: cross_sections_manifest.yaml
+model_files:
+  electron_impact: electron_impact_models.yaml
+  gas_rate: gas_rate_models.yaml
+  energy_loss: energy_loss_models.yaml

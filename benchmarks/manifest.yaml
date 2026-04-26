@@ -1,0 +1,6 @@
+# Core benchmark manifest.
+#
+# External-code comparisons are intentionally kept outside the core benchmark
+# manifest. See `tools/external_benchmarks/manifest.yaml` and
+# `tools/external_benchmarks/README.md` for ZDPlaskin/CRANE comparisons.
+benchmarks: []

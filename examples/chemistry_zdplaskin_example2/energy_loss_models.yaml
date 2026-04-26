@@ -1,0 +1,10 @@
+rate_models:
+  EM_E_AR_ION_ZDP:
+    backend: constant_event_loss
+    energy_loss_eV: 15.8
+  EM_E_AR_EXC_ZDP:
+    backend: constant_event_loss
+    energy_loss_eV: 11.5
+  EM_E_ARSTAR_ION_ZDP:
+    backend: constant_event_loss
+    energy_loss_eV: 4.3

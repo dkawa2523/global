@@ -1,0 +1,168 @@
+success: true
+status: 0
+message: The solver successfully reached the end of the integration interval.
+n_times: 200
+t_start_s: 0.0
+t_end_s: 1.0e-06
+nfev: 1209
+njev: 4
+nlu: 93
+final_electron_density_m3: 320074385631984.4
+final_mean_electron_energy_eV: 2.4083241689741204
+final_self_bias_V: -62.722215231823135
+final_plasma_potential_V: 24.566711521794797
+final_mean_ion_energy_wafer_eV: 12.02254367714685
+final_ion_flux_wafer_m2_s: 1.8773740089415267e+17
+final_radical_to_ion_flux_ratio_wafer: 0.09262271809554648
+final_F_to_C_radical_flux_ratio_wafer: 4.90579003030888
+final_film_wafer_m: 1.2150992898015903e-21
+final_etch_deposition_balance_wafer: 1.710693781827721e+16
+final_port_source_rf_absorbed_power_W: 55.487908598829115
+final_port_source_rf_coil_current_rms_A: 1.1411805131947261
+final_port_source_rf_coil_voltage_rms_V: 48.62325281343189
+final_port_source_rf_coupling_efficiency: 0.18495969532943038
+final_port_source_rf_delivered_power_W: 300.0
+final_port_source_rf_effective_field_Td: 72.23058858315066
+final_port_source_rf_frequency_Hz: 13560000.0
+final_port_source_rf_plasma_resistance_Ohm: 42.60785410479142
+final_port_wafer_bias_absorbed_power_W: 0.007578006524567824
+final_port_wafer_bias_delivered_power_W: 20.0
+final_port_wafer_bias_frequency_Hz: 2000000.0
+final_port_wafer_bias_plasma_potential_V: 24.566711521794797
+final_port_wafer_bias_rf_current_rms_A: 0.008308281099476192
+final_port_wafer_bias_rf_voltage_rms_V: 46.857736236089636
+final_port_wafer_bias_self_bias_V: -62.722215231823135
+step_summary:
+  ignition:
+    n_points: 200
+    t_start_s: 0.0
+    t_end_s: 1.0e-06
+    mean_electron_density_m3: 161581756168814.4
+    final_electron_density_m3: 320074385631984.4
+    min_electron_density_m3: 1000000000000.0
+    max_electron_density_m3: 320074385631984.4
+    mean_mean_electron_energy_eV: 9.204670799767921
+    final_mean_electron_energy_eV: 2.4083241689741204
+    min_mean_electron_energy_eV: 2.4083241689741204
+    max_mean_electron_energy_eV: 87.2588935836577
+    mean_self_bias_V: -84.34793746385002
+    final_self_bias_V: -62.722215231823135
+    min_self_bias_V: -211.12677402787466
+    max_self_bias_V: -62.722215231823135
+    mean_plasma_potential_V: 40.554040103050966
+    final_plasma_potential_V: 24.566711521794797
+    min_plasma_potential_V: 24.566711521794797
+    max_plasma_potential_V: 156.38177599951877
+    mean_mean_ion_energy_wafer_eV: 7.85618043855678
+    final_mean_ion_energy_wafer_eV: 12.02254367714685
+    min_mean_ion_energy_wafer_eV: 0.3239532310813136
+    max_mean_ion_energy_wafer_eV: 12.02254367714685
+    mean_ion_flux_wafer_m2_s: 1.1111129227802691e+17
+    final_ion_flux_wafer_m2_s: 1.8773740089415267e+17
+    min_ion_flux_wafer_m2_s: 1642001652684139.0
+    max_ion_flux_wafer_m2_s: 1.8773740089415267e+17
+    mean_radical_to_ion_flux_ratio_wafer: 0.057642451410233254
+    final_radical_to_ion_flux_ratio_wafer: 0.09262271809554648
+    min_radical_to_ion_flux_ratio_wafer: 0.0
+    max_radical_to_ion_flux_ratio_wafer: 0.09262271809554648
+    mean_F_to_C_radical_flux_ratio_wafer: 4.881266944397971
+    final_F_to_C_radical_flux_ratio_wafer: 4.90579003030888
+    min_F_to_C_radical_flux_ratio_wafer: 0.0
+    max_F_to_C_radical_flux_ratio_wafer: 4.9058015014903065
+    mean_film_wafer_m: 3.8126568055465944e-22
+    final_film_wafer_m: 1.2150992898015903e-21
+    min_film_wafer_m: 0.0
+    max_film_wafer_m: 1.2150992898015903e-21
+    mean_etch_deposition_balance_wafer: 7913136087443000.0
+    final_etch_deposition_balance_wafer: 1.710693781827721e+16
+    min_etch_deposition_balance_wafer: 0.0
+    max_etch_deposition_balance_wafer: 1.710693781827721e+16
+    mean_port_source_rf_absorbed_power_W: 54.75114388090623
+    final_port_source_rf_absorbed_power_W: 55.487908598829115
+    min_port_source_rf_absorbed_power_W: 54.00167867134404
+    max_port_source_rf_absorbed_power_W: 55.487908598829115
+    mean_port_source_rf_coil_current_rms_A: 0.9994841612118247
+    final_port_source_rf_coil_current_rms_A: 1.1411805131947261
+    min_port_source_rf_coil_current_rms_A: 0.9295304506800757
+    max_port_source_rf_coil_current_rms_A: 1.1411805131947261
+    mean_port_source_rf_coil_voltage_rms_V: 55.03742896597263
+    final_port_source_rf_coil_voltage_rms_V: 48.62325281343189
+    min_port_source_rf_coil_voltage_rms_V: 48.62325281343189
+    max_port_source_rf_coil_voltage_rms_V: 58.452416162887246
+    mean_port_source_rf_coupling_efficiency: 0.18250381293635407
+    final_port_source_rf_coupling_efficiency: 0.18495969532943038
+    min_port_source_rf_coupling_efficiency: 0.1800055955711468
+    max_port_source_rf_coupling_efficiency: 0.18495969532943038
+    mean_port_source_rf_delivered_power_W: 300.0
+    final_port_source_rf_delivered_power_W: 300.0
+    min_port_source_rf_delivered_power_W: 300.0
+    max_port_source_rf_delivered_power_W: 300.0
+    mean_port_source_rf_effective_field_Td: 108.82990110244442
+    final_port_source_rf_effective_field_Td: 72.23058858315066
+    min_port_source_rf_effective_field_Td: 72.23058858315066
+    max_port_source_rf_effective_field_Td: 440.5925645831936
+    mean_port_source_rf_frequency_Hz: 13560000.0
+    final_port_source_rf_frequency_Hz: 13560000.0
+    min_port_source_rf_frequency_Hz: 13560000.0
+    max_port_source_rf_frequency_Hz: 13560000.0
+    mean_port_source_rf_plasma_resistance_Ohm: 55.605819550278845
+    final_port_source_rf_plasma_resistance_Ohm: 42.60785410479142
+    min_port_source_rf_plasma_resistance_Ohm: 42.60785410479142
+    max_port_source_rf_plasma_resistance_Ohm: 62.5
+    mean_port_wafer_bias_absorbed_power_W: 0.005939957332720559
+    final_port_wafer_bias_absorbed_power_W: 0.007578006524567824
+    min_port_wafer_bias_absorbed_power_W: 0.0020828948174777275
+    max_port_wafer_bias_absorbed_power_W: 0.007578006524567824
+    mean_port_wafer_bias_delivered_power_W: 20.0
+    final_port_wafer_bias_delivered_power_W: 20.0
+    min_port_wafer_bias_delivered_power_W: 20.0
+    max_port_wafer_bias_delivered_power_W: 20.0
+    mean_port_wafer_bias_frequency_Hz: 2000000.0
+    final_port_wafer_bias_frequency_Hz: 2000000.0
+    min_port_wafer_bias_frequency_Hz: 2000000.0
+    max_port_wafer_bias_frequency_Hz: 2000000.0
+    mean_port_wafer_bias_plasma_potential_V: 40.554040103050966
+    final_port_wafer_bias_plasma_potential_V: 24.566711521794797
+    min_port_wafer_bias_plasma_potential_V: 24.566711521794797
+    max_port_wafer_bias_plasma_potential_V: 156.38177599951877
+    mean_port_wafer_bias_rf_current_rms_A: 0.005996444478500812
+    final_port_wafer_bias_rf_current_rms_A: 0.008308281099476192
+    min_port_wafer_bias_rf_current_rms_A: 0.001331990127162045
+    max_port_wafer_bias_rf_current_rms_A: 0.008308281099476192
+    mean_port_wafer_bias_rf_voltage_rms_V: 63.01361313740681
+    final_port_wafer_bias_rf_voltage_rms_V: 46.857736236089636
+    min_port_wafer_bias_rf_voltage_rms_V: 46.857736236089636
+    max_port_wafer_bias_rf_voltage_rms_V: 157.7259772029754
+    mean_port_wafer_bias_self_bias_V: -84.34793746385002
+    final_port_wafer_bias_self_bias_V: -62.722215231823135
+    min_port_wafer_bias_self_bias_V: -211.1267740278747
+    max_port_wafer_bias_self_bias_V: -62.722215231823135
+    count_warning_debye_ratio_process: 49
+    count_warning_debye_ratio_source: 26
+    count_warning_high_electronegativity_process: 0
+    count_warning_high_electronegativity_source: 0
+    count_warning_ion_ion_afterglow_process: 0
+    count_warning_ion_ion_afterglow_source: 0
+    count_warning_pressure_deviation_process: 0
+    count_warning_pressure_deviation_source: 0
+    count_warning_site_depletion_grounded_wall: 0
+    count_warning_site_depletion_source_wall: 0
+    count_warning_site_depletion_wafer: 0
+    count_warning_site_overfill_grounded_wall: 0
+    count_warning_site_overfill_source_wall: 0
+    count_warning_site_overfill_wafer: 0
+warning_counts:
+  warning_debye_ratio_process: 49
+  warning_debye_ratio_source: 26
+  warning_high_electronegativity_process: 0
+  warning_high_electronegativity_source: 0
+  warning_ion_ion_afterglow_process: 0
+  warning_ion_ion_afterglow_source: 0
+  warning_pressure_deviation_process: 0
+  warning_pressure_deviation_source: 0
+  warning_site_depletion_grounded_wall: 0
+  warning_site_depletion_source_wall: 0
+  warning_site_depletion_wafer: 0
+  warning_site_overfill_grounded_wall: 0
+  warning_site_overfill_source_wall: 0
+  warning_site_overfill_wafer: 0

@@ -1,0 +1,117 @@
+tool: pygmol_sensitivity
+scope: external_benchmark_only
+case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline
+summary_csv: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_sensitivity_summary.csv
+steps_csv: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\argon_lxcat_icp_baseline\comparison_pygmol_sensitivity_steps.csv
+benchmark_model:
+  file: C:\Users\user\Desktop\Global_model\plasma_review_updated\tools\external_benchmarks\pygmol_argon_model.yaml
+  rate_alignment_with_local_case: intentionally_not_aligned
+  guardrails:
+  - Do not import this file from plasma_global core modules.
+  - Do not use these rates as production LXCat or BOLSIG+ replacement data.
+  - Compare order and trends only unless a separate same-rate parity case is explicitly
+    created.
+interpretation:
+- This sweep changes only the external PyGMol benchmark model and PyGMol input mapping.
+- It must not be used to tune plasma_global production chemistry or core physics.
+- Powered-step density ratios indicate sensitivity of the PyGMol sanity check, not
+  local solver correctness.
+variant_count: 12
+summary:
+- variant_id: baseline
+  category: baseline
+  powered_density_ratio_min: 0.29215157353317894
+  powered_density_ratio_max: 0.6018620300118023
+  powered_density_ratio_mean: 0.44700680177249064
+  powered_energy_ratio_mean: 1.5588419006922571
+  production_density_ratio: 0.6018620300118023
+  production_energy_ratio: 1.4603442882250368
+- variant_id: ionization_rate_x0p5
+  category: rate
+  powered_density_ratio_min: 0.1917408064104561
+  powered_density_ratio_max: 0.3863170798605278
+  powered_density_ratio_mean: 0.289028943135492
+  powered_energy_ratio_mean: 1.6693305568190075
+  production_density_ratio: 0.3863170798605278
+  production_energy_ratio: 1.5599439253608005
+- variant_id: ionization_rate_x2
+  category: rate
+  powered_density_ratio_min: 0.4436840498207561
+  powered_density_ratio_max: 0.9351950664815131
+  powered_density_ratio_mean: 0.6894395581511346
+  powered_energy_ratio_mean: 1.465202269320641
+  production_density_ratio: 0.9351950664815131
+  production_energy_ratio: 1.3751439117079862
+- variant_id: excitation_rate_x0p5
+  category: rate
+  powered_density_ratio_min: 0.5628765950756383
+  powered_density_ratio_max: 1.1756930739092644
+  powered_density_ratio_mean: 0.8692848344924513
+  powered_energy_ratio_mean: 1.5601260100506564
+  production_density_ratio: 1.1756930739092644
+  production_energy_ratio: 1.468386925304046
+- variant_id: excitation_rate_x2
+  category: rate
+  powered_density_ratio_min: 0.14897253515008496
+  powered_density_ratio_max: 0.30454239822179474
+  powered_density_ratio_mean: 0.22675746668593985
+  powered_energy_ratio_mean: 1.5651642308625606
+  production_density_ratio: 0.30454239822179474
+  production_energy_ratio: 1.4675026111456768
+- variant_id: energy_loss_x0p5
+  category: energy_loss
+  powered_density_ratio_min: 0.5765951064807229
+  powered_density_ratio_max: 1.1895737206284458
+  powered_density_ratio_mean: 0.8830844135545843
+  powered_energy_ratio_mean: 1.5645047410255084
+  production_density_ratio: 1.1895737206284458
+  production_energy_ratio: 1.468284446670822
+- variant_id: energy_loss_x1p5
+  category: energy_loss
+  powered_density_ratio_min: 0.19559941586605106
+  powered_density_ratio_max: 0.4028568761296842
+  powered_density_ratio_mean: 0.2992281459978676
+  powered_energy_ratio_mean: 1.565000452757721
+  production_density_ratio: 0.4028568761296842
+  production_energy_ratio: 1.4683152717398822
+- variant_id: arplus_sticking_x0p5
+  category: surface
+  powered_density_ratio_min: 0.3054152584428794
+  powered_density_ratio_max: 0.7685533829642449
+  powered_density_ratio_mean: 0.5369843207035622
+  powered_energy_ratio_mean: 1.5217765163618229
+  production_density_ratio: 0.7685533829642449
+  production_energy_ratio: 1.401911571513483
+- variant_id: wall_area_x1p5
+  category: geometry
+  powered_density_ratio_min: 0.2669111094060811
+  powered_density_ratio_max: 0.41161453101997825
+  powered_density_ratio_mean: 0.33926282021302967
+  powered_energy_ratio_mean: 1.6171170846569476
+  production_density_ratio: 0.41161453101997825
+  production_energy_ratio: 1.5496870425510347
+- variant_id: wall_area_x2
+  category: geometry
+  powered_density_ratio_min: 0.24533189027948754
+  powered_density_ratio_max: 0.32387594185478386
+  powered_density_ratio_mean: 0.2846039160671357
+  powered_energy_ratio_mean: 1.6466578676148034
+  production_density_ratio: 0.32387594185478386
+  production_energy_ratio: 1.6056310584885098
+- variant_id: power_x0p75
+  category: power
+  powered_density_ratio_min: 0.21902281478951205
+  powered_density_ratio_max: 0.4513848286983985
+  powered_density_ratio_mean: 0.3352038217439553
+  powered_energy_ratio_mean: 1.5571037814353104
+  production_density_ratio: 0.4513848286983985
+  production_energy_ratio: 1.4622646195152649
+- variant_id: power_x1p25
+  category: power
+  powered_density_ratio_min: 0.3651686699840041
+  powered_density_ratio_max: 0.7523329431709922
+  powered_density_ratio_mean: 0.5587508065774982
+  powered_energy_ratio_mean: 1.5642849269285932
+  production_density_ratio: 0.7523329431709922
+  production_energy_ratio: 1.4683173986457472

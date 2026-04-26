@@ -1,0 +1,23 @@
+pressure_Torr,series_id,quantity_id,symbol,value,unit,source_figure,source_panel,digitization_method,note
+0.50,0D_LoKI,average_reduced_electric_field,E_over_N,69.500000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+0.50,1D_fluid,average_reduced_electric_field,E_over_N,72.500000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+0.75,0D_LoKI,average_reduced_electric_field,E_over_N,61.700000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+0.75,1D_fluid,average_reduced_electric_field,E_over_N,65.750000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+1.00,0D_LoKI,average_reduced_electric_field,E_over_N,57.200000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+1.00,1D_fluid,average_reduced_electric_field,E_over_N,59.000000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+1.50,0D_LoKI,average_reduced_electric_field,E_over_N,52.100000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+1.50,1D_fluid,average_reduced_electric_field,E_over_N,53.600000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+2.00,0D_LoKI,average_reduced_electric_field,E_over_N,49.400000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+2.00,1D_fluid,average_reduced_electric_field,E_over_N,48.200000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+3.00,0D_LoKI,average_reduced_electric_field,E_over_N,45.800000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+3.00,1D_fluid,average_reduced_electric_field,E_over_N,46.900000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+4.00,0D_LoKI,average_reduced_electric_field,E_over_N,44.000000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+4.00,1D_fluid,average_reduced_electric_field,E_over_N,45.600000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+6.00,0D_LoKI,average_reduced_electric_field,E_over_N,41.600000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+6.00,1D_fluid,average_reduced_electric_field,E_over_N,42.685714,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+7.50,0D_LoKI,average_reduced_electric_field,E_over_N,40.600000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+7.50,1D_fluid,average_reduced_electric_field,E_over_N,40.500000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+8.00,0D_LoKI,average_reduced_electric_field,E_over_N,40.400000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+8.00,1D_fluid,average_reduced_electric_field,E_over_N,40.180000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+10.00,0D_LoKI,average_reduced_electric_field,E_over_N,39.500000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.
+10.00,1D_fluid,average_reduced_electric_field,E_over_N,38.900000,Td,5b,5b,manual_visual_estimate_curve_sample,Approximate digitization from extracted PDF figure image.

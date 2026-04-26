@@ -1,0 +1,118 @@
+case:
+  name: argon_rf_envelope_calibration
+  description: 'Pure-Ar calibration-oriented RF-envelope case. Use it to tune coupling_efficiency,
+    effective_impedance_ohm, and self_bias_fraction before interpreting HF/LF cycle-averaged
+    recipe results quantitatively.
+
+    '
+  tags:
+  - argon
+  - rf_envelope
+  - calibration
+  - hf_lf
+  schema_version: 2
+  kind: plasma_global_case
+files:
+  chamber: chamber_argon_icp.yaml
+  recipe: recipe_rf_envelope_calibration.yaml
+  chemistry:
+    manifest: ../chemistry_argon_lxcat/chemistry_manifest.yaml
+    directory: null
+    species: null
+    gas_reactions: null
+    surface_reactions: null
+    reaction_models: null
+    aliases: null
+    cross_sections_manifest: null
+  output_dir: ../outputs/argon_rf_envelope_calibration
+  external_inputs:
+    comsol_anchor_yaml: ../external/comsol_anchor.yaml
+    power_waveform_h5: null
+    geometry_override_yaml: null
+runtime:
+  export_effective_config: true
+  export_resolved_paths: true
+physics:
+  mode: transient
+  gas_model: multi_zone_global
+  eedf_backend: swarm
+  electrical_backend: rf_envelope
+  integrator: scipy_bdf
+  enable_gas_temperature: false
+  enable_surface_coverages: true
+  enable_wall_inventory: true
+  enable_ied_proxy: true
+  enable_dae_fallback: false
+  quasi_neutrality: algebraic
+  electron_density_closure: quasi_neutral
+  gas_heating_fraction: 0.15
+  wall_relaxation_s_inv: 500.0
+numerics:
+  rtol: 1.0e-06
+  atol: 1.0e-14
+  first_step: 1.0e-10
+  max_step: 2.0e-06
+  jacobian: analytic_sparse
+  jacobian_rebuild_policy: every_step
+  positivity:
+    clip_negative: true
+    floor_density_m3: 1.0
+    floor_energy_J_m3: 1.0e-12
+  events:
+    recipe_boundaries: true
+    periodic_orbit_detection: false
+outputs:
+  formats:
+    solution_h5: true
+    observables_csv: true
+    summary_yaml: true
+    checkpoint_npz: false
+  plots:
+    enabled: false
+    format:
+    - png
+    dpi: 150
+    items:
+    - electron_density_vs_time
+    - mean_energy_vs_time
+    - self_bias_vs_time
+  save:
+    dense_solution: false
+    step_history: true
+  diagnostics: {}
+logging:
+  level: INFO
+  write_log_file: true
+  log_filename: run.log
+swarm:
+  model_name: boltzmann_2term
+  closure: auto
+  mixture_key_species:
+  - Ar
+  cache:
+    max_entries: 4
+    fraction_decimals: 4
+  boltzmann_2term:
+    energy_grid:
+      min_eV: 0.001
+      max_eV: 160.0
+      n: 360
+    reduced_field_grid_Td:
+      min: 0.2
+      max: 2500.0
+      n: 48
+    max_shape_iterations: 48
+    max_field_iterations: 42
+imports:
+  geometry_overrides:
+    enabled: false
+    file: null
+  external_power_map:
+    enabled: false
+    file: null
+  external_rate_tables:
+    enabled: false
+    directory: ../chemistry/tables
+  external_anchor_yaml:
+    enabled: true
+    file: ../external/comsol_anchor.yaml

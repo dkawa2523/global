@@ -1,0 +1,6 @@
+reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_filter,enabled,notes
+G0000,gas,"e + Ar -> Ar_plus + e + e",RM_E_AR_ION,EM_E_AR_ION,source|process,,true,seed ionization for algebraic quasi-neutrality
+G0001,gas,"e + CF4 -> CF3 + F + e",RM_E_CF4_DISS,EM_E_CF4_DISS,source|process,,true,example electron-impact dissociation
+G0002,gas,"e + O2 -> O + O + e",RM_E_O2_DISS,EM_E_O2_DISS,source|process,,true,example electron-impact dissociation
+G0003,gas,"e + O2 -> O_minus + O",RM_E_O2_ATTACH,EM_E_O2_ATTACH,source|process,,true,example attachment
+G0004,gas,"F + CF3 -> CF4",RM_NEUTRAL_RECOMB,,source|process,,true,example neutral recombination

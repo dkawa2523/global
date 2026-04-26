@@ -1,0 +1,11 @@
+recipe_id: crane_two_reaction_argon
+description: >
+  Single transient interval matching CRANE tutorials/TwoReactionArgon.
+  No inlet, pump, wall, or power source is included.
+
+steps:
+  - step_id: transient
+    t_start_s: 0.0
+    t_end_s: 7.5e-7
+    gas_inlets: {}
+    power_ports: {}

@@ -1,0 +1,45 @@
+simple_verdict:
+  current_local_run_EoverN_matches_zdplaskin: true
+  forced_zdplaskin_voltage_formula_check_matches: true
+  local_reported_EoverN_is_circuit_field: true
+  plain_language: The current local run E/N is evaluated from the active electrical
+    backend. The forced-voltage value only proves that the E/N unit formula is consistent.
+definition:
+  quantity: reduced electric field
+  formula: E/N = (V_gap / gap_m) / N_gas
+  neutral_density_formula: N_gas = pressure_Pa / (k_B * gas_temperature_K)
+  unit: Townsend; 1 Td = 1e-21 V m^2
+  same_footing_requirement: Use gap voltage, gap length, pressure, and gas temperature;
+    do not compare a fixed-power proxy field to a circuit-derived field.
+zdplaskin_circuit_field:
+  saved_reduced_field_Td: 2.561342
+  recomputed_from_voltage_gap_density_Td: 2.580367428133438
+  saved_vs_recomputed_relative_difference: 0.007427914012825349
+  final_gap_voltage_V: 33.2225
+  final_current_A: 0.009667775
+  final_voltage_current_power_W: 0.32118765493749996
+  gap_m: 0.004
+  pressure_Pa: 13332.0
+  gas_temperature_K: 300.0
+  neutral_density_m3: 3.2187760973281406e+24
+  source_voltage_reduced_field_before_loading_Td: 77.66927317731773
+local_run_field:
+  reported_EoverN_Td: 2.574326264261928
+  equivalent_gap_voltage_V: 33.145283716670505
+  reported_EoverN_is_circuit_field: true
+  same_ZDPlaskin_final_voltage_reduced_field_Td: 2.5803234947548987
+  absorbed_power_W: 0.3204667388401192
+  gap_m: 0.004
+  pressure_Pa: 13332.226994717474
+  gas_temperature_K: 300.0
+  neutral_density_m3: 3.218830901196339e+24
+comparison:
+  local_reported_over_zdplaskin_saved_EoverN_ratio: 1.0050693207943056
+  local_equivalent_voltage_over_zdplaskin_final_voltage_ratio: 0.9976757834801869
+  same_voltage_EoverN_over_zdplaskin_saved_ratio: 1.0074107615284873
+  absorbed_power_over_zdplaskin_VI_power_ratio: 0.9977554676018884
+assessment:
+  reported_local_EoverN_is_same_footing_as_zdplaskin: true
+  physically_comparable_field_key: same_ZDPlaskin_final_voltage_reduced_field_Td
+  interpretation: The same-voltage E/N is only a formula check. The local reported
+    E/N should be interpreted through the active electrical backend.

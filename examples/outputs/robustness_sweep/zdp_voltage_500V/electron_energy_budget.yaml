@@ -1,0 +1,51 @@
+time_s: 0.001
+step_id: dc_series_circuit
+sign_convention: positive terms add electron energy density; negative terms remove
+  it
+zones:
+  plasma:
+    electron_energy_density_J_m3: 0.012413943316607766
+    electron_density_m3: 8.923327322681858e+16
+    mean_energy_eV: 0.8683054768539208
+    terms_W_m3:
+      absorbed_power_W_m3: 1218025.1462591873
+      electron_impact_loss_W_m3: -26165.849583109677
+      ion_wall_loss_W_m3: -40.097036912643084
+      pump_loss_W_m3: 0.0
+      edge_transport_W_m3: 0.0
+      field_table_energy_relaxation_override_W_m3: -1191819.1996368426
+    loss_by_category_W_m3:
+      excitation: 23327.01480392132
+      ionization: 2838.8347791883566
+    top_losses:
+    - process_id: ZDP_AR_EXC
+      category: excitation
+      energy_loss_eV: 11.5
+      rate_m3_s: 1.2660502137283086e+22
+      loss_W_m3: 23327.01480392132
+    - process_id: ZDP_AR_ION
+      category: ionization
+      energy_loss_eV: 15.8
+      rate_m3_s: 1.1213444598424138e+21
+      loss_W_m3: 2838.615189715289
+    - process_id: ion_wall_loss:ambipolar_diffusion:Ar2_plus
+      category: ion_wall_loss
+      energy_loss_eV: 0.8683054768539208
+      rate_m3_s: 2.866714986155623e+20
+      loss_W_m3: 39.88112960122858
+    - process_id: ZDP_ARSTAR_ION
+      category: ionization
+      energy_loss_eV: 4.3
+      rate_m3_s: 3.187371369318536e+17
+      loss_W_m3: 0.21958947306751792
+    - process_id: ion_wall_loss:ambipolar_diffusion:Ar_plus
+      category: ion_wall_loss
+      energy_loss_eV: 0.8683054768539208
+      rate_m3_s: 1.5519739070616922e+18
+      loss_W_m3: 0.2159073114145028
+    net_W_m3: 2.322345103777934e-06
+    notes:
+    - Gas-temperature heating is currently a separate reduced heavy-particle equation
+      and is not subtracted from electron energy.
+    - Field-rate-table mode overrides the electron-energy RHS with relaxation to the
+      table mean energy.

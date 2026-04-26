@@ -1,0 +1,17 @@
+rate_models:
+  RM_CRANE_AR_ION:
+    backend: constant
+    value: 2.1736169000623e-18
+    source_units: cm3/s
+    source_value: 2.1736169000623e-12
+    source_sampling:
+      reduced_field_Td: 30.0
+      CRANE_file: tutorials/TwoReactionArgon/data/ionization.txt
+  RM_CRANE_ARPLUS_THREE_BODY_RECOMB:
+    backend: constant
+    value: 1.0e-37
+    source_units: cm6/s
+    source_value: 1.0e-25
+    source_sampling:
+      reduced_field_Td: 30.0
+      CRANE_input: tutorials/TwoReactionArgon/TwoReactionArgon.i

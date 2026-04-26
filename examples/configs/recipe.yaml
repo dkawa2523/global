@@ -1,0 +1,80 @@
+recipe_id: cf4_oxide_etch_demo
+description: >
+  Simple three-step transient recipe: ignition, main etch, afterglow.
+  Each step can override gas inlets, power ports, and optional imported inputs.
+
+steps:
+  - step_id: ignition
+    t_start_s: 0.0
+    t_end_s: 2.0e-4
+    gas_inlets:
+      showerhead:
+        Ar: 100.0
+        CF4: 20.0
+        O2: 2.0
+    power_ports:
+      source_rf:
+        mode: absorbed_power
+        zone_id: source
+        value_W: 300.0
+        frequency_Hz: 1.356e7
+        waveform: cw
+      wafer_bias:
+        mode: absorbed_power
+        zone_id: process
+        value_W: 20.0
+        frequency_Hz: 2.0e6
+        waveform: cw
+    imported_inputs:
+      comsol_case_label: ignition
+
+  - step_id: main_etch
+    t_start_s: 2.0e-4
+    t_end_s: 2.2e-3
+    gas_inlets:
+      showerhead:
+        Ar: 100.0
+        CF4: 30.0
+        O2: 5.0
+    power_ports:
+      source_rf:
+        mode: absorbed_power
+        zone_id: source
+        value_W: 800.0
+        frequency_Hz: 1.356e7
+        waveform: cw
+      wafer_bias:
+        mode: absorbed_power
+        zone_id: process
+        value_W: 120.0
+        frequency_Hz: 2.0e6
+        waveform: pulsed_square
+        duty_cycle: 0.50
+        repetition_Hz: 2.0e4
+    surface_overrides:
+      wafer:
+        temperature_K: 325.0
+    imported_inputs:
+      comsol_case_label: etch
+
+  - step_id: afterglow
+    t_start_s: 2.2e-3
+    t_end_s: 2.6e-3
+    gas_inlets:
+      showerhead:
+        Ar: 100.0
+        CF4: 0.0
+        O2: 0.0
+    power_ports:
+      source_rf:
+        mode: absorbed_power
+        zone_id: source
+        value_W: 0.0
+        waveform: off
+      wafer_bias:
+        mode: absorbed_power
+        zone_id: process
+        value_W: 0.0
+        waveform: off
+    imported_inputs:
+      comsol_case_label: afterglow

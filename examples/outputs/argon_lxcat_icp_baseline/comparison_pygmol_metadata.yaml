@@ -1,0 +1,41 @@
+comparison: argon_lxcat_vs_pygmol_minimal_argon
+local_case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+pygmol:
+  pygmol_version: 1.1.0
+  project_url: https://github.com/hanicinecm/pygmol
+  pypi_url: https://pypi.org/project/pygmol/
+  benchmark_model_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\tools\external_benchmarks\pygmol_argon_model.yaml
+  benchmark_model_id: pygmol_minimal_argon_arrhenius_surrogate
+  rate_alignment_with_local_case: intentionally_not_aligned
+  rate_source: PyGMol-compatible compact Arrhenius surrogate
+  power_mode: recipe
+  wall_loss_mode: pygmol
+  guardrails:
+  - Do not import this file from plasma_global core modules.
+  - Do not use these rates as production LXCat or BOLSIG+ replacement data.
+  - Compare order and trends only unless a separate same-rate parity case is explicitly
+    created.
+  model_note: PyGMol solves a 0D heavy-species/electron-energy global model. The electron-impact
+    rates are intentionally isolated in the external PyGMol benchmark model file and
+    are not the same LXCat cross-section integration used by the local case.
+rate_policy:
+  status: not_same_rate_physics_by_design
+  local_case: native local Ar LXCat/two-term workflow remains unchanged
+  pygmol_case: uses external-benchmark-only compact Arrhenius surrogate
+  reason: Forcing the core case to use PyGMol surrogate rates would make a misleading
+    production model.
+equivalent_cylinder:
+  volume_m3: 0.04
+  area_m2: 0.6614
+  radius_m: 0.15951158183553765
+  length_m: 0.5004096486460946
+limitations:
+- Local model is two-zone; PyGMol comparison is a single equivalent cylinder.
+- Local electron energy is EEDF mean energy; PyGMol reports electron temperature.
+- Local wafer ion flux and PyGMol total cylinder-wall Ar+ flux are not identical observables.
+- Same-rate modes align electron-impact rate coefficients only; they do not align
+  wall-loss or flow equations.
+- local-absorbed power mode reuses local total_absorbed_power_W as the PyGMol power
+  waveform.
+- local-coefficient wall-loss mode replaces PyGMol positive-ion surface loss with
+  the local global k_wall(t).

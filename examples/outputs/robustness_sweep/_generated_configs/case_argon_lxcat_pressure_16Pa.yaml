@@ -1,0 +1,37 @@
+include: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/configs/base_case.yaml
+case:
+  name: argon_lxcat_pressure_16Pa
+  description: 'Pure Ar production baseline using public BOLSIG/LXCat-style cross
+    sections from the Zenodo CC-BY dataset 10.5281/zenodo.8192503. This is intended
+    for comparison against public argon ICP/global-model examples before moving to
+    mixed-gas process chemistry.
+
+    '
+  tags:
+  - argon
+  - lxcat
+  - benchmark
+  - icp
+  - production_baseline
+  - robustness_sweep
+files:
+  chamber: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/outputs/robustness_sweep/_generated_configs/chamber_argon_lxcat_pressure_16Pa.yaml
+  recipe: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/configs/recipe_argon_lxcat.yaml
+  chemistry:
+    manifest: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/chemistry_argon_lxcat/chemistry_manifest.yaml
+  output_dir: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/outputs/robustness_sweep/argon_lxcat_pressure_16Pa
+physics:
+  enable_gas_temperature: false
+swarm:
+  model_name: boltzmann_2term
+  closure: auto
+  mixture_key_species:
+  - Ar
+  cache:
+    max_entries: 4
+    fraction_decimals: 4
+numerics:
+  max_step: 2.0e-06
+outputs:
+  plots:
+    enabled: false

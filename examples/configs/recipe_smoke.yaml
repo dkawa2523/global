@@ -1,0 +1,29 @@
+recipe_id: cf4_oxide_etch_demo
+description: 'Simple three-step transient recipe: ignition, main etch, afterglow.
+  Each step can override gas inlets, power ports, and optional imported inputs.
+
+  '
+steps:
+- step_id: ignition
+  t_start_s: 0.0
+  t_end_s: 1.0e-06
+  gas_inlets:
+    showerhead:
+      Ar: 100.0
+      CF4: 20.0
+      O2: 2.0
+  power_ports:
+    source_rf:
+      mode: absorbed_power
+      zone_id: source
+      value_W: 300.0
+      frequency_Hz: 1.356e7
+      waveform: cw
+    wafer_bias:
+      mode: absorbed_power
+      zone_id: process
+      value_W: 20.0
+      frequency_Hz: 2.0e6
+      waveform: cw
+  imported_inputs:
+    comsol_case_label: ignition

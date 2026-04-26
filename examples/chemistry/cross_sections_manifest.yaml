@@ -1,0 +1,86 @@
+cross_sections:
+  - cross_section_id: xs_ar_mt
+    kind: momentum_transfer
+    target_species: Ar
+    source: file
+    file: cross_sections/xs_ar_mt.csv
+    format: csv_xy
+    unit_energy: eV
+    unit_sigma: m2
+    metadata:
+      demo_data: true
+      note: synthetic demo table for reader testing
+  - cross_section_id: xs_cf4_mt
+    kind: momentum_transfer
+    target_species: CF4
+    source: file
+    file: cross_sections/xs_cf4_mt.csv
+    format: csv_xy
+    unit_energy: eV
+    unit_sigma: m2
+    metadata:
+      demo_data: true
+      note: synthetic demo table for reader testing
+  - cross_section_id: xs_o2_mt
+    kind: momentum_transfer
+    target_species: O2
+    source: file
+    file: cross_sections/xs_o2_mt.csv
+    format: csv_xy
+    unit_energy: eV
+    unit_sigma: m2
+    metadata:
+      demo_data: true
+      note: synthetic demo table for reader testing
+  - cross_section_id: xs_ar_ionization
+    kind: ionization
+    target_species: Ar
+    threshold_eV: 15.76
+    energy_loss_eV: 15.76
+    source: file
+    file: cross_sections/xs_ar_ionization.csv
+    format: csv_xy
+    unit_energy: eV
+    unit_sigma: m2
+    metadata:
+      demo_data: true
+      note: synthetic demo table for reader testing
+  - cross_section_id: xs_cf4_dissociation
+    kind: dissociation
+    target_species: CF4
+    threshold_eV: 12.5
+    energy_loss_eV: 12.5
+    source: file
+    file: cross_sections/xs_cf4_dissociation.csv
+    format: csv_xy
+    unit_energy: eV
+    unit_sigma: m2
+    metadata:
+      demo_data: true
+      note: synthetic demo table for reader testing
+  - cross_section_id: xs_o2_dissociation
+    kind: dissociation
+    target_species: O2
+    threshold_eV: 6.0
+    energy_loss_eV: 6.0
+    source: file
+    file: cross_sections/xs_o2_dissociation.csv
+    format: csv_xy
+    unit_energy: eV
+    unit_sigma: m2
+    metadata:
+      demo_data: true
+      note: synthetic demo table for reader testing
+  - cross_section_id: xs_o2_attachment
+    kind: attachment
+    target_species: O2
+    threshold_eV: 4.5
+    energy_loss_eV: 4.5
+    source: file
+    file: cross_sections/xs_o2_attachment.csv
+    format: csv_xy
+    unit_energy: eV
+    unit_sigma: m2
+    metadata:
+      demo_data: true
+      note: synthetic demo table for reader testing

@@ -1,0 +1,17 @@
+time_s: 0.001
+step_id: dc_series_circuit
+sign_convention: positive gas flux is returned to the gas; positive surface term increases
+  coverage
+surfaces:
+  wall:
+    zone_id: plasma
+    area_m2: 0.0002010619298
+    site_density_m2: 1.0e+18
+    site_metrics:
+      occupied_fraction: 0.0
+      free_fraction: 0.0
+      total_fraction: 0.0
+    species: {}
+    gas_fluxes_m2_s: {}
+    film_growth_m_s: 0.0
+    reactions: {}

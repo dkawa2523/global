@@ -1,0 +1,173 @@
+tool: external_model_registry
+scope: External benchmark and comparison candidates only; no core-solver imports depend
+  on this registry.
+models:
+- id: zdplaskin
+  role: 0D plasma chemistry/global model reference
+  source_url: https://github.com/Hemadityamalla/ZDPlaskin
+  current_status: implemented_from_committed_output
+  local_tools:
+  - tools/external_benchmarks/zdplaskin_example2.py
+  - tools/external_benchmarks/zdplaskin_eovern.py
+  - tools/external_benchmarks/zdplaskin_examples_inventory.py
+  best_use: Strict same-footing benchmark where committed output includes circuit,
+    E/N, and composition.
+  limits:
+  - Direct rerun depends on Fortran build and platform-specific BOLSIG library.
+  - example3 is a prescribed-electron-density chemistry driver, not a self-consistent
+    global discharge benchmark.
+- id: crane
+  role: plasma chemistry reaction-network benchmark
+  source_url: https://github.com/lcpp-org/crane
+  current_status: implemented_from_committed_tutorial_output
+  local_tools:
+  - tools/external_benchmarks/crane_two_reaction_argon.py
+  best_use: Strict scalar ODE/reaction-network parity with prescribed rates and unit
+    conversion.
+  limits:
+  - The public TwoReactionArgon tutorial does not validate electron energy, wall loss,
+    transport, or circuit closure.
+  - Full CRANE executable reruns require the external MOOSE/CRANE build stack.
+- id: pygmol
+  role: executable Python 0D global-model sanity check
+  source_url: https://pypi.org/project/pygmol/
+  current_status: implemented_executable_optional_dependency
+  availability:
+    available: true
+    version: 1.1.0
+  local_tools:
+  - tools/external_benchmarks/pygmol_argon.py
+  diagnostic_tools:
+  - tools/external_benchmarks/pygmol_sensitivity.py
+  best_use: Executable global-model trend/order check for pure-Ar cases.
+  limits:
+  - The current comparison uses compact Arrhenius Ar chemistry, not the same LXCat
+    cross-section integration.
+  - Single-zone equivalent-cylinder mapping is not strict parity for two-zone local
+    cases.
+- id: thunderboltz
+  role: 0D DSMC Boltzmann/transport and gas-model candidate
+  source_url: https://pypi.org/project/thunderboltz/
+  current_status: candidate_not_integrated
+  availability:
+    available: false
+    version: null
+  best_use: Independent transport/rate-table generation and kinetic consistency checks,
+    not direct replacement for a reactor global model.
+  limits:
+  - Needs a dedicated workflow to convert collision sets and outputs into the local
+    external rate-table format.
+  - Current environment does not have the Python package imported successfully unless
+    availability is true here.
+- id: loki_b
+  role: electron Boltzmann solver candidate
+  source_url: https://github.com/IST-Lisbon/LoKI
+  current_status: candidate_rate_table_generator
+  best_use: External E/N-rate and transport table generation for the local solver.
+  limits:
+  - LoKI-B is a Boltzmann/EEDF solver, not a full reactor global model comparison
+    by itself.
+  - Needs an explicit export parser and rate-table provenance workflow before automated
+    benchmarking.
+- id: loki_c_o2_dc_glow_benchmark
+  role: public low-pressure oxygen global-model benchmark candidate
+  source_url: https://nprime.tecnico.ulisboa.pt/loki/
+  benchmark_reference_url: https://doi.org/10.1088/1361-6595/acbb9c
+  current_status: candidate_public_benchmark_paper_only
+  local_spec_file: examples/external/loki_o2_dc_glow_candidate.yaml
+  local_tools:
+  - tools/external_benchmarks/loki_o2_dc_glow_digitization.py
+  best_use: Next low-pressure benchmark candidate for testing whether a 0D global
+    model reproduces volume-averaged O2 DC glow behaviour between 0.5 Torr and 10
+    Torr.
+  artifact_access: The benchmark paper and LoKI tool description are public, but no
+    machine-readable LoKI/1D reference output bundle has been located yet.
+  limits:
+  - LoKI-C is described publicly, but the official LoKI site states that it is still
+    under development and there is no tentative release date.
+  - The published benchmark gives case definition and figures, but a committed CSV/HDF5-style
+    reference output was not found from official sources.
+  - Automated parity will need either digitized curves, author-provided raw data,
+    or a future public LoKI-C release.
+- id: plasimo_global_model
+  role: global-model toolkit candidate
+  source_url: https://plasma-matters.nl/modules/global-models/index.php
+  downloads_url: https://plasma-matters.nl/downloads/index.php
+  current_status: candidate_public_input_files_login_required_runtime
+  best_use: Compare global-model structure, wall/surface coupling, and Boltzmann coupling
+    against published PLASIMO chemistries and applications.
+  artifact_access: Published input archives are publicly downloadable for several
+    papers, but binaries and documents require login/request access and the evaluation
+    version does not save output to disk.
+  limits:
+  - The official downloads page says binaries and most documents require login or
+    request access.
+  - The official evaluation version is available on request and explicitly does not
+    save output to disk.
+  - This means published inputs are accessible now, but automated output-to-output
+    benchmarking still needs executable access beyond the demo limitations.
+- id: quantemol_global_model
+  role: cloud/desktop global-model candidate
+  source_url: https://quantemoldb.com/brochure/quantemol-global-model/
+  documentation_url: https://quantemoldb.com/static/media/uploads/qgm_doc.pdf
+  chemistry_api_url: https://quantemoldb.com/chemistries/api/
+  current_status: candidate_online_tool_no_public_output_export
+  best_use: Cross-check reactor-averaged densities, electron temperature, pulsed-discharge
+    handling, and chemistry-reduction workflows against an independent commercial-style
+    global model.
+  artifact_access: The online global model is publicly available to use and chemistry
+    export is documented through the QDB API, but a public machine-readable global-model
+    output export workflow was not found.
+  limits:
+  - The desktop application is restricted to Gold or Platinum membership.
+  - Official documentation clearly defines model outputs, but no public API or documented
+    export endpoint for global-model result files was found.
+  - Without exportable result artifacts, reproducible automated benchmarking remains
+    awkward even if interactive runs are possible.
+- id: plasma_r
+  role: 0D global reactor model candidate with wall kinetics
+  source_url: https://www.plasma-r.com/
+  downloads_url: https://www.plasma-r.com/downloads/
+  references_url: https://www.plasma-r.com/references/
+  current_status: candidate_contact_required_access
+  best_use: Low-pressure wall-coupled global-model comparison for H2, SF6, and C4F8-type
+    reactor chemistries.
+  artifact_access: The project site and reference cases are public, but trying the
+    software requires contacting the developers and no public benchmark output bundle
+    has been located.
+  limits:
+  - The official site says users should contact the developers to try the software.
+  - The website exposes only a student installer link and says execution requires
+    an internet connection.
+  - No public machine-readable reference output set was found on the official site.
+- id: ngspice
+  role: future external circuit waveform source
+  source_url: https://ngspice.sourceforge.io/
+  current_status: future_one_way_circuit_input
+  availability:
+    available: false
+    path: null
+  best_use: Generate external voltage/current waveforms consumed by the existing external_circuit_table
+    backend.
+  limits:
+  - One-way waveform ingestion exists; fully coupled plasma-to-SPICE feedback is intentionally
+    not in the core solver yet.
+recommended_order:
+- Keep ZDPlaskin example2 and CRANE TwoReactionArgon as strict external-reference
+  tests.
+- Use PyGMol as an executable pure-Ar global-model sanity check.
+- Prepare the LoKI O2 DC glow paper as the next public low-pressure benchmark candidate,
+  but only after obtaining machine-readable reference outputs or a clean digitization
+  workflow.
+- Prepare ZDPlaskin example3 as a future prescribed-ne N2 driven-chemistry regression
+  only after adding that driver mode cleanly.
+- Use PLASIMO published input bundles as the next global-model candidate once executable
+  output artifacts can be generated reproducibly.
+- Treat Quantemol Global Model as a chemistry and reduced-model comparison candidate
+  only after a reproducible output export workflow is confirmed.
+- Treat plasma-R as a wall-kinetics global-model candidate only after contact access
+  and exportable outputs are available.
+- Use LoKI-B and ThunderBoltz for independent rate/transport table workflows before
+  treating them as discharge benchmarks.
+- Use ngspice first as one-way waveform input, then consider loose iterative coupling
+  only if a real circuit benchmark requires it.

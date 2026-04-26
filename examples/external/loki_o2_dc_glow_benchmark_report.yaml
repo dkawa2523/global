@@ -1,0 +1,2446 @@
+tool: loki_o2_dc_glow_benchmark
+scope: external_digitized_reference_only
+spec_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_candidate.yaml
+digitization_root: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized
+digitization_readiness_report:
+  tool: loki_o2_dc_glow_digitization
+  scope: external_candidate_only
+  spec_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_candidate.yaml
+  digitization_root: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized
+  schema_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized\schema.yaml
+  readme_file: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_digitized\README.md
+  passed: true
+  summary:
+    files_expected: 14
+    files_present: 14
+    files_with_correct_header: 14
+    files_with_data_rows: 14
+    primary_required_files_complete: 5/5
+    secondary_pressure_sweep_files_complete: 3/3
+    diagnostic_profile_files_started: 6/6
+    runnable_primary_pressure_benchmark: true
+    runnable_extended_species_benchmark: true
+    runnable_full_diagnostic_benchmark: true
+    readiness_stage: runnable_full_diagnostic_benchmark
+  evaluation:
+    execution_mode: readiness_check
+    physics_parity_executed: false
+    physics_parity_status: digitized_reference_ready_for_local_case_comparison
+    assessment: The digitization scaffold and CSV schemas are valid.
+    next_actions: []
+  datasets:
+  - file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig05a_avg_temperatures_vs_pressure.csv
+    priority: primary_required
+    schema_name: pressure_sweep
+    source_figure: 5a
+    exists: true
+    header_matches_schema: true
+    data_row_count: 44
+    expected_row_count: 44
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: average_gas_temperature
+      symbol: Tg,av
+      unit: K
+    - quantity_id: near_wall_temperature
+      symbol: Tnw
+      unit: K
+    expected_metric_ids: []
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig05b_avg_reduced_field_vs_pressure.csv
+    priority: primary_required
+    schema_name: pressure_sweep
+    source_figure: 5b
+    exists: true
+    header_matches_schema: true
+    data_row_count: 22
+    expected_row_count: 22
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: average_reduced_electric_field
+      symbol: E_over_N
+      unit: Td
+    expected_metric_ids: []
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig06_molar_fractions_vs_pressure.csv
+    priority: primary_required
+    schema_name: pressure_sweep
+    source_figure: '6'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 44
+    expected_row_count: 44
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: average_molar_fraction_atomic_oxygen
+      symbol: '[O]/ng'
+      unit: '1'
+    - quantity_id: average_molar_fraction_molecular_oxygen
+      symbol: '[O2]/ng'
+      unit: '1'
+    expected_metric_ids: []
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig07a_main_charged_species_vs_pressure.csv
+    priority: primary_required
+    schema_name: pressure_sweep
+    source_figure: 7a
+    exists: true
+    header_matches_schema: true
+    data_row_count: 66
+    expected_row_count: 66
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: average_electron_density
+      symbol: ne
+      unit: m^-3
+    - quantity_id: average_negative_ion_density
+      symbol: O_minus
+      unit: m^-3
+    - quantity_id: average_positive_ion_density
+      symbol: O2_plus
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig08_atomic_excited_states_vs_pressure.csv
+    priority: secondary_pressure_sweep
+    schema_name: pressure_sweep
+    source_figure: '8'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 66
+    expected_row_count: 66
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: average_atomic_excited_state_density
+      symbol: O(3P)
+      unit: m^-3
+    - quantity_id: average_atomic_excited_state_density
+      symbol: O(1D)
+      unit: m^-3
+    - quantity_id: average_atomic_excited_state_density
+      symbol: O(1S)
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig09a_molecular_states_vs_pressure.csv
+    priority: secondary_pressure_sweep
+    schema_name: pressure_sweep
+    source_figure: 9a
+    exists: true
+    header_matches_schema: true
+    data_row_count: 66
+    expected_row_count: 66
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: average_molecular_state_density
+      symbol: O2(X)
+      unit: m^-3
+    - quantity_id: average_molecular_state_density
+      symbol: O2(a)
+      unit: m^-3
+    - quantity_id: average_molecular_state_density
+      symbol: O2(b)
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/pressure_sweep/fig09b_ozone_and_herzberg_vs_pressure.csv
+    priority: secondary_pressure_sweep
+    schema_name: pressure_sweep
+    source_figure: 9b
+    exists: true
+    header_matches_schema: true
+    data_row_count: 44
+    expected_row_count: 44
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: average_molecular_state_density
+      symbol: O2(Hz)
+      unit: m^-3
+    - quantity_id: average_molecular_state_density
+      symbol: O3
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/acceptance_envelope_reference/fig11_relative_difference_envelope_vs_pressure.csv
+    priority: primary_required
+    schema_name: acceptance_envelope
+    source_figure: '11'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 36
+    expected_row_count: 36
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series: []
+    expected_quantities: []
+    expected_metric_ids:
+    - avg_gas_temperature_relative_difference
+    - near_wall_temperature_relative_difference
+    - electron_temperature_relative_difference
+    - avg_reduced_electric_field_relative_difference
+    - avg_charged_species_relative_difference
+    - avg_neutral_species_relative_difference
+    expected_profile_groups: []
+  - file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig01_gas_temperature_profiles.csv
+    priority: diagnostic_profile
+    schema_name: profile_curve
+    source_figure: '1'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 44
+    expected_row_count: null
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: gas_temperature_profile
+      symbol: Tg(r)
+      unit: K
+    expected_metric_ids: []
+    expected_profile_groups:
+    - 1Torr
+    - 10Torr
+  - file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig02_reduced_field_profiles.csv
+    priority: diagnostic_profile
+    schema_name: profile_curve
+    source_figure: '2'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 44
+    expected_row_count: null
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: reduced_electric_field_profile
+      symbol: E_over_N(r)
+      unit: Td
+    expected_metric_ids: []
+    expected_profile_groups:
+    - 1Torr
+    - 10Torr
+  - file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig03_electron_density_profiles.csv
+    priority: diagnostic_profile
+    schema_name: profile_curve
+    source_figure: '3'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 44
+    expected_row_count: null
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: electron_density_profile
+      symbol: ne(r)
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups:
+    - 1Torr
+    - 10Torr
+  - file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig04_atomic_oxygen_profiles.csv
+    priority: diagnostic_profile
+    schema_name: profile_curve
+    source_figure: '4'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 44
+    expected_row_count: null
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: atomic_oxygen_density_profile
+      symbol: O(3P)(r)
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups:
+    - 1Torr
+    - 10Torr
+  - file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig07b_charged_species_profiles_10Torr.csv
+    priority: diagnostic_profile
+    schema_name: profile_curve
+    source_figure: 7b
+    exists: true
+    header_matches_schema: true
+    data_row_count: 66
+    expected_row_count: null
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: electron_density_profile
+      symbol: e(r)
+      unit: m^-3
+    - quantity_id: negative_ion_density_profile
+      symbol: O_minus(r)
+      unit: m^-3
+    - quantity_id: positive_ion_density_profile
+      symbol: O2_plus(r)
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups:
+    - 10Torr
+  - file: examples/external/loki_o2_dc_glow_digitized/profile_assumption_diagnostics/fig10_ozone_reactant_profiles_10Torr.csv
+    priority: diagnostic_profile
+    schema_name: profile_curve
+    source_figure: '10'
+    exists: true
+    header_matches_schema: true
+    data_row_count: 110
+    expected_row_count: null
+    complete_for_expected_grid: true
+    status: digitized_complete
+    expected_series:
+    - 1D_fluid
+    - 0D_LoKI
+    expected_quantities:
+    - quantity_id: ozone_reactant_profile
+      symbol: digitized_reactant
+      unit: m^-3
+    expected_metric_ids: []
+    expected_profile_groups:
+    - 10Torr
+summary_csv: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\external\loki_o2_dc_glow_benchmark_summary.csv
+passed: true
+summary:
+  runnable_primary_pressure_benchmark: true
+  runnable_extended_species_benchmark: true
+  runnable_full_diagnostic_benchmark: true
+  readiness_stage: runnable_full_diagnostic_benchmark
+  direct_main_parameter_threshold_percent: 5.0
+  direct_main_parameter_threshold_pass: true
+  figure11_reference_main_parameter_threshold_pass: true
+  figure11_reference_species_envelope_pass: true
+  extended_neutral_subset_reference_ceiling_pass: true
+  profile_shape_expectation_pass: true
+direct_reconstruction:
+  avg_gas_temperature_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 2.4862
+    - 3.3602
+    - 3.6842
+    - 4.2929
+    - 4.3902
+    - 3.6866
+    - 2.2026
+    - 1.7049
+    - 0.789
+    - 1.0097
+    - 0.5556
+    max_percent: 4.3902
+    min_percent: 0.5556
+  near_wall_temperature_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 0.3058
+    - 0.3049
+    - 0.0
+    - 0.3021
+    - 0.3003
+    - 1.3433
+    - 2.071
+    - 2.7151
+    - 3.1884
+    - 3.1792
+    - 3.1429
+    max_percent: 3.1884
+    min_percent: 0.0
+  avg_reduced_electric_field_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 4.3165
+    - 6.564
+    - 3.1469
+    - 2.8791
+    - 2.4291
+    - 2.4017
+    - 3.6364
+    - 2.6099
+    - 0.2463
+    - 0.5446
+    - 1.519
+    max_percent: 6.564
+    min_percent: 0.2463
+  avg_charged_species_subset_proxy:
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 5.3406
+    - 2.2211
+    - 0.0
+    - 5.3333
+    - 10.6671
+    - 7.1019
+    - 8.2664
+    - 9.1161
+    - 10.8952
+    - 11.3509
+    - 12.9669
+    max_percent: 12.9669
+    min_percent: 0.0
+  avg_neutral_species_first_wave_subset_proxy:
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 2.9309
+    - 2.9219
+    - 1.5491
+    - 1.3728
+    - 2.6247
+    - 2.5377
+    - 10.0062
+    - 7.9897
+    - 12.4774
+    - 12.7718
+    - 15.1918
+    max_percent: 15.1918
+    min_percent: 1.3728
+  avg_neutral_species_extended_subset_proxy:
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 9.2087
+    - 9.1948
+    - 10.4176
+    - 16.9457
+    - 17.9395
+    - 21.7816
+    - 24.5278
+    - 30.423
+    - 34.7416
+    - 35.9546
+    - 40.5174
+    max_percent: 40.5174
+    min_percent: 9.1948
+extended_species_relative_differences:
+  O(3P):
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 8.3333
+    - 6.25
+    - 7.8947
+    - 4.5455
+    - 4.2553
+    - 1.9608
+    - 5.7143
+    - 9.2593
+    - 11.8182
+    - 13.5135
+    - 16.0714
+    max_percent: 16.0714
+    min_percent: 1.9608
+  O(1D):
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 20.6897
+    - 18.5185
+    - 20.0
+    - 19.0476
+    - 22.2222
+    - 22.2222
+    - 23.4783
+    - 17.8947
+    - 17.2414
+    - 17.6471
+    - 16.25
+    max_percent: 23.4783
+    min_percent: 16.25
+  O(1S):
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 14.2857
+    - 14.0625
+    - 14.0351
+    - 11.1111
+    - 15.7895
+    - 10.7143
+    - 8.3333
+    - 10.0
+    - 8.1081
+    - 8.5714
+    - 9.375
+    max_percent: 15.7895
+    min_percent: 8.1081
+  O2(X):
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 6.25
+    - 9.0909
+    - 9.375
+    - 6.25
+    - 5.8824
+    - 4.0
+    - 2.9412
+    - 5.2632
+    - 2.6087
+    - 8.3333
+    - 3.3333
+    max_percent: 9.375
+    min_percent: 2.6087
+  O2(a):
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 10.0
+    - 6.6667
+    - 9.0909
+    - 9.0909
+    - 16.6667
+    - 27.5362
+    - 21.6867
+    - 27.2727
+    - 27.8689
+    - 29.6875
+    - 28.5714
+    max_percent: 29.6875
+    min_percent: 6.6667
+  O2(b):
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 0.0
+    - 9.0909
+    - 12.5
+    - 16.6667
+    - 18.75
+    - 25.0
+    - 22.7273
+    - 33.3333
+    - 37.5
+    - 39.5833
+    - 41.3043
+    max_percent: 41.3043
+    min_percent: 0.0
+  O2(Hz):
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 10.0
+    - 9.0909
+    - 10.0
+    - 25.0
+    - 16.6667
+    - 18.1818
+    - 15.3846
+    - 12.5
+    - 14.2857
+    - 16.6667
+    - 18.4211
+    max_percent: 25.0
+    min_percent: 9.0909
+  O3:
+    pressures_Torr:
+    - 0.5
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+    - 3.0
+    - 4.0
+    - 6.0
+    - 7.5
+    - 8.0
+    - 10.0
+    values_percent:
+    - 16.6667
+    - 13.3333
+    - 18.1818
+    - 75.0
+    - 73.913
+    - 103.125
+    - 125.0
+    - 172.7273
+    - 203.0303
+    - 200.0
+    - 241.4634
+    max_percent: 241.4634
+    min_percent: 13.3333
+profile_diagnostics:
+  shape_expectation_pass: true
+  checks:
+  - figure: '1'
+    file_id: fig01
+    dataset_key: gas_temperature_profile::Tg(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 1.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 430.0
+    edge_value: 330.0
+    edge_to_center_ratio: 0.7674418604651163
+    center_to_edge_ratio: 1.303030303030303
+  - figure: '2'
+    file_id: fig02
+    dataset_key: reduced_electric_field_profile::E_over_N(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 1.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 65.0
+    edge_value: 49.5
+    edge_to_center_ratio: 0.7615384615384615
+    center_to_edge_ratio: 1.3131313131313131
+  - figure: '3'
+    file_id: fig03
+    dataset_key: electron_density_profile::ne(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 1.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 1.08e+16
+    edge_value: 0.0
+    edge_to_center_ratio: 0.0
+    center_to_edge_ratio: null
+  - figure: '4'
+    file_id: fig04
+    dataset_key: atomic_oxygen_density_profile::O(3P)(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 1.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 6.5e+21
+    edge_value: 8.52e+21
+    edge_to_center_ratio: 1.3107692307692307
+    center_to_edge_ratio: 0.7629107981220657
+  - figure: '1'
+    file_id: fig01
+    dataset_key: gas_temperature_profile::Tg(r)
+    series_id: 1D_fluid
+    pressure_Torr: 1.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 405.0
+    edge_value: 332.0
+    edge_to_center_ratio: 0.8197530864197531
+    center_to_edge_ratio: 1.2198795180722892
+  - figure: '2'
+    file_id: fig02
+    dataset_key: reduced_electric_field_profile::E_over_N(r)
+    series_id: 1D_fluid
+    pressure_Torr: 1.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 65.0
+    edge_value: 53.5
+    edge_to_center_ratio: 0.823076923076923
+    center_to_edge_ratio: 1.2149532710280373
+  - figure: '3'
+    file_id: fig03
+    dataset_key: electron_density_profile::ne(r)
+    series_id: 1D_fluid
+    pressure_Torr: 1.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 1.16e+16
+    edge_value: 0.0
+    edge_to_center_ratio: 0.0
+    center_to_edge_ratio: null
+  - figure: '4'
+    file_id: fig04
+    dataset_key: atomic_oxygen_density_profile::O(3P)(r)
+    series_id: 1D_fluid
+    pressure_Torr: 1.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 7.08e+21
+    edge_value: 8.43e+21
+    edge_to_center_ratio: 1.190677966101695
+    center_to_edge_ratio: 0.8398576512455516
+  - figure: '1'
+    file_id: fig01
+    dataset_key: gas_temperature_profile::Tg(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 725.0
+    edge_value: 355.0
+    edge_to_center_ratio: 0.4896551724137931
+    center_to_edge_ratio: 2.0422535211267605
+  - figure: '2'
+    file_id: fig02
+    dataset_key: reduced_electric_field_profile::E_over_N(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 53.5
+    edge_value: 26.5
+    edge_to_center_ratio: 0.4953271028037383
+    center_to_edge_ratio: 2.018867924528302
+  - figure: '3'
+    file_id: fig03
+    dataset_key: electron_density_profile::ne(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 1.5e+16
+    edge_value: 0.0
+    edge_to_center_ratio: 0.0
+    center_to_edge_ratio: null
+  - figure: '4'
+    file_id: fig04
+    dataset_key: atomic_oxygen_density_profile::O(3P)(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 9.5e+21
+    edge_value: 1.94e+22
+    edge_to_center_ratio: 2.0421052631578944
+    center_to_edge_ratio: 0.48969072164948463
+  - figure: '1'
+    file_id: fig01
+    dataset_key: gas_temperature_profile::Tg(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 712.0
+    edge_value: 360.0
+    edge_to_center_ratio: 0.5056179775280899
+    center_to_edge_ratio: 1.9777777777777779
+  - figure: '2'
+    file_id: fig02
+    dataset_key: reduced_electric_field_profile::E_over_N(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 51.0
+    edge_value: 26.8
+    edge_to_center_ratio: 0.5254901960784314
+    center_to_edge_ratio: 1.9029850746268657
+  - figure: '3'
+    file_id: fig03
+    dataset_key: electron_density_profile::ne(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 1.74e+16
+    edge_value: 0.0
+    edge_to_center_ratio: 0.0
+    center_to_edge_ratio: null
+  - figure: '4'
+    file_id: fig04
+    dataset_key: atomic_oxygen_density_profile::O(3P)(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 9.3e+21
+    edge_value: 1.05e+22
+    edge_to_center_ratio: 1.129032258064516
+    center_to_edge_ratio: 0.8857142857142858
+  - figure: 7b
+    file_id: fig07b
+    dataset_key: electron_density_profile::e(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 6600000000000000.0
+    edge_value: 6600000000000000.0
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: 7b
+    file_id: fig07b
+    dataset_key: electron_density_profile::e(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 1.76e+16
+    edge_value: 200000000000000.0
+    edge_to_center_ratio: 0.011363636363636364
+    center_to_edge_ratio: 88.0
+  - figure: 7b
+    file_id: fig07b
+    dataset_key: negative_ion_density_profile::O_minus(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 6600000000000000.0
+    edge_value: 6600000000000000.0
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: 7b
+    file_id: fig07b
+    dataset_key: negative_ion_density_profile::O_minus(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 2.2e+16
+    edge_value: 100000000000000.0
+    edge_to_center_ratio: 0.004545454545454545
+    center_to_edge_ratio: 220.0
+  - figure: 7b
+    file_id: fig07b
+    dataset_key: positive_ion_density_profile::O2_plus(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 1.34e+16
+    edge_value: 1.34e+16
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: 7b
+    file_id: fig07b
+    dataset_key: positive_ion_density_profile::O2_plus(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 4.1e+16
+    edge_value: 200000000000000.0
+    edge_to_center_ratio: 0.004878048780487805
+    center_to_edge_ratio: 205.0
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O2(X)(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 1.35e+23
+    edge_value: 1.35e+23
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O2(X)(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 1.15e+23
+    edge_value: 2.15e+23
+    edge_to_center_ratio: 1.8695652173913042
+    center_to_edge_ratio: 0.5348837209302326
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O(3P)(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 9.2e+21
+    edge_value: 9.2e+21
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O(3P)(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 8.6e+21
+    edge_value: 1.02e+22
+    edge_to_center_ratio: 1.186046511627907
+    center_to_edge_ratio: 0.8431372549019608
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O2(a)(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 1.5e+22
+    edge_value: 1.5e+22
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O2(a)(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 8.8e+21
+    edge_value: 1.38e+22
+    edge_to_center_ratio: 1.5681818181818181
+    center_to_edge_ratio: 0.6376811594202898
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O3(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 8.2e+18
+    edge_value: 8.2e+18
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O3(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: increasing
+    observed_trend: increasing
+    passed: true
+    center_value: 3.0e+18
+    edge_value: 1.4e+20
+    edge_to_center_ratio: 46.666666666666664
+    center_to_edge_ratio: 0.02142857142857143
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O2(b)(r)
+    series_id: 0D_LoKI
+    pressure_Torr: 10.0
+    expected_trend: flat
+    observed_trend: flat
+    passed: true
+    center_value: 2.35e+20
+    edge_value: 2.35e+20
+    edge_to_center_ratio: 1.0
+    center_to_edge_ratio: 1.0
+  - figure: '10'
+    file_id: fig10
+    dataset_key: ozone_reactant_profile::O2(b)(r)
+    series_id: 1D_fluid
+    pressure_Torr: 10.0
+    expected_trend: decreasing
+    observed_trend: decreasing
+    passed: true
+    center_value: 2.3e+20
+    edge_value: 6.0e+18
+    edge_to_center_ratio: 0.02608695652173913
+    center_to_edge_ratio: 38.333333333333336
+  key_findings:
+  - 'Figures 1 to 4 preserve the expected radial directionality: Tg, E/N, and ne decrease
+    toward the wall, while O(3P) increases.'
+  - 'At 10 Torr the charged-species profile diagnostic stays strongly center-peaked
+    in 1D: O2+ edge-to-center ratio is about 0.0049.'
+  - 'At 10 Torr the chemistry split from figure 10 is preserved: O3 is wall-peaked
+    with edge-to-center ratio about 46.7, while O2(b) stays center-peaked with edge-to-center
+    ratio about 0.0261.'
+figure11_reference:
+  avg_gas_temperature_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 1.0
+    - 2.0
+    - 4.0
+    - 7.5
+    - 10.0
+    values_percent:
+    - 3.5
+    - 3.2
+    - 3.8
+    - 2.8
+    - 0.9
+    - 0.8
+    max_percent: 3.8
+    min_percent: 0.8
+  near_wall_temperature_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 1.0
+    - 2.0
+    - 4.0
+    - 7.5
+    - 10.0
+    values_percent:
+    - 1.5
+    - 1.2
+    - 1.1
+    - 1.3
+    - 2.5
+    - 2.8
+    max_percent: 2.8
+    min_percent: 1.1
+  electron_temperature_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 1.0
+    - 2.0
+    - 4.0
+    - 7.5
+    - 10.0
+    values_percent:
+    - 1.0
+    - 0.8
+    - 0.4
+    - 0.4
+    - 2.0
+    - 2.1
+    max_percent: 2.1
+    min_percent: 0.4
+  avg_reduced_electric_field_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 1.0
+    - 2.0
+    - 4.0
+    - 7.5
+    - 10.0
+    values_percent:
+    - 4.1
+    - 3.6
+    - 2.5
+    - 4.0
+    - 1.0
+    - 1.2
+    max_percent: 4.1
+    min_percent: 1.0
+  avg_charged_species_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 1.0
+    - 2.0
+    - 4.0
+    - 7.5
+    - 10.0
+    values_percent:
+    - 11.0
+    - 18.0
+    - 24.0
+    - 36.0
+    - 46.0
+    - 53.0
+    max_percent: 53.0
+    min_percent: 11.0
+  avg_neutral_species_relative_difference:
+    pressures_Torr:
+    - 0.5
+    - 1.0
+    - 2.0
+    - 4.0
+    - 7.5
+    - 10.0
+    values_percent:
+    - 11.0
+    - 17.0
+    - 24.0
+    - 35.0
+    - 50.0
+    - 56.0
+    max_percent: 56.0
+    min_percent: 11.0
+evaluation:
+  execution_mode: digitized_reference_consistency_check
+  assessment: LoKI reference data are digitized through the full diagnostic benchmark,
+    including radial-profile checks from figures 1, 2, 3, 4, 7b, and 10.
+  key_findings:
+  - Directly reconstructible main discharge parameters from figures 5a and 5b stay
+    within the paper-level 5 percent envelope.
+  - Figure 11 envelope data are digitized as an external acceptance reference on their
+    observed six-pressure subset.
+  - Charged-species proxy from e, O-, and O2+ remains well below the figure 11 aggregate
+    charged envelope, which is consistent with the paper-level aggregate covering
+    a broader charged set.
+  - Electron-temperature relative difference remains reference-only because Te pressure-sweep
+    curves are not part of the digitized pressure-sweep set.
+  - The extended neutral subset now follows the same rising pressure trend as figure
+    11 and stays below the aggregate neutral envelope at all overlapping pressures.
+  - 'O3 remains the dominant high-pressure outlier: the digitized 1D-versus-0D difference
+    reaches about a factor 3.4 at 10 Torr.'
+  - O2(X) stays close between 0D and 1D, while O2(a), O2(b), and O3 account for most
+    of the growing high-pressure neutral-species spread.
+  - 'Figures 1 to 4 preserve the expected radial directionality: Tg, E/N, and ne decrease
+    toward the wall, while O(3P) increases.'
+  - 'At 10 Torr the charged-species profile diagnostic stays strongly center-peaked
+    in 1D: O2+ edge-to-center ratio is about 0.0049.'
+  - 'At 10 Torr the chemistry split from figure 10 is preserved: O3 is wall-peaked
+    with edge-to-center ratio about 46.7, while O2(b) stays center-peaked with edge-to-center
+    ratio about 0.0261.'
+  comparison_rows:
+  - pressure_Torr: 1.0
+    metric_id: profile::gas_temperature_profile::Tg(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=1; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.7674418604651163
+  - pressure_Torr: 1.0
+    metric_id: profile::reduced_electric_field_profile::E_over_N(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=2; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.7615384615384615
+  - pressure_Torr: 1.0
+    metric_id: profile::electron_density_profile::ne(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=3; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.0
+  - pressure_Torr: 1.0
+    metric_id: profile::atomic_oxygen_density_profile::O(3P)(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=4; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=1.3107692307692307
+  - pressure_Torr: 1.0
+    metric_id: profile::gas_temperature_profile::Tg(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=1; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.8197530864197531
+  - pressure_Torr: 1.0
+    metric_id: profile::reduced_electric_field_profile::E_over_N(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=2; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.823076923076923
+  - pressure_Torr: 1.0
+    metric_id: profile::electron_density_profile::ne(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=3; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.0
+  - pressure_Torr: 1.0
+    metric_id: profile::atomic_oxygen_density_profile::O(3P)(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=4; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=1.190677966101695
+  - pressure_Torr: 10.0
+    metric_id: profile::gas_temperature_profile::Tg(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=1; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.4896551724137931
+  - pressure_Torr: 10.0
+    metric_id: profile::reduced_electric_field_profile::E_over_N(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=2; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.4953271028037383
+  - pressure_Torr: 10.0
+    metric_id: profile::electron_density_profile::ne(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=3; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.0
+  - pressure_Torr: 10.0
+    metric_id: profile::atomic_oxygen_density_profile::O(3P)(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=4; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=2.0421052631578944
+  - pressure_Torr: 10.0
+    metric_id: profile::gas_temperature_profile::Tg(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=1; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.5056179775280899
+  - pressure_Torr: 10.0
+    metric_id: profile::reduced_electric_field_profile::E_over_N(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=2; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.5254901960784314
+  - pressure_Torr: 10.0
+    metric_id: profile::electron_density_profile::ne(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=3; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.0
+  - pressure_Torr: 10.0
+    metric_id: profile::atomic_oxygen_density_profile::O(3P)(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=4; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=1.129032258064516
+  - pressure_Torr: 10.0
+    metric_id: profile::electron_density_profile::e(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=7b; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::electron_density_profile::e(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=7b; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.011363636363636364
+  - pressure_Torr: 10.0
+    metric_id: profile::negative_ion_density_profile::O_minus(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=7b; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::negative_ion_density_profile::O_minus(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=7b; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.004545454545454545
+  - pressure_Torr: 10.0
+    metric_id: profile::positive_ion_density_profile::O2_plus(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=7b; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::positive_ion_density_profile::O2_plus(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=7b; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.004878048780487805
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O2(X)(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O2(X)(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=1.8695652173913042
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O(3P)(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O(3P)(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=1.186046511627907
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O2(a)(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O2(a)(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=1.5681818181818181
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O3(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O3(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=increasing; observed_trend=increasing; edge_to_center_ratio=46.666666666666664
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O2(b)(r)::0D_LoKI
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=flat; observed_trend=flat; edge_to_center_ratio=1.0
+  - pressure_Torr: 10.0
+    metric_id: profile::ozone_reactant_profile::O2(b)(r)::1D_fluid
+    comparison_scope: diagnostic_profile_shape
+    computed_from_primary_percent: ''
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: figure=10; expected_trend=decreasing; observed_trend=decreasing; edge_to_center_ratio=0.02608695652173913
+  - pressure_Torr: 0.5
+    metric_id: avg_gas_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 2.486188
+    figure11_reference_percent: 3.5
+    difference_percent_points: -1.013812
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 1.0
+    metric_id: avg_gas_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 3.684211
+    figure11_reference_percent: 3.2
+    difference_percent_points: 0.484211
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 2.0
+    metric_id: avg_gas_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 4.390244
+    figure11_reference_percent: 3.8
+    difference_percent_points: 0.590244
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 4.0
+    metric_id: avg_gas_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 2.202643
+    figure11_reference_percent: 2.8
+    difference_percent_points: -0.597357
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 7.5
+    metric_id: avg_gas_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 0.788955
+    figure11_reference_percent: 0.9
+    difference_percent_points: -0.111045
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 10.0
+    metric_id: avg_gas_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 0.555556
+    figure11_reference_percent: 0.8
+    difference_percent_points: -0.244444
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 0.5
+    metric_id: near_wall_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 0.30581
+    figure11_reference_percent: 1.5
+    difference_percent_points: -1.19419
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 1.0
+    metric_id: near_wall_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 0.0
+    figure11_reference_percent: 1.2
+    difference_percent_points: -1.2
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 2.0
+    metric_id: near_wall_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 0.3003
+    figure11_reference_percent: 1.1
+    difference_percent_points: -0.7997
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 4.0
+    metric_id: near_wall_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 2.071006
+    figure11_reference_percent: 1.3
+    difference_percent_points: 0.771006
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 7.5
+    metric_id: near_wall_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 3.188406
+    figure11_reference_percent: 2.5
+    difference_percent_points: 0.688406
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 10.0
+    metric_id: near_wall_temperature_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 3.142857
+    figure11_reference_percent: 2.8
+    difference_percent_points: 0.342857
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 0.5
+    metric_id: avg_reduced_electric_field_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 4.316547
+    figure11_reference_percent: 4.1
+    difference_percent_points: 0.216547
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 1.0
+    metric_id: avg_reduced_electric_field_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 3.146853
+    figure11_reference_percent: 3.6
+    difference_percent_points: -0.453147
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 2.0
+    metric_id: avg_reduced_electric_field_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 2.42915
+    figure11_reference_percent: 2.5
+    difference_percent_points: -0.07085
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 4.0
+    metric_id: avg_reduced_electric_field_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 3.636364
+    figure11_reference_percent: 4.0
+    difference_percent_points: -0.363636
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 7.5
+    metric_id: avg_reduced_electric_field_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 0.246305
+    figure11_reference_percent: 1.0
+    difference_percent_points: -0.753695
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 10.0
+    metric_id: avg_reduced_electric_field_relative_difference
+    comparison_scope: direct_overlap_metric
+    computed_from_primary_percent: 1.518987
+    figure11_reference_percent: 1.2
+    difference_percent_points: 0.318987
+    note: Directly reconstructible from first-wave primary pressure-sweep datasets.
+  - pressure_Torr: 0.5
+    metric_id: avg_charged_species_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 5.340637
+    figure11_reference_percent: 11.0
+    difference_percent_points: -5.659363
+    note: First-wave charged proxy from e, O-, and O2+ only.
+  - pressure_Torr: 1.0
+    metric_id: avg_charged_species_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 0.0
+    figure11_reference_percent: 18.0
+    difference_percent_points: -18.0
+    note: First-wave charged proxy from e, O-, and O2+ only.
+  - pressure_Torr: 2.0
+    metric_id: avg_charged_species_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 10.667084
+    figure11_reference_percent: 24.0
+    difference_percent_points: -13.332916
+    note: First-wave charged proxy from e, O-, and O2+ only.
+  - pressure_Torr: 4.0
+    metric_id: avg_charged_species_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 8.266441
+    figure11_reference_percent: 36.0
+    difference_percent_points: -27.733559
+    note: First-wave charged proxy from e, O-, and O2+ only.
+  - pressure_Torr: 7.5
+    metric_id: avg_charged_species_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 10.895208
+    figure11_reference_percent: 46.0
+    difference_percent_points: -35.104792
+    note: First-wave charged proxy from e, O-, and O2+ only.
+  - pressure_Torr: 10.0
+    metric_id: avg_charged_species_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 12.966858
+    figure11_reference_percent: 53.0
+    difference_percent_points: -40.033142
+    note: First-wave charged proxy from e, O-, and O2+ only.
+  - pressure_Torr: 0.5
+    metric_id: avg_neutral_species_first_wave_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 2.930885
+    figure11_reference_percent: 11.0
+    difference_percent_points: -8.069115
+    note: First-wave neutral proxy from O/ng and O2/ng only.
+  - pressure_Torr: 1.0
+    metric_id: avg_neutral_species_first_wave_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 1.549149
+    figure11_reference_percent: 17.0
+    difference_percent_points: -15.450851
+    note: First-wave neutral proxy from O/ng and O2/ng only.
+  - pressure_Torr: 2.0
+    metric_id: avg_neutral_species_first_wave_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 2.624688
+    figure11_reference_percent: 24.0
+    difference_percent_points: -21.375312
+    note: First-wave neutral proxy from O/ng and O2/ng only.
+  - pressure_Torr: 4.0
+    metric_id: avg_neutral_species_first_wave_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 10.006241
+    figure11_reference_percent: 35.0
+    difference_percent_points: -24.993759
+    note: First-wave neutral proxy from O/ng and O2/ng only.
+  - pressure_Torr: 7.5
+    metric_id: avg_neutral_species_first_wave_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 12.477425
+    figure11_reference_percent: 50.0
+    difference_percent_points: -37.522575
+    note: First-wave neutral proxy from O/ng and O2/ng only.
+  - pressure_Torr: 10.0
+    metric_id: avg_neutral_species_first_wave_subset_proxy
+    comparison_scope: subset_proxy_vs_aggregate_reference
+    computed_from_primary_percent: 15.19182
+    figure11_reference_percent: 56.0
+    difference_percent_points: -40.80818
+    note: First-wave neutral proxy from O/ng and O2/ng only.
+  - pressure_Torr: 0.5
+    metric_id: avg_neutral_species_extended_subset_proxy
+    comparison_scope: extended_subset_vs_aggregate_reference
+    computed_from_primary_percent: 9.208714
+    figure11_reference_percent: 11.0
+    difference_percent_points: -1.791286
+    note: Extended neutral proxy includes O/ng, O2/ng, O(3P), O(1D), O(1S), O2(X),
+      O2(a), O2(b), O2(Hz), and O3.
+  - pressure_Torr: 1.0
+    metric_id: avg_neutral_species_extended_subset_proxy
+    comparison_scope: extended_subset_vs_aggregate_reference
+    computed_from_primary_percent: 10.417585
+    figure11_reference_percent: 17.0
+    difference_percent_points: -6.582415
+    note: Extended neutral proxy includes O/ng, O2/ng, O(3P), O(1D), O(1S), O2(X),
+      O2(a), O2(b), O2(Hz), and O3.
+  - pressure_Torr: 2.0
+    metric_id: avg_neutral_species_extended_subset_proxy
+    comparison_scope: extended_subset_vs_aggregate_reference
+    computed_from_primary_percent: 17.939512
+    figure11_reference_percent: 24.0
+    difference_percent_points: -6.060488
+    note: Extended neutral proxy includes O/ng, O2/ng, O(3P), O(1D), O(1S), O2(X),
+      O2(a), O2(b), O2(Hz), and O3.
+  - pressure_Torr: 4.0
+    metric_id: avg_neutral_species_extended_subset_proxy
+    comparison_scope: extended_subset_vs_aggregate_reference
+    computed_from_primary_percent: 24.527817
+    figure11_reference_percent: 35.0
+    difference_percent_points: -10.472183
+    note: Extended neutral proxy includes O/ng, O2/ng, O(3P), O(1D), O(1S), O2(X),
+      O2(a), O2(b), O2(Hz), and O3.
+  - pressure_Torr: 7.5
+    metric_id: avg_neutral_species_extended_subset_proxy
+    comparison_scope: extended_subset_vs_aggregate_reference
+    computed_from_primary_percent: 34.741609
+    figure11_reference_percent: 50.0
+    difference_percent_points: -15.258391
+    note: Extended neutral proxy includes O/ng, O2/ng, O(3P), O(1D), O(1S), O2(X),
+      O2(a), O2(b), O2(Hz), and O3.
+  - pressure_Torr: 10.0
+    metric_id: avg_neutral_species_extended_subset_proxy
+    comparison_scope: extended_subset_vs_aggregate_reference
+    computed_from_primary_percent: 40.517365
+    figure11_reference_percent: 56.0
+    difference_percent_points: -15.482635
+    note: Extended neutral proxy includes O/ng, O2/ng, O(3P), O(1D), O(1S), O2(X),
+      O2(a), O2(b), O2(Hz), and O3.
+  - pressure_Torr: 0.5
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 8.333333
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 6.25
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 7.894737
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 4.545455
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 4.255319
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 1.960784
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 5.714286
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.259259
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 11.818182
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 13.513514
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O(3P)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 16.071429
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.5
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 20.689655
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 18.518519
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 20.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 19.047619
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 22.222222
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 22.222222
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 23.478261
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 17.894737
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 17.241379
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 17.647059
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O(1D)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 16.25
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.5
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 14.285714
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 14.0625
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 14.035088
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 11.111111
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 15.789474
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 10.714286
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 8.333333
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 10.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 8.108108
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 8.571429
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O(1S)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.375
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.5
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 6.25
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.090909
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.375
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 6.25
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 5.882353
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 4.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 2.941176
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 5.263158
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 2.608696
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 8.333333
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O2(X)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 3.333333
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.5
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 10.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 6.666667
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.090909
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.090909
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 16.666667
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 27.536232
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 21.686747
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 27.272727
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 27.868852
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 29.6875
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O2(a)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 28.571429
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.5
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 0.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.090909
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 12.5
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 16.666667
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 18.75
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 25.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 22.727273
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 33.333333
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 37.5
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 39.583333
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O2(b)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 41.304348
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.5
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 10.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 9.090909
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 10.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 25.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 16.666667
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 18.181818
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 15.384615
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 12.5
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 14.285714
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 16.666667
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O2(Hz)
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 18.421053
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.5
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 16.666667
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 0.75
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 13.333333
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.0
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 18.181818
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 1.5
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 75.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 2.0
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 73.913043
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 3.0
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 103.125
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 4.0
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 125.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 6.0
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 172.727273
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 7.5
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 203.030303
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 8.0
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 200.0
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.
+  - pressure_Torr: 10.0
+    metric_id: species::O3
+    comparison_scope: extended_species_direct_difference
+    computed_from_primary_percent: 241.463415
+    figure11_reference_percent: ''
+    difference_percent_points: ''
+    note: Direct 0D versus 1D relative difference for a digitized secondary neutral
+      or excited species.

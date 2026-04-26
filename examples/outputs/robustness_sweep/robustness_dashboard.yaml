@@ -1,0 +1,23 @@
+tool: robustness_dashboard
+generated_at_utc: '2026-04-25T11:24:02.002434+00:00'
+rerun_cases: false
+outputs:
+  dashboard_yaml: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\robustness_dashboard.yaml
+  robustness_report_yaml: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\robustness_report.yaml
+  robustness_summary_csv: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\robustness_summary.csv
+  overview_png: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\robustness_stress_overview.png
+  rate_table_coverage_png: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\robustness_rate_table_coverage.png
+  markdown_report_md: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\robustness_sweep\robustness_applicability_report.md
+headline:
+  all_cases_passed: true
+  external_reference_count: 2
+  stress_case_count: 8
+  failed_cases: []
+assessment:
+  summary:
+  - The added benchmark content broadens the evidence from strict external parity
+    toward practical applicability across pressure, electrical, and chemistry perturbations.
+  - These added cases remain stress/applicability checks unless an authoritative external
+    or experimental reference is attached.
+  - The ZDPlaskin-derived stress family now demonstrates that the widened diagnostic
+    E/N table covers the executed pressure/voltage perturbations.

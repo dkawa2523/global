@@ -1,0 +1,150 @@
+case:
+  name: zdp_pressure_200torr
+  description: 'Local executable parity case using the species set, nominal pressure,
+    nominal geometry, DC source/resistor drive, and output-derived E/N-rate table
+    from ZDPlaskin example2. The numerical method remains local to this code; the
+    benchmark setup is intentionally isolated from production Ar cases.
+
+    '
+  tags:
+  - argon
+  - zdplaskin
+  - example2
+  - benchmark
+  - executable_comparison
+  - robustness_sweep
+  schema_version: 2
+  kind: plasma_global_case
+files:
+  chamber: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/outputs/robustness_sweep/_generated_configs/chamber_zdp_pressure_200torr.yaml
+  recipe: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/configs/recipe_zdplaskin_example2.yaml
+  chemistry:
+    manifest: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/chemistry_zdplaskin_example2/chemistry_manifest.yaml
+    directory: null
+    species: null
+    gas_reactions: null
+    surface_reactions: null
+    reaction_models: null
+    aliases: null
+    cross_sections_manifest: null
+  output_dir: C:/Users/user/Desktop/Global_model/plasma_review_updated/examples/outputs/robustness_sweep/zdp_pressure_200torr
+  external_inputs:
+    comsol_anchor_yaml: ../external/comsol_anchor.yaml
+    power_waveform_h5: null
+    geometry_override_yaml: null
+runtime:
+  export_effective_config: true
+  export_resolved_paths: true
+physics:
+  mode: transient
+  gas_model: multi_zone_global
+  eedf_backend: rate_table
+  electrical_backend: dc_series_circuit
+  integrator: scipy_bdf
+  enable_gas_temperature: false
+  enable_surface_coverages: false
+  enable_wall_inventory: false
+  enable_ied_proxy: false
+  enable_dae_fallback: false
+  quasi_neutrality: algebraic
+  electron_density_closure: quasi_neutral
+  gas_heating_fraction: 0.15
+  wall_relaxation_s_inv: 500.0
+numerics:
+  rtol: 3.0e-06
+  atol: 1.0e-14
+  first_step: 1.0e-12
+  max_step: 1.0e-06
+  jacobian: analytic_sparse
+  jacobian_rebuild_policy: every_step
+  positivity:
+    clip_negative: true
+    floor_density_m3: 1.0
+    floor_energy_J_m3: 1.0e-12
+  events:
+    recipe_boundaries: true
+    periodic_orbit_detection: false
+outputs:
+  formats:
+    solution_h5: true
+    observables_csv: true
+    summary_yaml: true
+    checkpoint_npz: false
+  plots:
+    enabled: false
+    format:
+    - png
+    dpi: 150
+    items:
+    - electron_density_vs_time
+    - mean_energy_vs_time
+    - self_bias_vs_time
+  save:
+    dense_solution: false
+    step_history: true
+  diagnostics:
+    reaction_budget:
+      enabled: true
+      filename: reaction_budget.yaml
+      species:
+      - Ar_star
+      - Ar_plus
+      - Ar2_plus
+      max_reactions_per_species: 6
+    electron_energy_budget:
+      enabled: true
+      filename: electron_energy_budget.yaml
+      max_reactions: 8
+    surface_reaction_budget:
+      enabled: true
+      filename: surface_reaction_budget.yaml
+      max_reactions_per_species: 6
+    state_manifest:
+      enabled: true
+      filename: state_manifest.yaml
+    provenance:
+      enabled: true
+      filename: run_provenance.yaml
+logging:
+  level: INFO
+  write_log_file: true
+  log_filename: run.log
+swarm:
+  model_name: table
+  closure: local_field
+  mixture_key_species:
+  - Ar
+  - CF4
+  - O2
+  cache:
+    max_entries: 8
+    fraction_decimals: 3
+  boltzmann_2term:
+    energy_grid:
+      min_eV: 0.001
+      max_eV: 160.0
+      n: 360
+    reduced_field_grid_Td:
+      min: 0.2
+      max: 2500.0
+      n: 48
+    max_shape_iterations: 48
+    max_field_iterations: 42
+  table:
+    file: tables/zdplaskin_example2_wide_eovern_rates.h5
+    lookup: local_field
+    electron_energy_mode: table_relaxation
+    energy_relaxation_time_s: 1.0e-06
+imports:
+  geometry_overrides:
+    enabled: false
+    file: null
+  external_power_map:
+    enabled: false
+    file: null
+  external_rate_tables:
+    enabled: false
+    directory: ../chemistry/tables
+  external_anchor_yaml:
+    enabled: true
+    file: ../external/comsol_anchor.yaml
