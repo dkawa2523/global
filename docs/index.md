@@ -1,5 +1,7 @@
 # Documentation index
 
+Japanese edition: `ja/index.md`
+
 - `ARCHITECTURE.md` - package ownership and coupling boundaries
 - `CONFIG_GUIDE.md` - case YAML workflow and include/override usage
 - `CHEMISTRY_INPUT_SPEC.md` - chemistry file bundle and validation

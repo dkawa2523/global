@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+site/
+site_ja/
+mkdocs-serve*.log
+mkdocs-ja-serve*.log
 
 .venv/
 venv/
