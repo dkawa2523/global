@@ -225,6 +225,37 @@ class SurfaceCore:
             return 0.0
         return ((e - threshold) / max(ref - threshold, 1.0e-6)) ** exponent
 
+    def _bohm_proxy_ion_flux_m2_s(self, zone_id: str, coupled: CoupledPlasmaEvaluation) -> float:
+        ne_zone = coupled.ne_by_zone[zone_id]
+        mean_e_zone = coupled.mean_e_by_zone[zone_id]
+        ion_mass_zone = coupled.ion_mass_by_zone[zone_id]
+        return float(
+            0.61
+            * ne_zone
+            * np.sqrt(max(mean_e_zone, 0.05) * E_CHARGE / max(ion_mass_zone, 1.0e-30))
+        )
+
+    def surface_ion_flux_m2_s(
+        self,
+        surface_id: str,
+        zone_id: str,
+        gas_row: np.ndarray,
+        coupled: CoupledPlasmaEvaluation,
+    ) -> float:
+        ied = ((coupled.power.metadata or {}).get('surface_ied', {}) or {}).get(surface_id, {})
+        if isinstance(ied, dict) and ied.get('ion_flux_m2_s') is not None:
+            return max(float(ied['ion_flux_m2_s']), 0.0)
+
+        wall_loss = self.system.gas_core.ion_wall_loss_diagnostics(
+            zone_id,
+            gas_row,
+            coupled.mean_e_by_zone[zone_id],
+        )
+        wall_flux = float(wall_loss.get('flux_m2_s', 0.0) or 0.0)
+        if wall_flux > 0.0:
+            return wall_flux
+        return max(self._bohm_proxy_ion_flux_m2_s(zone_id, coupled), 0.0)
+
     def surface_rate(self, rxn: CompiledSurfaceReaction, gas_row: np.ndarray, Tg: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation) -> SurfaceRateEvaluation:
         sys = self.system
         model = rxn.rate_model
@@ -232,11 +263,8 @@ class SurfaceCore:
         Ts = self.surface_temperature(rxn.surface_id, step)
         area_surface_ied = (coupled.power.metadata or {}).get('surface_ied', {}).get(rxn.surface_id, {})
         ion_energy_eV = float(area_surface_ied.get('mean_ion_energy_eV', max(coupled.power.plasma_potential_V - coupled.power.self_bias_V, 0.0)))
-        ne_zone = coupled.ne_by_zone[rxn.zone_id]
         pos_zone = coupled.pos_by_zone[rxn.zone_id]
-        mean_e_zone = coupled.mean_e_by_zone[rxn.zone_id]
-        ion_mass_zone = coupled.ion_mass_by_zone[rxn.zone_id]
-        ion_flux_total = float(area_surface_ied.get('ion_flux_m2_s', 0.61 * ne_zone * np.sqrt(max(mean_e_zone, 0.05) * E_CHARGE / max(ion_mass_zone, 1.0e-30))))
+        ion_flux_total = self.surface_ion_flux_m2_s(rxn.surface_id, rxn.zone_id, gas_row, coupled)
         rate = 1.0
         dlog_gas: dict[int, float] = {}
         dlog_surface: dict[int, float] = {}

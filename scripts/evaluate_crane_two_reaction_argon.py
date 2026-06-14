@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.external_benchmarks.crane_two_reaction_argon import build_report, main
+from tools.external_benchmarks.crane_two_reaction_argon import main
 
 
 if __name__ == '__main__':

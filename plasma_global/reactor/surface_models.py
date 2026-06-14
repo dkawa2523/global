@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from typing import Any
 
 K_B = 1.380649e-23
+E_CHARGE = 1.602176634e-19
+BOHM_FLUX_COEFF = 0.61
 
 BOHM_ION_LOSS_MODES = {
     'active',
@@ -18,6 +20,15 @@ BOHM_ION_LOSS_MODES = {
     'yes',
     '1',
 }
+PRESCRIBED_ION_LOSS_MODES = {
+    'prescribed_loss_frequency',
+    'prescribed_frequency',
+    'loss_frequency',
+    'global_loss_frequency',
+    'fixed_loss_frequency',
+    'ion_loss_frequency',
+    'effective_loss_frequency',
+}
 AMBIPOLAR_ION_LOSS_MODES = {
     'ambipolar',
     'ambipolar_diffusion',
@@ -25,7 +36,8 @@ AMBIPOLAR_ION_LOSS_MODES = {
     'diffusion',
     'diffusion_loss',
 }
-ION_LOSS_ACTIVE_MODES = BOHM_ION_LOSS_MODES | AMBIPOLAR_ION_LOSS_MODES
+EFFECTIVE_FREQUENCY_ION_LOSS_FAMILIES = {'prescribed_loss_frequency', 'ambipolar_diffusion'}
+ION_LOSS_ACTIVE_MODES = BOHM_ION_LOSS_MODES | PRESCRIBED_ION_LOSS_MODES | AMBIPOLAR_ION_LOSS_MODES
 ION_LOSS_DISABLED_MODES = {'disabled', 'false', 'no', 'none', 'off', '0'}
 ION_LOSS_KNOWN_MODES = ION_LOSS_ACTIVE_MODES | ION_LOSS_DISABLED_MODES
 ION_LOSS_CONSUMED_MODEL_KEYS = {
@@ -38,6 +50,10 @@ ION_LOSS_CONSUMED_MODEL_KEYS = {
     'max_h_factor',
     'ambipolar_loss_rate_s',
     'loss_rate_s',
+    'ion_loss_frequency_s',
+    'loss_frequency_s',
+    'prescribed_loss_frequency_s',
+    'global_loss_frequency_s',
     'ambipolar_diffusion_coefficient_m2_s',
     'diffusion_coefficient_m2_s',
     'diffusion_length_m',
@@ -58,6 +74,8 @@ def ion_loss_family(models: Mapping[str, Any]) -> str:
     mode = configured_ion_loss_mode(models)
     if mode in ION_LOSS_DISABLED_MODES:
         return 'disabled'
+    if mode in PRESCRIBED_ION_LOSS_MODES:
+        return 'prescribed_loss_frequency'
     if mode in AMBIPOLAR_ION_LOSS_MODES:
         return 'ambipolar_diffusion'
     return 'bohm'
@@ -65,6 +83,10 @@ def ion_loss_family(models: Mapping[str, Any]) -> str:
 
 def ion_loss_enabled(models: Mapping[str, Any]) -> bool:
     return ion_loss_family(models) != 'disabled'
+
+
+def ion_loss_uses_effective_frequency(family: str) -> bool:
+    return normalized_model_value(family) in EFFECTIVE_FREQUENCY_ION_LOSS_FAMILIES
 
 
 def _model_float(models: Mapping[str, Any], keys: tuple[str, ...], default: float | None = None) -> float | None:
@@ -99,14 +121,46 @@ def bohm_h_factor(
     return _clamp(float(value), min_h, max_h)
 
 
-def ambipolar_loss_rate_s(models: Mapping[str, Any], *, volume_m3: float, area_m2: float) -> float:
-    explicit = _model_float(models, ('ambipolar_loss_rate_s', 'loss_rate_s'))
+def effective_ion_loss_frequency_s(models: Mapping[str, Any], *, volume_m3: float, area_m2: float) -> float:
+    explicit = _model_float(
+        models,
+        (
+            'ambipolar_loss_rate_s',
+            'loss_rate_s',
+            'ion_loss_frequency_s',
+            'loss_frequency_s',
+            'prescribed_loss_frequency_s',
+            'global_loss_frequency_s',
+        ),
+    )
     if explicit is not None:
         return max(explicit, 0.0)
     D = _model_float(models, ('ambipolar_diffusion_coefficient_m2_s', 'diffusion_coefficient_m2_s'))
     if D is None:
-        raise ValueError('ambipolar_diffusion ion_loss requires ambipolar_loss_rate_s or diffusion_coefficient_m2_s')
+        raise ValueError(
+            'effective-frequency ion_loss requires loss_rate_s, ion_loss_frequency_s, '
+            'ambipolar_loss_rate_s, or diffusion_coefficient_m2_s'
+        )
     diffusion_length = _model_float(models, ('diffusion_length_m',))
     if diffusion_length is None:
         diffusion_length = volume_m3 / max(area_m2, 1.0e-30)
     return max(D, 0.0) / max(diffusion_length, 1.0e-30) ** 2
+
+
+def ambipolar_loss_rate_s(models: Mapping[str, Any], *, volume_m3: float, area_m2: float) -> float:
+    return effective_ion_loss_frequency_s(models, volume_m3=volume_m3, area_m2=area_m2)
+
+
+def bohm_ion_loss_frequency_s(
+    *,
+    area_m2: float,
+    volume_m3: float,
+    h_factor: float,
+    mean_energy_eV: float,
+    ion_mass_kg: float,
+) -> float:
+    if area_m2 <= 0.0 or volume_m3 <= 0.0 or h_factor <= 0.0:
+        return 0.0
+    mass = max(float(ion_mass_kg), 1.0e-30)
+    sound_speed = (max(float(mean_energy_eV), 0.05) * E_CHARGE / mass) ** 0.5
+    return max(float(area_m2), 0.0) / max(float(volume_m3), 1.0e-30) * max(float(h_factor), 0.0) * BOHM_FLUX_COEFF * sound_speed

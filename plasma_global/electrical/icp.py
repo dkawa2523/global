@@ -23,7 +23,6 @@ class ICPBackend(CCPBackend):
     def _source_port_result(self, request: PowerRequest, port_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
         port = self.chamber.power_port_by_id[port_id]
         zone_id = cfg.get('zone_id') or port.zone_id
-        zone = self.chamber.zone_by_id[zone_id]
         ne, te, _ion_mass, _pos, pressure, _gas_temperature, _ion_species = self._zone_meta(request, zone_id)
         f_Hz = float(cfg.get('frequency_Hz') or port.parameters.get('frequency_Hz') or 13.56e6)
         p_in = float(cfg.get('value_W', cfg.get('value', 0.0))) * self._waveform_multiplier(request.time_s, cfg)

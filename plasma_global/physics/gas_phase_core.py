@@ -7,9 +7,9 @@ import numpy as np
 
 from plasma_global.chemistry.models import E_CHARGE, K_B
 from plasma_global.physics.types import CompiledGasReaction, CoupledPlasmaEvaluation
+from plasma_global.reactor.surface_models import bohm_ion_loss_frequency_s, ion_loss_uses_effective_frequency
 
 SCCM_TO_PARTICLES_PER_S = 4.477962e17
-BOHM_FLUX_COEFF = 0.61
 EV_TO_K = E_CHARGE / K_B
 
 
@@ -232,6 +232,49 @@ class GasPhaseCore:
         sys = self.system
         return max(float(We_J_m3), sys.floor_energy) / max(ne_m3, sys.floor_density) / E_CHARGE
 
+    def ion_wall_loss_frequency_s(self, zone_id: str, ion_local_idx: int, mean_energy_eV: float) -> float:
+        sys = self.system
+        family = sys.zone_ion_loss_family.get(zone_id, 'disabled')
+        if family == 'bohm':
+            zone = sys.chamber.zone_by_id[zone_id]
+            return bohm_ion_loss_frequency_s(
+                area_m2=sys.zone_ion_loss_area.get(zone_id, 0.0),
+                volume_m3=zone.volume_m3,
+                h_factor=sys.zone_ion_loss_h_factor.get(zone_id, 0.0),
+                mean_energy_eV=mean_energy_eV,
+                ion_mass_kg=sys.gas_masses[ion_local_idx],
+            )
+        if ion_loss_uses_effective_frequency(family):
+            return max(float(sys.zone_effective_ion_loss_frequency_s.get(zone_id, 0.0)), 0.0)
+        return 0.0
+
+    def ion_wall_loss_diagnostics(self, zone_id: str, gas_row: np.ndarray, mean_energy_eV: float) -> dict[str, float]:
+        sys = self.system
+        family = sys.zone_ion_loss_family.get(zone_id, 'disabled')
+        total_ion_density = 0.0
+        total_loss_source = 0.0
+        representative_frequency = 0.0
+        for idx in sys.positive_ion_local_indices:
+            frequency = self.ion_wall_loss_frequency_s(zone_id, idx, mean_energy_eV)
+            representative_frequency = max(representative_frequency, frequency)
+            n_i = max(float(gas_row[idx]), 0.0)
+            total_ion_density += n_i
+            total_loss_source += frequency * n_i
+        if total_ion_density > 0.0:
+            effective_frequency = total_loss_source / total_ion_density
+        elif ion_loss_uses_effective_frequency(family):
+            effective_frequency = max(float(sys.zone_effective_ion_loss_frequency_s.get(zone_id, 0.0)), 0.0)
+        else:
+            effective_frequency = representative_frequency
+        volume = sys.chamber.zone_by_id[zone_id].volume_m3
+        area = sys.zone_ion_loss_area.get(zone_id, 0.0)
+        flux = total_loss_source * volume / max(area, 1.0e-30) if area > 0.0 else 0.0
+        return {
+            'frequency_s': max(float(effective_frequency), 0.0),
+            'source_m3_s': max(float(total_loss_source), 0.0),
+            'flux_m2_s': max(float(flux), 0.0),
+        }
+
     def zone_state_meta(self, gas: np.ndarray, We: np.ndarray) -> tuple[dict[str, float], dict[str, float], dict[str, float], dict[str, float]]:
         sys = self.system
         ne_by_zone: dict[str, float] = {}
@@ -322,27 +365,14 @@ class GasPhaseCore:
                 continue
             z = sys.zone_index[zone_id]
             mean_e = coupled.mean_e_by_zone[zone_id]
-            volume = sys.chamber.zone_by_id[zone_id].volume_m3
-            if family == 'bohm':
-                area = sys.zone_ion_loss_area.get(zone_id, 0.0)
-                h_factor = sys.zone_ion_loss_h_factor.get(zone_id, 1.0)
-                pref_common = area / max(volume, 1.0e-30) * h_factor * BOHM_FLUX_COEFF
-            elif family == 'ambipolar_diffusion':
-                pref_common = sys.zone_ambipolar_loss_rate_s.get(zone_id, 0.0)
-            else:
-                continue
-            if pref_common <= 0.0:
-                continue
             for idx in sys.positive_ion_local_indices:
                 n_i = max(float(gas[z, idx]), 0.0)
                 if n_i <= 0.0:
                     continue
-                if family == 'bohm':
-                    mass = max(float(sys.gas_masses[idx]), 1.0e-30)
-                    sound_speed = np.sqrt(max(mean_e, 0.05) * E_CHARGE / mass)
-                    loss = pref_common * n_i * sound_speed
-                else:
-                    loss = pref_common * n_i
+                frequency = self.ion_wall_loss_frequency_s(zone_id, idx, mean_e)
+                if frequency <= 0.0:
+                    continue
+                loss = frequency * n_i
                 charge = max(float(sys.gas_charges[idx]), 1.0)
                 gas_rhs[z, idx] -= loss
                 We_rhs[z] -= charge * mean_e * E_CHARGE * loss
@@ -354,17 +384,6 @@ class GasPhaseCore:
             if family == 'disabled':
                 continue
             z = sys.zone_index[zone_id]
-            volume = sys.chamber.zone_by_id[zone_id].volume_m3
-            if family == 'bohm':
-                area = sys.zone_ion_loss_area.get(zone_id, 0.0)
-                h_factor = sys.zone_ion_loss_h_factor.get(zone_id, 1.0)
-                pref_common = area / max(volume, 1.0e-30) * h_factor * BOHM_FLUX_COEFF
-            elif family == 'ambipolar_diffusion':
-                pref_common = sys.zone_ambipolar_loss_rate_s.get(zone_id, 0.0)
-            else:
-                continue
-            if pref_common <= 0.0:
-                continue
             ne = coupled.ne_by_zone[zone_id]
             mean_e = coupled.mean_e_by_zone[zone_id]
             active_ne = self.electron_density_deriv_active(gas[z])
@@ -373,12 +392,9 @@ class GasPhaseCore:
                 n_i_raw = float(gas[z, ion_idx])
                 if n_i_raw <= 0.0:
                     continue
-                if family == 'bohm':
-                    mass = max(float(sys.gas_masses[ion_idx]), 1.0e-30)
-                    sound_speed = np.sqrt(max(mean_e, 0.05) * E_CHARGE / mass)
-                    pref = pref_common * sound_speed
-                else:
-                    pref = pref_common
+                pref = self.ion_wall_loss_frequency_s(zone_id, ion_idx, mean_e)
+                if pref <= 0.0:
+                    continue
                 loss = pref * n_i_raw
                 charge = max(float(sys.gas_charges[ion_idx]), 1.0)
                 row = self.gas_state_idx(z, ion_idx)
@@ -402,7 +418,7 @@ class GasPhaseCore:
                     dloss_dWe = loss * 0.5 * dmean_dWe / max(mean_e, 1.0e-30)
                     J[row, We_idx] += -dloss_dWe
                     J[We_idx, We_idx] += -charge * E_CHARGE * (dmean_dWe * loss + mean_e * dloss_dWe)
-                elif family == 'ambipolar_diffusion':
+                elif ion_loss_uses_effective_frequency(family):
                     dmean_dWe = 1.0 / max(ne, sys.floor_density) / E_CHARGE
                     J[We_idx, We_idx] += -charge * E_CHARGE * dmean_dWe * loss
 
@@ -506,7 +522,6 @@ class GasPhaseCore:
     def apply_jacobian(self, time_s: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation, J) -> None:
         sys = self.system
         gas = coupled.gas
-        We = coupled.electron_energy
         Tg = coupled.gas_temperature
 
         for rxn in self.gas_reactions:

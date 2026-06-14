@@ -9,6 +9,7 @@ import yaml
 from plasma_global.chemistry.cross_sections import load_cross_sections_manifest
 from plasma_global.chemistry.models import MechanismBundle, Reaction, Species
 from plasma_global.chemistry.parser import parse_csv_bool, parse_equation, parse_pipe_list, parse_semicolon_map
+from plasma_global.chemistry.provenance import PROVENANCE_FIELDS, provenance_from_mapping
 
 
 def _load_species(path: Path) -> list[Species]:
@@ -37,6 +38,7 @@ def _load_reactions(path: Path) -> list[Reaction]:
     with path.open('r', encoding='utf-8', newline='') as fh:
         for row in csv.DictReader(fh):
             reactants, products = parse_equation(row['equation'])
+            provenance = _reaction_row_provenance(row)
             rxns.append(
                 Reaction(
                     reaction_id=row['reaction_id'].strip(),
@@ -50,9 +52,34 @@ def _load_reactions(path: Path) -> list[Reaction]:
                     surface_filter=parse_pipe_list(row.get('surface_filter', '')),
                     enabled=parse_csv_bool(row.get('enabled', True)),
                     notes=row.get('notes', '').strip(),
+                    provenance=provenance,
                 )
             )
     return rxns
+
+
+def _parse_provenance_cell(value: str | None) -> dict[str, Any]:
+    if value is None or not str(value).strip():
+        return {}
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        return {'_invalid_provenance': value}
+    if isinstance(parsed, dict):
+        return parsed
+    return {'_invalid_provenance': value}
+
+
+def _reaction_row_provenance(row: dict[str, Any]) -> dict[str, Any]:
+    raw: dict[str, Any] = {}
+    raw.update(_parse_provenance_cell(row.get('provenance')))
+    for key in PROVENANCE_FIELDS:
+        if key == 'notes':
+            continue
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            raw[key] = value.strip() if isinstance(value, str) else value
+    return provenance_from_mapping(raw)
 
 
 def _load_yaml(path: Path) -> dict:

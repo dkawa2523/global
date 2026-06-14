@@ -18,11 +18,12 @@ from plasma_global.physics.prescribed_electrons import build_prescribed_electron
 from plasma_global.reactor.surface_models import (
     ION_LOSS_CONSUMED_MODEL_KEYS,
     ION_LOSS_KNOWN_MODES,
-    ambipolar_loss_rate_s,
     bohm_h_factor,
     configured_ion_loss_mode,
+    effective_ion_loss_frequency_s,
     ion_loss_enabled,
     ion_loss_family,
+    ion_loss_uses_effective_frequency,
 )
 
 
@@ -50,7 +51,7 @@ def _surface_model_warnings(chamber_path: Path) -> list[ConfigMessage]:
         raw = yaml.safe_load(fh) or {}
     messages: list[ConfigMessage] = []
     families_by_zone: dict[str, set[str]] = {}
-    ambipolar_count_by_zone: dict[str, int] = {}
+    effective_frequency_count_by_zone: dict[str, int] = {}
     zones = {str(z.get('zone_id')): z for z in raw.get('zones', []) or []}
     for surface in raw.get('surfaces', []) or []:
         models = surface.get('models', {}) or {}
@@ -82,21 +83,22 @@ def _surface_model_warnings(chamber_path: Path) -> list[ConfigMessage]:
                 zone_id = str(surface.get('zone_id', ''))
                 family = ion_loss_family(models)
                 families_by_zone.setdefault(zone_id, set()).add(family)
-                if family == 'ambipolar_diffusion':
-                    ambipolar_count_by_zone[zone_id] = ambipolar_count_by_zone.get(zone_id, 0) + 1
+                if ion_loss_uses_effective_frequency(family):
+                    effective_frequency_count_by_zone[zone_id] = effective_frequency_count_by_zone.get(zone_id, 0) + 1
                     try:
                         zone = zones.get(zone_id, {})
-                        ambipolar_loss_rate_s(
+                        effective_ion_loss_frequency_s(
                             models,
                             volume_m3=float(zone.get('volume_m3', 0.0) or 0.0),
                             area_m2=float(surface.get('area_m2', 0.0) or 0.0),
                         )
                     except Exception as exc:
+                        code = 'AMBIPOLAR_LOSS_CONFIG_INVALID' if family == 'ambipolar_diffusion' else 'ION_LOSS_FREQUENCY_CONFIG_INVALID'
                         messages.append(
                             ConfigMessage(
                                 'ERROR',
-                                'AMBIPOLAR_LOSS_CONFIG_INVALID',
-                                f'ambipolar diffusion ion loss for {surface_id} needs ambipolar_loss_rate_s or diffusion_coefficient_m2_s: {exc}',
+                                code,
+                                f'effective-frequency ion loss for {surface_id} needs loss_rate_s, ion_loss_frequency_s, ambipolar_loss_rate_s, or diffusion_coefficient_m2_s: {exc}',
                                 surface_id,
                             )
                         )
@@ -122,21 +124,21 @@ def _surface_model_warnings(chamber_path: Path) -> list[ConfigMessage]:
                             )
                         )
     for zone_id, families in families_by_zone.items():
-        if 'bohm' in families and 'ambipolar_diffusion' in families:
+        if len(families) > 1:
             messages.append(
                 ConfigMessage(
                     'ERROR',
                     'ION_LOSS_MODE_MIXED_IN_ZONE',
-                    f'Zone {zone_id} mixes Bohm-like and ambipolar-diffusion ion wall-loss modes; choose one family to avoid double counting.',
+                    f'Zone {zone_id} mixes ion wall-loss mode families {sorted(families)}; choose one family to avoid double counting.',
                     zone_id,
                 )
             )
-        if ambipolar_count_by_zone.get(zone_id, 0) > 1:
+        if effective_frequency_count_by_zone.get(zone_id, 0) > 1:
             messages.append(
                 ConfigMessage(
                     'WARNING',
-                    'AMBIPOLAR_LOSS_MULTIPLE_SURFACES',
-                    f'Zone {zone_id} has multiple ambipolar diffusion surfaces; the solver uses an area-weighted rate, not an additive sum.',
+                    'ION_LOSS_FREQUENCY_MULTIPLE_SURFACES',
+                    f'Zone {zone_id} has multiple effective-frequency ion wall-loss surfaces; the solver uses an area-weighted rate, not an additive sum.',
                     zone_id,
                 )
             )

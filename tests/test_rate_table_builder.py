@@ -11,6 +11,17 @@ from scripts.build_rate_table_h5 import build_rate_table_h5
 h5py = pytest.importorskip('h5py')
 
 
+def _write_minimal_rate_table(path, rate_ids=('xs_ion',), n=2) -> None:
+    with h5py.File(path, 'w') as h5:
+        h5.create_dataset('mean_energy_eV', data=[1.0, 2.0][:n])
+        h5.create_dataset('effective_field_Td', data=[10.0, 20.0][:n])
+        h5.create_dataset('mobility_m2_V_s', data=[0.1, 0.2][:n])
+        h5.create_dataset('diffusion_m2_s', data=[0.2, 0.4][:n])
+        group = h5.create_group('rate_coefficients')
+        for rate_id in rate_ids:
+            group.create_dataset(rate_id, data=[1.0e-16, 2.0e-16][:n])
+
+
 def test_build_rate_table_h5_from_csv(tmp_path) -> None:
     table_dir = tmp_path / 'table'
     table_dir.mkdir()
@@ -96,3 +107,35 @@ def test_field_rate_table_builder_keeps_sorted_field_axis_consistent(tmp_path) -
         assert list(h5['effective_field_Td'][:]) == [10.0, 20.0]
         assert list(h5['mean_energy_eV'][:]) == [1.0, 2.0]
         assert list(h5['rate_coefficients']['xs_ion'][:]) == [1.0e-16, 3.0e-16]
+
+
+def test_rate_table_fails_fast_when_required_cross_section_rate_is_missing(tmp_path) -> None:
+    table_path = tmp_path / 'missing_required.h5'
+    _write_minimal_rate_table(table_path, rate_ids=('xs_other',))
+    model = TabulatedSwarmModel()
+    mechanism = SimpleNamespace(
+        gas_reactions=[SimpleNamespace(enabled=True, rate_model_key='rm_ion')],
+        rate_models={'rm_ion': {'backend': 'electron_impact_xsec', 'cross_section_id': 'xs_ion'}},
+    )
+    swarm = SimpleNamespace(closure='mean_energy', table=SimpleNamespace(file=str(table_path)))
+    run_config = SimpleNamespace(paths=SimpleNamespace(chemistry_dir=str(tmp_path)))
+
+    with pytest.raises(ValueError, match='missing rate_coefficients.*xs_ion'):
+        model.prepare(mechanism=mechanism, chamber=SimpleNamespace(), run_config=run_config, swarm_config=swarm)
+
+
+def test_rate_table_rejects_invalid_dataset_shape(tmp_path) -> None:
+    table_path = tmp_path / 'bad_shape.h5'
+    with h5py.File(table_path, 'w') as h5:
+        h5.create_dataset('mean_energy_eV', data=[1.0, 2.0])
+        h5.create_dataset('effective_field_Td', data=[10.0, 20.0])
+        h5.create_dataset('mobility_m2_V_s', data=[0.1])
+        h5.create_dataset('diffusion_m2_s', data=[0.2, 0.4])
+        group = h5.create_group('rate_coefficients')
+        group.create_dataset('xs_ion', data=[1.0e-16, 2.0e-16])
+    model = TabulatedSwarmModel()
+    swarm = SimpleNamespace(closure='mean_energy', table=SimpleNamespace(file=str(table_path)))
+    run_config = SimpleNamespace(paths=SimpleNamespace(chemistry_dir=str(tmp_path)))
+
+    with pytest.raises(ValueError, match='mobility_m2_V_s.*does not match'):
+        model.prepare(mechanism=SimpleNamespace(rate_models={}, gas_reactions=[]), chamber=SimpleNamespace(), run_config=run_config, swarm_config=swarm)

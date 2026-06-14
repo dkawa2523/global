@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from plasma_global.chemistry.models import E_CHARGE
 from plasma_global.electrical.base import PowerRequest, PowerResult
 from plasma_global.electrical.direct_power import DirectPowerBackend
 from plasma_global.electrical.sheath import build_species_resolved_ied, debye_length_m

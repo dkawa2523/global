@@ -39,6 +39,17 @@ PORT_SUMMARY_SUFFIXES = (
     'plasma_resistance_Ohm',
 )
 
+DIAGNOSTIC_SUMMARY_KEYS = (
+    'projection_density_clip_count',
+    'projection_electron_energy_clip_count',
+    'projection_max_abs_delta',
+    'nonfinite_state_count',
+    'final_rhs_norm_inf',
+    'final_relative_rhs_norm_s_inv',
+    'solver_event_count',
+    'steady_state_event_count',
+)
+
 
 def _safe_float(value):
     try:
@@ -101,6 +112,25 @@ def summarize_solution(solution) -> dict:
         'njev': solution.diagnostics.get('njev'),
         'nlu': solution.diagnostics.get('nlu'),
     }
+    for key in DIAGNOSTIC_SUMMARY_KEYS:
+        value = solution.diagnostics.get(key)
+        if value is None:
+            out[key] = None
+        elif isinstance(value, bool):
+            out[key] = bool(value)
+        elif isinstance(value, int):
+            out[key] = int(value)
+        else:
+            out[key] = float(value)
+    event_counts = solution.diagnostics.get('event_counts') or {}
+    if event_counts:
+        out['event_counts'] = {str(k): int(v) for k, v in event_counts.items()}
+    chemistry_provenance = solution.diagnostics.get('chemistry_provenance')
+    if chemistry_provenance:
+        out['chemistry_provenance'] = chemistry_provenance
+    electrical_coupling = solution.diagnostics.get('electrical_coupling')
+    if electrical_coupling:
+        out['electrical_coupling'] = electrical_coupling
     if obs:
         final = obs[-1]
         for key in _summary_keys(obs):

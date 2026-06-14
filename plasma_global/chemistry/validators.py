@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from plasma_global.chemistry.models import MechanismBundle
+from plasma_global.chemistry.provenance import RANGE_PROVENANCE_FIELDS, provenance_from_mapping
 
 
 @dataclass
@@ -29,6 +31,37 @@ def _normalized_side(side: dict[str, float]) -> tuple[tuple[str, float], ...]:
     return tuple(sorted((sp, float(nu)) for sp, nu in side.items() if abs(float(nu)) > 0.0))
 
 
+def _validate_provenance(report: ValidationReport, raw: Any, entity_kind: str, entity_id: str) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        report.add(
+            'WARNING',
+            'PROVENANCE_FORMAT_INVALID',
+            f'{entity_kind} {entity_id} provenance should be a mapping',
+            entity_id,
+        )
+        return {}
+    provenance = provenance_from_mapping(raw)
+    if '_invalid_provenance' in provenance:
+        report.add(
+            'WARNING',
+            'PROVENANCE_FORMAT_INVALID',
+            f'{entity_kind} {entity_id} provenance should be a mapping',
+            entity_id,
+        )
+    for field_name in RANGE_PROVENANCE_FIELDS:
+        value = provenance.get(field_name)
+        if isinstance(value, (list, tuple)) and len(value) != 2:
+            report.add(
+                'WARNING',
+                'PROVENANCE_RANGE_INVALID',
+                f'{entity_kind} {entity_id} {field_name} should have two entries when given as a list',
+                entity_id,
+            )
+    return provenance
+
+
 def validate_mechanism(mechanism: MechanismBundle) -> ValidationReport:
     report = ValidationReport()
 
@@ -49,6 +82,7 @@ def validate_mechanism(mechanism: MechanismBundle) -> ValidationReport:
             report.add('WARNING', 'GAS_SPECIES_SITE_ELEMENT', f'Gas species {species.canonical_id} includes site stoichiometry; check if this is intentional', species.canonical_id)
 
     for cs_id, cs in mechanism.cross_sections.items():
+        _validate_provenance(report, getattr(cs, 'metadata', {}) or {}, 'Cross section', cs_id)
         if not cs.has_tabulated_data():
             report.add('ERROR', 'CROSS_SECTION_NO_DATA', f'Cross section {cs_id} has no tabulated data', cs_id)
             continue
@@ -87,6 +121,7 @@ def validate_mechanism(mechanism: MechanismBundle) -> ValidationReport:
             report.add('ERROR', 'UNKNOWN_RATE_MODEL', f'Unknown rate model {rxn.rate_model_key}', rxn.reaction_id)
         if rxn.energy_model_key and rxn.energy_model_key not in mechanism.rate_models:
             report.add('ERROR', 'UNKNOWN_ENERGY_MODEL', f'Unknown energy model {rxn.energy_model_key}', rxn.reaction_id)
+        rxn_provenance = _validate_provenance(report, getattr(rxn, 'provenance', {}) or {}, 'Reaction', rxn.reaction_id)
 
         if rxn.phase == 'surface' and not rxn.surface_filter:
             report.add('ERROR', 'SURFACE_REACTION_NO_SURFACE_FILTER', f'Surface reaction {rxn.reaction_id} has no surface_filter', rxn.reaction_id)
@@ -95,11 +130,33 @@ def validate_mechanism(mechanism: MechanismBundle) -> ValidationReport:
 
         if rxn.rate_model_key in mechanism.rate_models:
             model = mechanism.rate_models[rxn.rate_model_key]
+            model_provenance = _validate_provenance(
+                report,
+                model.get('provenance') if 'provenance' in model else model,
+                'Rate model',
+                rxn.rate_model_key,
+            )
             backend = str(model.get('backend', '')).lower()
             if backend == 'electron_impact_xsec':
                 cs_id = model.get('cross_section_id')
                 if cs_id not in mechanism.cross_sections:
                     report.add('ERROR', 'UNKNOWN_CROSS_SECTION', f'Unknown cross section {cs_id}', rxn.reaction_id)
+                declared_cs = rxn_provenance.get('cross_section_id')
+                if declared_cs and cs_id and str(declared_cs) != str(cs_id):
+                    report.add(
+                        'WARNING',
+                        'PROVENANCE_CROSS_SECTION_MISMATCH',
+                        f'Reaction {rxn.reaction_id} provenance cross_section_id {declared_cs} differs from rate model {cs_id}',
+                        rxn.reaction_id,
+                    )
+                declared_model_cs = model_provenance.get('cross_section_id')
+                if declared_model_cs and cs_id and str(declared_model_cs) != str(cs_id):
+                    report.add(
+                        'WARNING',
+                        'PROVENANCE_CROSS_SECTION_MISMATCH',
+                        f'Rate model {rxn.rate_model_key} provenance cross_section_id {declared_model_cs} differs from model {cs_id}',
+                        rxn.rate_model_key,
+                    )
             if backend == 'first_order_loss':
                 rate = model.get('rate_s_inv', model.get('value'))
                 try:

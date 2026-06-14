@@ -54,10 +54,9 @@ class Boltzmann2TermSwarmModel(SwarmModel):
 
     The present solver uses a steady 1D energy-space recurrence with actual
     momentum-transfer and inelastic cross sections, and it closes the field
-    dependence through an electron power-balance root solve. This is not yet a
-    full BOLSIG+-equivalent treatment of all integral collision operators, but
-    it is substantially more physical than the earlier surrogate-only version
-    and is designed to be replaced by other swarm solvers behind the same API.
+    dependence through an electron power-balance root solve. It is an internal
+    approximate closure for compact studies and backend-contract testing, not
+    a replacement for mature external swarm solvers.
     """
 
     def prepare(self, mechanism: Any, chamber: Any, run_config: Any, swarm_config: Any | None = None) -> None:

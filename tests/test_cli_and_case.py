@@ -44,6 +44,14 @@ def test_cli_validate_returns_success() -> None:
     assert main(['validate', str(SMOKE_CASE)]) == 0
 
 
+def test_cli_check_jacobian_reports_grouped_diagnostics(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(['check-jacobian', str(SMOKE_CASE), '--top', '2']) == 0
+    out = capsys.readouterr().out
+    assert 'max_relative_error:' in out
+    assert 'group_max_relative_error:' in out
+    assert 'gas_densities:' in out
+
+
 def test_legacy_run_yaml_shape_is_rejected(tmp_path: Path) -> None:
     legacy = tmp_path / 'run.yaml'
     legacy.write_text(

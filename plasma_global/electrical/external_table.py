@@ -28,17 +28,56 @@ class CircuitTable:
         return set(self.columns)
 
 
+@dataclass(frozen=True)
+class CircuitTableColumns:
+    power: str | None
+    voltage: str | None
+    current: str | None
+    reduced_field: str | None
+
+    @property
+    def power_source(self) -> str:
+        return 'column' if self.power else 'voltage_current_product'
+
+
+def _available_columns(table: CircuitTable) -> str:
+    return ', '.join(['time_s', *sorted(table.columns)]) or '<none>'
+
+
 def _first_existing(names: tuple[str, ...], table: CircuitTable, cfg: dict[str, Any], cfg_key: str) -> str | None:
     configured = cfg.get(cfg_key)
     if configured:
         name = str(configured)
         if name not in table.columns:
-            raise ValueError(f'Column {name!r} configured by {cfg_key} is not present in {table.path}')
+            raise ValueError(
+                f'Column {name!r} configured by {cfg_key} is not present in {table.path}. '
+                f'Available columns: {_available_columns(table)}'
+            )
         return name
     for name in names:
         if name in table.columns:
             return name
     return None
+
+
+def resolve_circuit_table_columns(table: CircuitTable, cfg: dict[str, Any]) -> CircuitTableColumns:
+    columns = CircuitTableColumns(
+        power=_first_existing(POWER_COLUMNS, table, cfg, 'power_column'),
+        voltage=_first_existing(VOLTAGE_COLUMNS, table, cfg, 'voltage_column'),
+        current=_first_existing(CURRENT_COLUMNS, table, cfg, 'current_column'),
+        reduced_field=_first_existing(REDUCED_FIELD_COLUMNS, table, cfg, 'reduced_field_column'),
+    )
+    if columns.power is None and (columns.voltage is None or columns.current is None):
+        raise ValueError(
+            'External circuit table needs either a power column '
+            f'{POWER_COLUMNS} or both voltage and current columns '
+            f'{VOLTAGE_COLUMNS} and {CURRENT_COLUMNS}. '
+            f'Available columns: {_available_columns(table)}'
+        )
+    for name in (columns.power, columns.voltage, columns.current, columns.reduced_field):
+        if name is not None and not np.all(np.isfinite(table.columns[name])):
+            raise ValueError(f'External circuit table column {name!r} in {table.path} contains missing or non-finite values.')
+    return columns
 
 
 def resolve_circuit_table_path(run_config: Any, cfg: dict[str, Any]) -> Path:
@@ -101,18 +140,7 @@ def read_circuit_table(path: str | Path) -> CircuitTable:
 
 
 def validate_circuit_table_columns(table: CircuitTable, cfg: dict[str, Any]) -> None:
-    power_col = _first_existing(POWER_COLUMNS, table, cfg, 'power_column')
-    voltage_col = _first_existing(VOLTAGE_COLUMNS, table, cfg, 'voltage_column')
-    current_col = _first_existing(CURRENT_COLUMNS, table, cfg, 'current_column')
-    field_col = _first_existing(REDUCED_FIELD_COLUMNS, table, cfg, 'reduced_field_column')
-    if power_col is None and (voltage_col is None or current_col is None):
-        raise ValueError(
-            'External circuit table needs either a power column '
-            '(absorbed_power_W/power_W/plasma_power_W) or both voltage and current columns.'
-        )
-    for name in (power_col, voltage_col, current_col, field_col):
-        if name is not None and not np.all(np.isfinite(table.columns[name])):
-            raise ValueError(f'External circuit table column {name!r} contains missing or non-finite values.')
+    resolve_circuit_table_columns(table, cfg)
 
 
 class ExternalCircuitTableBackend(ElectricalBackend):
@@ -144,6 +172,7 @@ class ExternalCircuitTableBackend(ElectricalBackend):
         p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         p_port: dict[str, float] = {}
         port_details: dict[str, dict[str, float | str]] = {}
+        table_sources: dict[str, dict[str, Any]] = {}
         zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         plasma_potential = 0.0
 
@@ -153,17 +182,12 @@ class ExternalCircuitTableBackend(ElectricalBackend):
             cfg.update(step_cfg or {})
             zone_id = str(cfg.get('zone_id') or port.zone_id)
             table = self._table_for(cfg)
-            validate_circuit_table_columns(table, cfg)
+            columns = resolve_circuit_table_columns(table, cfg)
 
-            power_col = _first_existing(POWER_COLUMNS, table, cfg, 'power_column')
-            voltage_col = _first_existing(VOLTAGE_COLUMNS, table, cfg, 'voltage_column')
-            current_col = _first_existing(CURRENT_COLUMNS, table, cfg, 'current_column')
-            field_col = _first_existing(REDUCED_FIELD_COLUMNS, table, cfg, 'reduced_field_column')
-
-            voltage = self._value(table, voltage_col, request.time_s, cfg) if voltage_col else 0.0
-            current = self._value(table, current_col, request.time_s, cfg) if current_col else 0.0
-            if power_col:
-                absorbed = self._value(table, power_col, request.time_s, cfg)
+            voltage = self._value(table, columns.voltage, request.time_s, cfg) if columns.voltage else 0.0
+            current = self._value(table, columns.current, request.time_s, cfg) if columns.current else 0.0
+            if columns.power:
+                absorbed = self._value(table, columns.power, request.time_s, cfg)
             else:
                 absorbed = voltage * current
 
@@ -173,11 +197,25 @@ class ExternalCircuitTableBackend(ElectricalBackend):
             absorbed = max(absorbed, 0.0)
 
             reduced_field = 0.0
-            if field_col:
-                reduced_field = max(self._value(table, field_col, request.time_s, cfg), 0.0)
-            elif 'gap_m' in cfg and 'total_density_m3' in cfg and voltage_col:
-                electric_field = abs(voltage) / max(float(cfg['gap_m']), 1.0e-30)
-                reduced_field = electric_field / max(float(cfg['total_density_m3']), 1.0e-30) / 1.0e-21
+            reduced_field_source = 'none'
+            if columns.reduced_field:
+                reduced_field = max(self._value(table, columns.reduced_field, request.time_s, cfg), 0.0)
+                reduced_field_source = 'column'
+            elif 'gap_m' in cfg and columns.voltage:
+                total_density = None
+                if 'total_density_m3' in cfg:
+                    total_density = float(cfg['total_density_m3'])
+                    reduced_field_source = 'voltage_gap_config_density'
+                else:
+                    zone_density = (request.metadata or {}).get('zone_total_density_m3', {})
+                    if zone_id in zone_density:
+                        total_density = float(zone_density[zone_id])
+                        reduced_field_source = 'voltage_gap_runtime_density'
+                if total_density is not None:
+                    electric_field = abs(voltage) / max(float(cfg['gap_m']), 1.0e-30)
+                    reduced_field = electric_field / max(total_density, 1.0e-30) / 1.0e-21
+                else:
+                    reduced_field_source = 'none'
 
             p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
             p_port[port_id] = absorbed
@@ -191,6 +229,20 @@ class ExternalCircuitTableBackend(ElectricalBackend):
                 'voltage_V': voltage,
                 'current_A': current,
                 'reduced_field_Td': reduced_field,
+            }
+            table_sources[port_id] = {
+                'file': str(table.path),
+                'time_start_s': float(table.time_s[0]),
+                'time_end_s': float(table.time_s[-1]),
+                'n_rows': int(table.time_s.size),
+                'power_column': columns.power,
+                'voltage_column': columns.voltage,
+                'current_column': columns.current,
+                'reduced_field_column': columns.reduced_field,
+                'reduced_field_source': reduced_field_source,
+                'power_source': columns.power_source,
+                'interpolation': str(cfg.get('interpolation', 'linear')).lower(),
+                'hold': str(cfg.get('hold', 'edge')).lower(),
             }
 
         return PowerResult(
@@ -207,6 +259,7 @@ class ExternalCircuitTableBackend(ElectricalBackend):
                     'model': 'external_circuit_table',
                     'version': 1,
                     'external_circuit_ready': True,
+                    'table_sources': table_sources,
                 },
             },
         )

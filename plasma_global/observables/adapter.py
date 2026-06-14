@@ -98,6 +98,10 @@ class ObservablesAdapter:
                 rec[f'ion_loss_h_factor_{zone_id}'] = float(sys.zone_ion_loss_h_factor.get(zone_id, 0.0))
                 rec[f'ion_loss_characteristic_length_{zone_id}_m'] = float(sys.zone_ion_loss_characteristic_length_m.get(zone_id, 0.0))
                 rec[f'ambipolar_loss_rate_{zone_id}_s'] = float(sys.zone_ambipolar_loss_rate_s.get(zone_id, 0.0))
+                wall_loss = sys.gas_core.ion_wall_loss_diagnostics(zone_id, gas_row, coupled.mean_e_by_zone[zone_id])
+                rec[f'ion_wall_loss_frequency_{zone_id}_s'] = float(wall_loss['frequency_s'])
+                rec[f'ion_wall_loss_source_{zone_id}_m3_s'] = float(wall_loss['source_m3_s'])
+                rec[f'ion_wall_flux_{zone_id}_m2_s'] = float(wall_loss['flux_m2_s'])
 
             for surface_id in sys.surface_ids:
                 surface = sys.chamber.surface_by_id[surface_id]
@@ -117,6 +121,10 @@ class ObservablesAdapter:
                         rec[f'mean_ion_energy_{surface_id}_{ion_id}_eV'] = float(payload.get('mean_ion_energy_eV', 0.0))
                         rec[f'ied_width_{surface_id}_{ion_id}_eV'] = float(payload.get('width_eV', 0.0))
                         rec[f'charge_fraction_{surface_id}_{ion_id}'] = float(payload.get('charge_fraction', 0.0))
+                else:
+                    rec[f'ion_flux_{surface_id}_m2_s'] = float(
+                        sys.surface_core.surface_ion_flux_m2_s(surface_id, surface.zone_id, gas_row, coupled)
+                    )
                 site_metrics = sys.surface_core.surface_site_metrics(surface_id, state)
                 rec[f'site_fill_{surface_id}'] = float(site_metrics['total_fraction'])
                 rec[f'occupied_site_fraction_{surface_id}'] = float(site_metrics['occupied_fraction'])

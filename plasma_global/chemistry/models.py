@@ -42,6 +42,7 @@ class Reaction:
     surface_filter: list[str]
     enabled: bool
     notes: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

@@ -118,6 +118,15 @@ def main(argv: list[str] | None = None) -> int:
                 f'{item.relative_error:.6g} row={item.row_label} col={item.column_label} '
                 f'fd={item.finite_difference:.6g} jac={item.jacobian_value:.6g}'
             )
+        if result.group_summaries:
+            print('group_max_relative_error:')
+            for item in result.group_summaries[:max(int(args.top), 0)]:
+                print(
+                    f'  {item.group}: {item.max_relative_error:.6g} '
+                    f'row={item.row_label} col={item.column_label} col_group={item.column_group} '
+                    f'fd={item.finite_difference:.6g} jac={item.jacobian_value:.6g} '
+                    f'checked={item.checked_entry_count}'
+                )
         if args.fail_threshold is not None and result.max_relative_error > args.fail_threshold:
             return 2
         return 0

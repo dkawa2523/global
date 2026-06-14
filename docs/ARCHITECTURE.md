@@ -23,6 +23,21 @@ The supported Python entry points are:
 
 The supported CLI commands are documented in [CLI and API](CLI_API.md).
 
+## Core Contracts
+
+The core plasma system consumes stable internal objects: mechanism data,
+reactor/recipe configuration, EEDF results, electrical coupling results,
+numerical options, and observables. It should not know whether rate
+coefficients came from `maxwell`, `boltzmann_2term`, `rate_table`, BOLSIG+,
+LoKI-B, Magboltz, or another offline source. It should also not know whether
+electrical waveforms came from measurements, a simple reduced backend, or a
+SPICE-generated table.
+
+External solver integration belongs in offline tools, adapters, or backend
+file readers. Avoid direct calls to external executables from the ODE RHS,
+Jacobian, or core workflow. See the [Extension Guide](EXTENSION_GUIDE.md) for
+the project boundary policy.
+
 ## Extension Points
 
 Backends are selected by registry name:
@@ -32,4 +47,3 @@ Backends are selected by registry name:
 - integrator backend
 
 Each backend should keep its request/result interface small and avoid reading files directly unless the backend owns that file format.
-

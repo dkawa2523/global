@@ -23,8 +23,8 @@ class TabulatedSwarmModel(SwarmModel):
     `effective_field_Td`. Field-gridded tables should be used with
     `swarm.closure: local_field`.
 
-    If no table is supplied, this backend falls back to the analytic Maxwell
-    closure so that the interface remains usable during development.
+    If no table is supplied, this backend fails fast. Use the explicit
+    `maxwell` backend for cheap smoke or development runs.
     """
 
     def prepare(self, mechanism, chamber, run_config, swarm_config=None) -> None:
@@ -46,6 +46,7 @@ class TabulatedSwarmModel(SwarmModel):
         if not self.table_path.exists():
             raise FileNotFoundError(f'Rate table file not found: {self.table_path}')
         self._load_table(self.table_path)
+        self._validate_required_rate_coefficients(mechanism)
 
     def _load_table(self, path: Path) -> None:
         try:
@@ -54,12 +55,63 @@ class TabulatedSwarmModel(SwarmModel):
             raise RuntimeError('The rate_table EEDF backend requires the optional h5py dependency. Install plasma-global-model[io].') from exc
 
         with h5py.File(path, 'r') as h5:
-            self.mean_energy = np.asarray(h5['mean_energy_eV'][:], dtype=float)
-            self.mobility = np.asarray(h5['mobility_m2_V_s'][:], dtype=float)
-            self.diffusion = np.asarray(h5['diffusion_m2_s'][:], dtype=float)
-            self.eff_field = np.asarray(h5['effective_field_Td'][:], dtype=float)
-            self.k_tables = {name: np.asarray(ds[:], dtype=float) for name, ds in h5['rate_coefficients'].items()}
+            self.mean_energy = self._read_1d_dataset(h5, 'mean_energy_eV')
+            self.mobility = self._read_1d_dataset(h5, 'mobility_m2_V_s')
+            self.diffusion = self._read_1d_dataset(h5, 'diffusion_m2_s')
+            self.eff_field = self._read_1d_dataset(h5, 'effective_field_Td')
+            n_grid = self.mean_energy.size
+            for name, arr in {
+                'mobility_m2_V_s': self.mobility,
+                'diffusion_m2_s': self.diffusion,
+                'effective_field_Td': self.eff_field,
+            }.items():
+                if arr.size != n_grid:
+                    raise ValueError(f'rate_table dataset {name!r} length {arr.size} does not match mean_energy_eV length {n_grid}.')
+            if 'rate_coefficients' not in h5:
+                raise ValueError('rate_table HDF5 file requires a rate_coefficients group.')
+            self.k_tables = {}
+            for name, ds in h5['rate_coefficients'].items():
+                arr = np.asarray(ds[:], dtype=float)
+                if arr.ndim != 1 or arr.size != n_grid:
+                    raise ValueError(
+                        f'rate_table rate_coefficients/{name} must be a 1D dataset with length {n_grid}.'
+                    )
+                if not np.all(np.isfinite(arr)):
+                    raise ValueError(f'rate_table rate_coefficients/{name} contains non-finite values.')
+                self.k_tables[name] = arr
             self.grid_column = str(h5.attrs.get('grid_column', 'mean_energy_eV'))
+
+    @staticmethod
+    def _read_1d_dataset(h5, name: str) -> np.ndarray:
+        if name not in h5:
+            raise ValueError(f'rate_table HDF5 file requires dataset {name!r}.')
+        arr = np.asarray(h5[name][:], dtype=float)
+        if arr.ndim != 1 or arr.size < 1:
+            raise ValueError(f'rate_table dataset {name!r} must be a non-empty 1D array.')
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(f'rate_table dataset {name!r} contains non-finite values.')
+        return arr
+
+    def _validate_required_rate_coefficients(self, mechanism) -> None:
+        required: set[str] = set()
+        rate_models = getattr(mechanism, 'rate_models', {}) or {}
+        for reaction in getattr(mechanism, 'gas_reactions', []) or []:
+            if not getattr(reaction, 'enabled', True):
+                continue
+            model = rate_models.get(getattr(reaction, 'rate_model_key', ''), {})
+            if str(model.get('backend', '')).lower() != 'electron_impact_xsec':
+                continue
+            cs_id = model.get('cross_section_id')
+            if cs_id:
+                required.add(str(cs_id))
+        missing = sorted(required.difference(self.k_tables))
+        if missing:
+            have = ', '.join(sorted(self.k_tables)) or '<none>'
+            need = ', '.join(missing)
+            raise ValueError(
+                f'rate_table file {self.table_path} is missing rate_coefficients for required cross_section_id(s): {need}. '
+                f'Available rate_coefficients: {have}'
+            )
 
     @staticmethod
     def _interp_slope(x: np.ndarray, y: np.ndarray, x0: float) -> float:

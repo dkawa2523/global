@@ -1,5 +1,12 @@
 # Review Results
 
+This page records historical review and verification results. It is not the
+normative product specification. For current extension policy and user-facing
+guidance, see [Architecture](ARCHITECTURE.md), [Physics and
+Numerics](PHYSICS_NUMERICS.md), [Configuration](CONFIGURATION.md),
+[Chemistry](CHEMISTRY.md), [External Swarm and Rate
+Tables](SWARM_RATE_TABLES.md), and the [Extension Guide](EXTENSION_GUIDE.md).
+
 Generated comparison files under `examples/outputs/` are intentionally not
 tracked. They are reproducible run products, and `.gitignore` keeps them out of
 the repository. This page records the review-relevant results so reviewers can
@@ -25,7 +32,7 @@ py -m mkdocs build --strict
 
 | Check | Result |
 | --- | --- |
-| Lean pytest gate | `49 passed` |
+| Lean pytest gate | OK at the time of this historical review |
 | Smoke case validation | OK; only metadata-only surface-model warnings |
 | Smoke run | solver success, 200 samples |
 | MkDocs strict build | OK |
@@ -48,11 +55,11 @@ not be read as a calibrated reactor digital twin without case-specific
 validation of wall losses, surface reactions, EEDF data, and electrical
 coupling.
 
-The refactor keeps the physical equations and state history intact except for
-removing diagnostic outputs and removing the missing-rate-table fallback. The
-latter is an intentional safety change: `rate_table` now fails fast when the
-table file is absent, and quick analytic checks should use the explicit
-`maxwell` backend.
+The refactor kept the physical equations and state history intact while
+removing broad non-core report surfaces and the missing-rate-table fallback.
+The latter is an intentional safety change: `rate_table` fails fast when the
+table file is absent or required electron-impact rate coefficients are missing.
+Quick analytic checks should use the explicit `maxwell` backend.
 
 ## Numerics Review
 
@@ -76,9 +83,9 @@ The public product surface is now deliberately small:
 - Output: summary, observables, effective case, resolved paths, optional HDF5
 
 The old generated reports, dashboard outputs, broad benchmark dashboards,
-legacy config normalization, registry maturity contracts, provenance outputs,
-state manifests, budget reports, and warning columns were removed to keep the
-core package readable and maintainable.
+legacy config normalization, registry maturity contracts, state manifests,
+budget reports, and warning columns were removed to keep the core package
+readable and maintainable.
 
 ## Comparison Results
 
@@ -118,5 +125,5 @@ Smoke run details:
 ## Reproducibility Notes
 
 The comparison YAML files can be regenerated locally with the commands above.
-They should remain ignored unless a future release explicitly wants fixed
+They should remain ignored unless the project deliberately adopts fixed
 benchmark artifacts as versioned reference data.

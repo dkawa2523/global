@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 
+from plasma_global.chemistry.provenance import chemistry_provenance_summary
 from plasma_global.config.export import write_effective_config, write_resolved_paths
 from plasma_global.io.hdf5_writer import write_observables_csv, write_solution_h5, write_summary_yaml
 from plasma_global.numerics.solver_base import SolverResult
@@ -33,7 +34,24 @@ def _concatenate(results: list[SolverResult]) -> SolverResult:
     diagnostics = {'segments': len(results)}
     for key in ['nfev', 'njev', 'nlu']:
         diagnostics[key] = sum((r.diagnostics.get(key) or 0) for r in results)
+    event_counts: dict[str, int] = {}
+    for res in results:
+        for name, count in (res.diagnostics.get('event_counts') or {}).items():
+            event_counts[str(name)] = event_counts.get(str(name), 0) + int(count)
+    diagnostics['event_counts'] = event_counts
+    diagnostics['solver_event_count'] = int(sum(event_counts.values()))
+    diagnostics['steady_state_event_count'] = int(event_counts.get('steady_state', 0))
     return SolverResult(t=t, y=y, success=success, status=status, message=message, diagnostics=diagnostics)
+
+
+def _electrical_coupling_summary(system: Any) -> dict[str, Any] | None:
+    power = getattr(getattr(system, 'electrical_adapter', None), 'last_power', None)
+    if power is None:
+        power = getattr(system, '_last_power', None)
+    circuit_interface = ((getattr(power, 'metadata', None) or {}).get('circuit_interface') if power is not None else None)
+    if isinstance(circuit_interface, dict):
+        return {'circuit_interface': circuit_interface}
+    return None
 
 
 def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
@@ -41,8 +59,10 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
     built = build_case(loaded)
 
     system = built.system
+    if hasattr(system, 'reset_numerical_diagnostics'):
+        system.reset_numerical_diagnostics()
     recipe = loaded.recipe
-    y0 = system.project_state(system.initial_state())
+    y0 = system.initial_state()
 
     results: list[SolverResult] = []
     t_start = recipe.steps[0].t_start_s
@@ -56,13 +76,24 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
         if not seg.success:
             step_id = getattr(step, 'step_id', f'step_{len(results)}')
             raise RuntimeError(f"Solver failed in recipe step {step_id!r}: {seg.message}")
-        seg.y = system.project_trajectory(seg.y)
+        seg.y = system.project_trajectory(seg.y, count_diagnostics=True)
         results.append(seg)
-        y0 = system.project_state(seg.y[:, -1].copy())
+        y0 = system.project_state(seg.y[:, -1].copy(), count_diagnostics=False)
+        if int(seg.diagnostics.get('steady_state_event_count', 0) or 0) > 0:
+            break
 
     solution = _concatenate(results)
-    solution.y = system.project_trajectory(solution.y)
+    solution.y = system.project_trajectory(solution.y, count_diagnostics=False)
+    if solution.t.size:
+        system.update_final_rhs_diagnostics(float(solution.t[-1]), solution.y[:, -1])
+    system.diagnostics['solver_event_count'] = int(solution.diagnostics.get('solver_event_count', 0) or 0)
+    system.diagnostics['steady_state_event_count'] = int(solution.diagnostics.get('steady_state_event_count', 0) or 0)
+    solution.diagnostics.update(system.diagnostics)
+    solution.diagnostics['chemistry_provenance'] = chemistry_provenance_summary(loaded.mechanism)
     solution.diagnostics['observables'] = system.compute_observables(solution.t, solution.y)
+    electrical_coupling = _electrical_coupling_summary(system)
+    if electrical_coupling:
+        solution.diagnostics['electrical_coupling'] = electrical_coupling
     summary = summarize_solution(solution)
     observables = observables_dataframe(solution)
 

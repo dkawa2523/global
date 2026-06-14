@@ -9,7 +9,7 @@ The project focuses on a compact, inspectable core:
 - run a transient global model
 - write `summary.yaml`, `observables.csv`, resolved config snapshots, and optional `solution.h5`
 
-It is a reduced-order modeling base, not a spatial fluid/PIC solver and not a full RF sheath or circuit simulator.
+It is a reduced-order 0D / multi-zone modeling base, not a spatial fluid/PIC solver and not a full RF sheath, feature-scale, or circuit simulator.
 
 ## Install
 
@@ -52,6 +52,16 @@ Export the effective configuration without running the solver:
 python -m plasma_global.cli export-config examples/configs/case_smoke.yaml tmp_case_export
 ```
 
+## Recommended Production Workflow
+
+1. Prepare chemistry and cross-section data.
+2. Generate electron-impact rate and transport tables with an external swarm solver when high-fidelity electron kinetics are required.
+3. Run the global model with the `rate_table` backend.
+4. Inspect particle, power, wall-loss, surface, and electrical observables.
+5. Save `effective_case.yaml`, `resolved_paths.yaml`, `summary.yaml`, and `observables.csv` for reproducibility.
+
+For table guidance, see [External Swarm and Rate Tables](docs/SWARM_RATE_TABLES.md). For extension boundaries, see the [Extension Guide](docs/EXTENSION_GUIDE.md).
+
 ## Public API
 
 ```python
@@ -92,6 +102,7 @@ Generated outputs are ignored by git and can be regenerated from the case files.
 This code is useful for mechanism checks, reduced-order discharge studies, sensitivity sweeps, and CLI/API integration. Interpret results with the configured model choices in mind:
 
 - EEDF and swarm behavior are reduced-order or table driven.
+- The internal `boltzmann_2term` backend is approximate and is not a replacement for mature swarm solvers such as BOLSIG+, LoKI-B, or Magboltz.
 - Electrical backends are lumped or prescribed models.
 - Sheath and ion-energy diagnostics are proxy-level.
 - Spatial transport is represented by global zones and conductance links.
