@@ -102,7 +102,6 @@ def test_rf_envelope_pulsed_square_turns_power_off() -> None:
 
 def test_rf_envelope_backend_is_registered() -> None:
     details = ELECTRICAL_REGISTRY.details()
-    assert details['rf_envelope']['maturity'] == 'experimental'
     assert 'HF/LF' in details['rf_envelope']['description']
 
 

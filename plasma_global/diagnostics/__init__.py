@@ -1,1 +1,0 @@
-"""Diagnostics and provenance helpers."""

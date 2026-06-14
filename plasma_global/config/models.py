@@ -77,7 +77,6 @@ class OutputsConfig:
     formats: Any = None
     plots: Any = None
     save: Any = None
-    diagnostics: Any = None
 
 
 @dataclass

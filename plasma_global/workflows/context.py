@@ -31,29 +31,21 @@ EEDF_REGISTRY.register(
     'swarm',
     lambda **kwargs: SwarmEEDFBackend(),
     description='Swarm wrapper with replaceable swarm model backend.',
-    maturity='experimental',
-    assumptions=['Delegates all rate and transport physics to the selected swarm model.'],
 )
 EEDF_REGISTRY.register(
     'maxwell',
     lambda **kwargs: MaxwellEEDFBackend(),
     description='Analytic Maxwellian closure.',
-    maturity='stable-debug',
-    assumptions=['Useful for smoke tests and mechanism debugging; not a non-Maxwellian kinetic solution.'],
 )
 EEDF_REGISTRY.register(
     'boltzmann_2term',
     lambda **kwargs: Boltzmann2TermBackend(),
     description='Internal two-term Boltzmann swarm backend.',
-    maturity='experimental',
-    assumptions=['Reduced two-term-like energy-space closure, not a full BOLSIG+ replacement.'],
 )
 EEDF_REGISTRY.register(
     'rate_table',
     lambda **kwargs: TableEEDFBackend(),
     description='Interpolated external rate-table backend.',
-    maturity='experimental',
-    assumptions=['Accuracy is inherited from the supplied table and its metadata.'],
 )
 
 ELECTRICAL_REGISTRY = Registry()
@@ -61,52 +53,31 @@ ELECTRICAL_REGISTRY.register(
     'direct_power',
     lambda **kwargs: DirectPowerBackend(),
     description='Direct absorbed-power prescription.',
-    maturity='stable-debug',
-    assumptions=['No circuit, sheath, or electromagnetic coupling is solved.'],
 )
 ELECTRICAL_REGISTRY.register(
     'dc_series_circuit',
     lambda **kwargs: DCSeriesCircuitBackend(),
     description='Reduced voltage-source plus ballast-resistor circuit for DC and pulsed DC cases.',
-    maturity='experimental',
-    assumptions=[
-        'Represents the plasma as a conductive resistor derived from ne, a mobility model, gap, and electrode area.',
-        'No sheath capacitance, RLC ringing, matching network, or external SPICE co-simulation is solved.',
-    ],
 )
 ELECTRICAL_REGISTRY.register(
     'external_circuit_table',
     lambda **kwargs: ExternalCircuitTableBackend(),
     description='One-way coupling from measured or SPICE-generated circuit waveform CSV data.',
-    maturity='experimental',
-    assumptions=[
-        'Reads prescribed circuit results and deposits the interpolated absorbed power into the plasma.',
-        'Does not feed plasma impedance back into the external circuit during the ODE solve.',
-    ],
 )
 ELECTRICAL_REGISTRY.register(
     'rf_envelope',
     lambda **kwargs: RFEnvelopeBackend(),
     description='Cycle-averaged HF/LF RF power and bias envelope model.',
-    maturity='experimental',
-    assumptions=[
-        'Averages over the RF period and uses user-supplied coupling efficiency or effective impedance.',
-        'Does not resolve sheath motion, matching networks, or RF-cycle electron kinetics.',
-    ],
 )
 ELECTRICAL_REGISTRY.register(
     'ccp',
     lambda **kwargs: CCPBackend(),
     description='Reduced CCP / bias backend.',
-    maturity='experimental',
-    assumptions=['Lumped circuit and sheath proxy; no full RF sheath transit solve.'],
 )
 ELECTRICAL_REGISTRY.register(
     'icp',
     lambda **kwargs: ICPBackend(),
     description='Reduced ICP source-coupling backend.',
-    maturity='experimental',
-    assumptions=['Reduced ICP coupling proxy; no spatial EM field solve.'],
 )
 
 INTEGRATOR_REGISTRY = Registry()
@@ -119,8 +90,6 @@ INTEGRATOR_REGISTRY.register(
         max_step=run_config.numerics.max_step,
     ),
     description='SciPy solve_ivp(method="BDF") backend.',
-    maturity='stable',
-    assumptions=['Stiff ODE integration with the system analytic Jacobian.'],
 )
 
 

@@ -41,25 +41,5 @@ numerics:
   max_step: 1.0e-6
 
 outputs:
-  diagnostics:
-    reaction_budget:
-      enabled: true
-      filename: reaction_budget.yaml
-      species: [Ar_star, Ar_plus, Ar2_plus]
-      max_reactions_per_species: 6
-    electron_energy_budget:
-      enabled: true
-      filename: electron_energy_budget.yaml
-      max_reactions: 8
-    surface_reaction_budget:
-      enabled: true
-      filename: surface_reaction_budget.yaml
-      max_reactions_per_species: 6
-    state_manifest:
-      enabled: true
-      filename: state_manifest.yaml
-    provenance:
-      enabled: true
-      filename: run_provenance.yaml
   plots:
     enabled: false

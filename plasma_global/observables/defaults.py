@@ -84,10 +84,6 @@ def _stepwise_summary(records: list[dict]) -> dict[str, dict]:
                 block[f'final_{key}'] = float(values[-1])
                 block[f'min_{key}'] = float(np.min(values))
                 block[f'max_{key}'] = float(np.max(values))
-        warning_keys = sorted({k for r in rows for k in r.keys() if k.startswith('warning_')})
-        for key in warning_keys:
-            vals = [int(float(r.get(key, 0.0) or 0.0)) for r in rows]
-            block[f'count_{key}'] = int(sum(vals))
         summary[step_id] = block
     return summary
 
@@ -111,8 +107,6 @@ def summarize_solution(solution) -> dict:
             if key in final and final[key] is not None:
                 out[f'final_{key}'] = float(final[key])
         out['step_summary'] = _stepwise_summary(obs)
-        warning_keys = sorted({k for r in obs for k in r.keys() if k.startswith('warning_')})
-        out['warning_counts'] = {key: int(sum(int(float(r.get(key, 0.0) or 0.0)) for r in obs)) for key in warning_keys}
     return out
 
 

@@ -40,7 +40,7 @@ class PrescribedElectronProfile:
             out[zone_id] = max(self._value(column, time_s), 0.0)
         return out
 
-    def provenance(self) -> dict[str, Any]:
+    def metadata(self) -> dict[str, Any]:
         return {
             'file': str(self.path),
             'time_s_min': float(self.time_s[0]),

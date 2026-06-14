@@ -39,6 +39,40 @@ class ElectricalCouplingAdapter:
                 count = max(count, int(cfg.get('transport_coupling_iterations', 4)))
         return max(count, 1)
 
+    def _evaluate_eedf_by_zone(
+        self,
+        *,
+        time_s: float,
+        gas: np.ndarray,
+        Tg: np.ndarray,
+        ne_by_zone: dict[str, float],
+        mean_e_by_zone: dict[str, float],
+        pressure_by_zone: dict[str, float],
+        power: Any,
+    ) -> tuple[dict[str, Any], dict[str, float]]:
+        sys = self.system
+        red_field_map = (power.metadata or {}).get('zone_reduced_field_Td', {})
+        eedf_by_zone = {}
+        mobility_by_zone: dict[str, float] = {}
+        for z_idx, zone_id in enumerate(sys.zone_ids):
+            req = EEDFRequest(
+                time_s=time_s,
+                zone_id=zone_id,
+                composition={sp_id: gas[z_idx, sys.gas_species_index[sp_id]] for sp_id in sys.gas_species_ids},
+                electron_density_m3=ne_by_zone[zone_id],
+                mean_energy_eV=mean_e_by_zone[zone_id],
+                reduced_field_Td=float(red_field_map[zone_id]) if zone_id in red_field_map else None,
+                gas_temperature_K=float(Tg[z_idx]),
+                pressure_Pa=pressure_by_zone[zone_id],
+                metadata={'absorbed_power_W': power.absorbed_power_W_by_zone.get(zone_id, 0.0)},
+            )
+            eedf = sys.eedf_backend.evaluate(req)
+            eedf_by_zone[zone_id] = eedf
+            mu = eedf.transport.get('mobility_m2_V_s')
+            if mu is not None:
+                mobility_by_zone[zone_id] = float(mu)
+        return eedf_by_zone, mobility_by_zone
+
     def evaluate(self, time_s: float, y: np.ndarray, step: Any | None = None) -> CoupledPlasmaEvaluation:
         sys = self.system
         step = step or sys.current_step(time_s)
@@ -76,7 +110,7 @@ class ElectricalCouplingAdapter:
             'electron_density_closure': sys.electron_density_closure,
         }
         if prescribed_ne is not None and sys.prescribed_electron_profile is not None:
-            metadata['prescribed_electron_profile'] = sys.prescribed_electron_profile.provenance()
+            metadata['prescribed_electron_profile'] = sys.prescribed_electron_profile.metadata()
         if self.last_zone_electron_mobility_m2_V_s:
             metadata['zone_electron_mobility_m2_V_s'] = dict(self.last_zone_electron_mobility_m2_V_s)
 
@@ -97,26 +131,15 @@ class ElectricalCouplingAdapter:
                 )
             )
 
-            red_field_map = (power.metadata or {}).get('zone_reduced_field_Td', {})
-            eedf_by_zone = {}
-            mobility_by_zone = {}
-            for z_idx, zone_id in enumerate(sys.zone_ids):
-                req = EEDFRequest(
-                    time_s=time_s,
-                    zone_id=zone_id,
-                    composition={sp_id: gas[z_idx, sys.gas_species_index[sp_id]] for sp_id in sys.gas_species_ids},
-                    electron_density_m3=ne_by_zone[zone_id],
-                    mean_energy_eV=mean_e_by_zone[zone_id],
-                    reduced_field_Td=float(red_field_map[zone_id]) if zone_id in red_field_map else None,
-                    gas_temperature_K=float(Tg[z_idx]),
-                    pressure_Pa=pressure_by_zone[zone_id],
-                    metadata={'absorbed_power_W': power.absorbed_power_W_by_zone.get(zone_id, 0.0)},
-                )
-                eedf = sys.eedf_backend.evaluate(req)
-                eedf_by_zone[zone_id] = eedf
-                mu = eedf.transport.get('mobility_m2_V_s')
-                if mu is not None:
-                    mobility_by_zone[zone_id] = float(mu)
+            eedf_by_zone, mobility_by_zone = self._evaluate_eedf_by_zone(
+                time_s=time_s,
+                gas=gas,
+                Tg=Tg,
+                ne_by_zone=ne_by_zone,
+                mean_e_by_zone=mean_e_by_zone,
+                pressure_by_zone=pressure_by_zone,
+                power=power,
+            )
 
             if not needs_transport_coupling or not mobility_by_zone:
                 break
@@ -140,25 +163,15 @@ class ElectricalCouplingAdapter:
                     metadata=metadata,
                 )
             )
-            red_field_map = (power.metadata or {}).get('zone_reduced_field_Td', {})
-            eedf_by_zone = {}
-            for z_idx, zone_id in enumerate(sys.zone_ids):
-                req = EEDFRequest(
-                    time_s=time_s,
-                    zone_id=zone_id,
-                    composition={sp_id: gas[z_idx, sys.gas_species_index[sp_id]] for sp_id in sys.gas_species_ids},
-                    electron_density_m3=ne_by_zone[zone_id],
-                    mean_energy_eV=mean_e_by_zone[zone_id],
-                    reduced_field_Td=float(red_field_map[zone_id]) if zone_id in red_field_map else None,
-                    gas_temperature_K=float(Tg[z_idx]),
-                    pressure_Pa=pressure_by_zone[zone_id],
-                    metadata={'absorbed_power_W': power.absorbed_power_W_by_zone.get(zone_id, 0.0)},
-                )
-                eedf = sys.eedf_backend.evaluate(req)
-                eedf_by_zone[zone_id] = eedf
-                mu = eedf.transport.get('mobility_m2_V_s')
-                if mu is not None:
-                    mobility_by_zone[zone_id] = float(mu)
+            eedf_by_zone, mobility_by_zone = self._evaluate_eedf_by_zone(
+                time_s=time_s,
+                gas=gas,
+                Tg=Tg,
+                ne_by_zone=ne_by_zone,
+                mean_e_by_zone=mean_e_by_zone,
+                pressure_by_zone=pressure_by_zone,
+                power=power,
+            )
 
         self.last_zone_electron_mobility_m2_V_s = mobility_by_zone
 

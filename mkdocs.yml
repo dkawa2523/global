@@ -1,82 +1,20 @@
 site_name: Plasma Global Model
-site_description: YAML-driven low-pressure plasma global model research platform
-repo_url: https://github.com/dkawa2523/global
+site_description: YAML-driven low-pressure plasma global model
 docs_dir: docs
 site_dir: site
 theme:
   name: readthedocs
-  highlightjs: true
-  hljs_languages:
-    - yaml
-    - powershell
-    - bash
-    - text
 nav:
   - Home: index.md
-  - English:
-      - Architecture: ARCHITECTURE.md
-      - Configuration Guide: CONFIG_GUIDE.md
-      - Chemistry Input Spec: CHEMISTRY_INPUT_SPEC.md
-      - Physics Models and Approximations: PHYSICS_MODELS_AND_APPROXIMATIONS.md
-      - Circuit Coupling: CIRCUIT_COUPLING.md
-      - RF Envelope Calibration: RF_ENVELOPE_CALIBRATION.md
-      - Model Maturity: MODEL_MATURITY.md
-      - Numerics and Solvers: NUMERICS_AND_SOLVERS.md
-      - Input / Output Spec: IO_SPEC.md
-      - Developer Guide: DEVELOPER_GUIDE.md
-      - Core Split Refactor: CORE_SPLIT_REFACTOR.md
-      - Argon LXCat Case: ARGON_LXCAT_CASE.md
-      - Argon Executable Comparison: ARGON_EXECUTABLE_COMPARISON.md
-      - External Benchmarks: EXTERNAL_BENCHMARKS.md
-      - ZDPlaskin Comparison: ZDPLASKIN_COMPARISON.md
-      - CRANE Comparison: CRANE_COMPARISON.md
-      - Robustness Benchmarks: ROBUSTNESS_BENCHMARKS.md
-  - 日本語:
-      - はじめに:
-          - 概要: ja/index.md
-          - 用語集と最小物理背景: ja/GLOSSARY_AND_MINIMAL_PHYSICS.md
-          - 全体像: ja/OVERVIEW.md
-          - モデルの入力と出力: ja/MODEL_INPUT_OUTPUT.md
-          - 全体ワークフロー: ja/END_TO_END_WORKFLOW.md
-          - 1 ケースの読み解き: ja/QUICKSTART_CASE_WALKTHROUGH.md
-          - 入力スキーマ早見表: ja/SCHEMA_REFERENCE.md
-          - 出力の読み方: ja/OUTPUT_READING_GUIDE.md
-          - state vector の読み方: ja/STATE_VECTOR_GUIDE.md
-          - observables.csv 列辞書: ja/OBSERVABLES_COLUMN_REFERENCE.md
-          - コードモジュール一覧: ja/CODE_MODULES.md
-      - モデル設定と物理:
-          - 設定ガイド: ja/CONFIG_GUIDE.md
-          - 化学入力仕様: ja/CHEMISTRY_INPUT_SPEC.md
-          - 物理モデルと近似: ja/PHYSICS_MODELS_AND_APPROXIMATIONS.md
-          - 物理式・記号・実装対応表: ja/PHYSICS_EQUATION_REFERENCE.md
-          - 表面・ウェハ・IED ガイド: ja/SURFACE_WAFER_IED_GUIDE.md
-          - 回路結合: ja/CIRCUIT_COUPLING.md
-          - RF envelope 較正: ja/RF_ENVELOPE_CALIBRATION.md
-          - 数値解法とソルバー: ja/NUMERICS_AND_SOLVERS.md
-          - モデル成熟度: ja/MODEL_MATURITY.md
-          - 入出力仕様: ja/IO_SPEC.md
-      - コード構造と開発:
-          - アーキテクチャ: ja/ARCHITECTURE.md
-          - core 分割リファクタリング: ja/CORE_SPLIT_REFACTOR.md
-          - 開発者ガイド: ja/DEVELOPER_GUIDE.md
-      - ベンチマークと検証:
-          - Ar LXCat 基準ケース: ja/ARGON_LXCAT_CASE.md
-          - Ar 実行比較: ja/ARGON_EXECUTABLE_COMPARISON.md
-          - 外部ベンチマーク: ja/EXTERNAL_BENCHMARKS.md
-          - ベンチマーク判定基準: ja/BENCHMARK_ACCEPTANCE_GUIDE.md
-          - ZDPlaskin 比較: ja/ZDPLASKIN_COMPARISON.md
-          - CRANE 比較: ja/CRANE_COMPARISON.md
-          - ロバスト性ベンチマーク: ja/ROBUSTNESS_BENCHMARKS.md
+  - Architecture: ARCHITECTURE.md
+  - Configuration: CONFIGURATION.md
+  - Chemistry: CHEMISTRY.md
+  - Physics and Numerics: PHYSICS_NUMERICS.md
+  - CLI and API: CLI_API.md
+  - Developer: DEVELOPER.md
 markdown_extensions:
   - admonition
-  - attr_list
-  - def_list
   - fenced_code
   - tables
   - toc:
       permalink: true
-extra_javascript:
-  - assets/js/mathjax-config.js
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
-  - https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js
-  - assets/js/mermaid-init.js

@@ -31,11 +31,8 @@ def _print_registry(payload: dict[str, dict[str, dict[str, Any]]]) -> None:
     for category, title in labels.items():
         print(f'{title}:')
         for name, detail in payload[category].items():
-            maturity = detail.get('maturity') or 'experimental'
             description = detail.get('description') or ''
-            print(f'  - {name} [{maturity}]: {description}')
-            for assumption in detail.get('assumptions') or []:
-                print(f'      assumption: {assumption}')
+            print(f'  - {name}: {description}')
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -52,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     export_parser.add_argument('case', type=Path)
     export_parser.add_argument('output_dir', type=Path)
 
-    backends_parser = sub.add_parser('list-backends', help='List available model backends and maturity labels')
+    backends_parser = sub.add_parser('list-backends', help='List available model backends')
     backends_parser.add_argument('--json', action='store_true', help='Emit machine-readable JSON')
 
     jac_parser = sub.add_parser('check-jacobian', help='Finite-difference check the analytic Jacobian at a case state')

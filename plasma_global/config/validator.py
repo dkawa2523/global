@@ -226,8 +226,8 @@ def validate_run_config(run_config: RunConfig, resolved_paths: ResolvedPaths) ->
             )
         )
 
-    if run_config.case.schema_version < 2:
-        messages.append(ConfigMessage('WARNING', 'LEGACY_SCHEMA', 'Legacy run.yaml schema loaded. Consider migrating to case.yaml schema_version 2.', 'schema'))
+    if run_config.case.schema_version != 2:
+        messages.append(ConfigMessage('ERROR', 'UNSUPPORTED_SCHEMA_VERSION', 'Only case schema_version 2 is supported.', 'schema'))
 
     return ConfigValidationReport(messages=messages)
 

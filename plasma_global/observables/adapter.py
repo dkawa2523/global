@@ -98,11 +98,6 @@ class ObservablesAdapter:
                 rec[f'ion_loss_h_factor_{zone_id}'] = float(sys.zone_ion_loss_h_factor.get(zone_id, 0.0))
                 rec[f'ion_loss_characteristic_length_{zone_id}_m'] = float(sys.zone_ion_loss_characteristic_length_m.get(zone_id, 0.0))
                 rec[f'ambipolar_loss_rate_{zone_id}_s'] = float(sys.zone_ambipolar_loss_rate_s.get(zone_id, 0.0))
-                target_p = float(sys.chamber.zone_by_id[zone_id].pressure_Pa)
-                rec[f'warning_high_electronegativity_{zone_id}'] = 1 if alpha > 3.0 else 0
-                rec[f'warning_ion_ion_afterglow_{zone_id}'] = 1 if alpha > 10.0 and coupled.power.absorbed_power_W_by_zone.get(zone_id, 0.0) < 1.0 else 0
-                rec[f'warning_pressure_deviation_{zone_id}'] = 1 if target_p > 0.0 and abs(pressure - target_p) / target_p > 0.25 else 0
-                rec[f'warning_debye_ratio_{zone_id}'] = 1 if debye_length_m(coupled.ne_by_zone[zone_id], coupled.mean_e_by_zone[zone_id]) / max(sys.zone_char_length_m.get(zone_id, 1.0), 1.0e-12) > 0.05 else 0
 
             for surface_id in sys.surface_ids:
                 surface = sys.chamber.surface_by_id[surface_id]
@@ -126,8 +121,6 @@ class ObservablesAdapter:
                 rec[f'site_fill_{surface_id}'] = float(site_metrics['total_fraction'])
                 rec[f'occupied_site_fraction_{surface_id}'] = float(site_metrics['occupied_fraction'])
                 rec[f'free_site_fraction_{surface_id}'] = float(site_metrics['free_fraction'])
-                rec[f'warning_site_overfill_{surface_id}'] = 1 if site_metrics['total_fraction'] > 1.001 else 0
-                rec[f'warning_site_depletion_{surface_id}'] = 1 if site_metrics['free_fraction'] < 1.0e-5 else 0
 
                 radical_incident = 0.0
                 halogen_atom_flux = 0.0

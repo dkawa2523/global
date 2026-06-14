@@ -89,7 +89,6 @@ def test_external_circuit_table_can_use_voltage_current_product(tmp_path: Path) 
 
 def test_external_circuit_table_backend_is_registered() -> None:
     details = ELECTRICAL_REGISTRY.details()
-    assert details['external_circuit_table']['maturity'] == 'experimental'
     assert 'CSV' in details['external_circuit_table']['description']
 
 

@@ -6,7 +6,6 @@ from typing import Any
 import numpy as np
 
 from plasma_global.config.export import write_effective_config, write_resolved_paths
-from plasma_global.diagnostics.provenance import build_run_provenance
 from plasma_global.io.hdf5_writer import write_observables_csv, write_solution_h5, write_summary_yaml
 from plasma_global.numerics.solver_base import SolverResult
 from plasma_global.observables.defaults import observables_dataframe, summarize_solution
@@ -35,71 +34,6 @@ def _concatenate(results: list[SolverResult]) -> SolverResult:
     for key in ['nfev', 'njev', 'nlu']:
         diagnostics[key] = sum((r.diagnostics.get(key) or 0) for r in results)
     return SolverResult(t=t, y=y, success=success, status=status, message=message, diagnostics=diagnostics)
-
-
-def _diagnostic_config(run_config: Any, name: str) -> Any:
-    diagnostics = getattr(run_config.outputs, 'diagnostics', None)
-    return getattr(diagnostics, name, None) if diagnostics is not None else None
-
-
-def _reaction_budget_config(run_config: Any) -> Any:
-    return _diagnostic_config(run_config, 'reaction_budget')
-
-
-def _maybe_write_reaction_budget(output_dir: Path, run_config: Any, system: Any, solution: SolverResult) -> None:
-    cfg = _reaction_budget_config(run_config)
-    if not bool(getattr(cfg, 'enabled', False)):
-        return
-    species = getattr(cfg, 'species', None)
-    max_items = int(getattr(cfg, 'max_reactions_per_species', 5))
-    filename = str(getattr(cfg, 'filename', 'reaction_budget.yaml'))
-    budget = system.reaction_budget(
-        float(solution.t[-1]),
-        solution.y[:, -1],
-        species_filter=list(species) if species else None,
-        max_reactions_per_species=max_items,
-    )
-    write_summary_yaml(output_dir / filename, budget)
-
-
-def _maybe_write_electron_energy_budget(output_dir: Path, run_config: Any, system: Any, solution: SolverResult) -> None:
-    cfg = _diagnostic_config(run_config, 'electron_energy_budget')
-    if not bool(getattr(cfg, 'enabled', False)):
-        return
-    filename = str(getattr(cfg, 'filename', 'electron_energy_budget.yaml'))
-    max_items = int(getattr(cfg, 'max_reactions', 8))
-    budget = system.electron_energy_budget(float(solution.t[-1]), solution.y[:, -1], max_reactions=max_items)
-    write_summary_yaml(output_dir / filename, budget)
-
-
-def _maybe_write_surface_reaction_budget(output_dir: Path, run_config: Any, system: Any, solution: SolverResult) -> None:
-    cfg = _diagnostic_config(run_config, 'surface_reaction_budget')
-    if not bool(getattr(cfg, 'enabled', False)):
-        return
-    filename = str(getattr(cfg, 'filename', 'surface_reaction_budget.yaml'))
-    max_items = int(getattr(cfg, 'max_reactions_per_species', 5))
-    budget = system.surface_reaction_budget(
-        float(solution.t[-1]),
-        solution.y[:, -1],
-        max_reactions_per_species=max_items,
-    )
-    write_summary_yaml(output_dir / filename, budget)
-
-
-def _maybe_write_state_manifest(output_dir: Path, run_config: Any, system: Any) -> None:
-    cfg = _diagnostic_config(run_config, 'state_manifest')
-    if not bool(getattr(cfg, 'enabled', False)):
-        return
-    filename = str(getattr(cfg, 'filename', 'state_manifest.yaml'))
-    write_summary_yaml(output_dir / filename, system.state_manifest())
-
-
-def _maybe_write_provenance(output_dir: Path, run_config: Any, loaded: Any, built: Any) -> None:
-    cfg = _diagnostic_config(run_config, 'provenance')
-    if not bool(getattr(cfg, 'enabled', False)):
-        return
-    filename = str(getattr(cfg, 'filename', 'run_provenance.yaml'))
-    write_summary_yaml(output_dir / filename, build_run_provenance(loaded, built))
 
 
 def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
@@ -146,11 +80,6 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
         write_observables_csv(output_dir / 'observables.csv', observables)
     if getattr(loaded.run_config.outputs.formats, 'summary_yaml', False):
         write_summary_yaml(output_dir / 'summary.yaml', summary)
-    _maybe_write_reaction_budget(output_dir, loaded.run_config, system, solution)
-    _maybe_write_electron_energy_budget(output_dir, loaded.run_config, system, solution)
-    _maybe_write_surface_reaction_budget(output_dir, loaded.run_config, system, solution)
-    _maybe_write_state_manifest(output_dir, loaded.run_config, system)
-    _maybe_write_provenance(output_dir, loaded.run_config, loaded, built)
     make_requested_plots(loaded.run_config, observables, output_dir)
 
     return {

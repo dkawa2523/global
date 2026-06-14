@@ -35,14 +35,5 @@ numerics:
     floor_energy_J_m3: 1.0e-30
 
 outputs:
-  diagnostics:
-    reaction_budget:
-      enabled: true
-      filename: reaction_budget.yaml
-      species: [Ar, Ar_plus]
-      max_reactions_per_species: 4
-    state_manifest:
-      enabled: true
-      filename: state_manifest.yaml
   plots:
     enabled: false

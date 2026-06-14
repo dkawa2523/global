@@ -74,53 +74,6 @@ def _ns(data: Any) -> Any:
     return data
 
 
-def _normalize_legacy(raw: dict[str, Any]) -> dict[str, Any]:
-    project = raw.get('project', {})
-    paths = raw.get('paths', {})
-    model = raw.get('model', {})
-    return {
-        'case': {
-            'name': project.get('name', 'unnamed_case'),
-            'description': project.get('description', ''),
-            'tags': project.get('tags', []),
-            'schema_version': int(project.get('schema_version', 1)),
-            'kind': project.get('kind', 'plasma_global_case_legacy'),
-        },
-        'files': {
-            'chamber': paths['chamber_file'],
-            'recipe': paths['recipe_file'],
-            'chemistry': {
-                'manifest': paths.get('chemistry_manifest'),
-                'directory': paths.get('chemistry_dir'),
-            },
-            'output_dir': paths['output_dir'],
-            'external_inputs': paths.get('external_inputs', {}) or {},
-        },
-        'runtime': _normalize_runtime(raw.get('runtime', {})),
-        'physics': {
-            'mode': model.get('mode', 'transient'),
-            'gas_model': model.get('gas_model', 'multi_zone_global'),
-            'eedf_backend': model.get('eedf_backend', 'swarm'),
-            'electrical_backend': model.get('electrical_backend', 'icp'),
-            'integrator': model.get('integrator', 'scipy_bdf'),
-            'enable_gas_temperature': model.get('enable_gas_temperature', True),
-            'enable_surface_coverages': model.get('enable_surface_coverages', True),
-            'enable_wall_inventory': model.get('enable_wall_inventory', True),
-            'enable_ied_proxy': model.get('enable_ied_proxy', True),
-            'enable_dae_fallback': model.get('enable_dae_fallback', False),
-            'quasi_neutrality': model.get('quasi_neutrality', 'algebraic'),
-            'electron_density_closure': model.get('electron_density_closure', 'quasi_neutral'),
-            'gas_heating_fraction': model.get('gas_heating_fraction', 0.15),
-            'wall_relaxation_s_inv': model.get('wall_relaxation_s_inv', 500.0),
-        },
-        'numerics': raw.get('numerics', {}),
-        'outputs': raw.get('outputs', {}),
-        'logging': raw.get('logging', {}),
-        'swarm': raw.get('swarm', {}),
-        'imports': raw.get('imports', {}),
-    }
-
-
 def _normalize_raw(raw: dict[str, Any]) -> dict[str, Any]:
     if 'files' in raw or 'physics' in raw or 'case' in raw:
         case = raw.get('case', {})
@@ -137,7 +90,7 @@ def _normalize_raw(raw: dict[str, Any]) -> dict[str, Any]:
             'swarm': raw.get('swarm', {}),
             'imports': raw.get('imports', {}),
         }
-    return _normalize_legacy(raw)
+    raise ValueError('Unsupported configuration schema. Use schema_version 2 with case/files/physics sections.')
 
 
 def _normalize_runtime(raw_runtime: dict[str, Any] | None) -> dict[str, Any]:
@@ -168,7 +121,6 @@ def load_run_config(path: str | Path) -> RunConfig:
             formats=_ns(outputs_raw.get('formats', {})),
             plots=_ns(outputs_raw.get('plots', {})),
             save=_ns(outputs_raw.get('save', {})),
-            diagnostics=_ns(outputs_raw.get('diagnostics', {})),
         ),
         logging=LoggingConfig(**norm.get('logging', {})),
         swarm=_ns(norm.get('swarm', {})),

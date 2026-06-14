@@ -34,11 +34,3 @@ benchmarks:
         min: 1.0e-3
         max: 1.0e3
       note: Broad executable-model sanity check only; PyGMol setup is not the same physics closure as the local LXCat/two-term case.
-  - id: pygmol_argon_same_footing_decomposition
-    case: ../../examples/configs/case_argon_lxcat.yaml
-    comparison_tool: pygmol_same_footing
-    expectations:
-      production_final_ne_ratio_pygmol_over_local_after_rate_power_wall_alignment:
-        min: 0.1
-        max: 10.0
-      note: External diagnostic only; stages align local electron-impact rates, absorbed power, and global ion wall-loss coefficient cumulatively without changing the core solver.

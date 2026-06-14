@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -42,10 +41,11 @@ class TabulatedSwarmModel(SwarmModel):
                 self.table_path = Path(path)
                 if not self.table_path.is_absolute():
                     self.table_path = Path(run_config.paths.chemistry_dir).joinpath(path).resolve()
-        self._loaded = False
-        if self.table_path and self.table_path.exists():
-            self._load_table(self.table_path)
-            self._loaded = True
+        if self.table_path is None:
+            raise ValueError('rate_table EEDF backend requires swarm.table.file.')
+        if not self.table_path.exists():
+            raise FileNotFoundError(f'Rate table file not found: {self.table_path}')
+        self._load_table(self.table_path)
 
     def _load_table(self, path: Path) -> None:
         try:
@@ -94,19 +94,6 @@ class TabulatedSwarmModel(SwarmModel):
 
     def evaluate(self, request: EEDFRequest) -> EEDFResult:
         eps = max(float(request.mean_energy_eV), 1.0e-3)
-        if not self._loaded:
-            # Fallback to a Maxwell-like shape if no table is present.
-            k_map = {}
-            dk_map = {}
-            for cs_id, cs in self.mechanism.cross_sections.items():
-                A = float(cs.prefactor_m3_s)
-                p = float(cs.exponent)
-                Eth = float(cs.threshold_eV)
-                k = A * (eps ** p) * math.exp(-Eth / eps)
-                dk = k * (p / eps + Eth / (eps * eps))
-                k_map[cs_id] = k
-                dk_map[cs_id] = dk
-            return EEDFResult(rate_coefficients=k_map, d_rate_d_mean_energy_eV=dk_map, transport={'mean_energy_eV': eps, 'swarm_model': 'table_fallback'})
         if self._use_field_lookup(request):
             axis = self.eff_field
             x0 = max(float(request.reduced_field_Td or 0.0), 0.0)

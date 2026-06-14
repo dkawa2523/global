@@ -181,7 +181,6 @@ def test_dc_series_backend_exposes_required_circuit_metadata() -> None:
 
 def test_dc_series_backend_is_registered() -> None:
     details = ELECTRICAL_REGISTRY.details()
-    assert details['dc_series_circuit']['maturity'] == 'experimental'
     assert 'ballast-resistor' in details['dc_series_circuit']['description']
 
 

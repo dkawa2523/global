@@ -9,8 +9,6 @@ class Registration:
     name: str
     builder: Callable[..., Any]
     description: str = ''
-    maturity: str = 'experimental'
-    assumptions: tuple[str, ...] = ()
 
 
 @dataclass
@@ -29,15 +27,11 @@ class Registry:
         name: str,
         builder: Callable[..., Any],
         description: str = '',
-        maturity: str = 'experimental',
-        assumptions: list[str] | tuple[str, ...] = (),
     ) -> None:
         self._entries[name] = Registration(
             name=name,
             builder=builder,
             description=description,
-            maturity=maturity,
-            assumptions=tuple(assumptions),
         )
 
     def build(self, name: str, **kwargs: Any) -> Any:
@@ -55,8 +49,6 @@ class Registry:
         return {
             name: {
                 'description': reg.description,
-                'maturity': reg.maturity,
-                'assumptions': list(reg.assumptions),
             }
             for name, reg in sorted(self._entries.items())
         }

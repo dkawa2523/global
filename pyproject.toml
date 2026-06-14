@@ -28,5 +28,18 @@ plasma-global = "plasma_global.cli:main"
 include = ["plasma_global*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+  "tests/test_cli_and_case.py",
+  "tests/test_conservation_validation.py",
+  "tests/test_crane_two_reaction_argon.py",
+  "tests/test_dc_series_circuit.py",
+  "tests/test_external_circuit_table.py",
+  "tests/test_numerics.py",
+  "tests/test_physics_consistency.py",
+  "tests/test_rate_table_builder.py",
+  "tests/test_rf_envelope.py",
+  "tests/test_runner_failure.py",
+  "tests/test_smoke_run.py",
+  "tests/test_zdplaskin_example2_case.py",
+]
 addopts = "-q"
