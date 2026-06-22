@@ -1,0 +1,7 @@
+artifact
+examples/outputs/external_benchmarks/figures/accuracy_crane_this_code_vs_external.png
+examples/outputs/external_benchmarks/figures/accuracy_zdplaskin_this_code_vs_external.png
+examples/outputs/external_benchmarks/figures/accuracy_pygmol_external_over_this_code.png
+examples/outputs/external_benchmarks/figures/speed_this_code_runtime.png
+examples/outputs/external_benchmarks/figures/speed_external_vs_this_code_context.png
+examples/outputs/external_benchmarks/graph_summary.md

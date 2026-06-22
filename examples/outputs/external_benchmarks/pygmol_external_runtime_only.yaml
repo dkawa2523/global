@@ -1,0 +1,31 @@
+tool: pygmol_external_runtime_only
+pygmol_version: 1.1.0
+case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+repetitions: 5
+runs:
+- rep_index: 1
+  model_setup_s: 0.00010170007590204477
+  model_run_s: 0.13615869998466223
+  setup_plus_run_s: 0.13626040006056428
+- rep_index: 2
+  model_setup_s: 9.929994121193886e-05
+  model_run_s: 0.1366532000247389
+  setup_plus_run_s: 0.13675249996595085
+- rep_index: 3
+  model_setup_s: 0.00011849997099488974
+  model_run_s: 0.14030069997534156
+  setup_plus_run_s: 0.14041919994633645
+- rep_index: 4
+  model_setup_s: 9.80000477284193e-05
+  model_run_s: 0.14328919991385192
+  setup_plus_run_s: 0.14338719996158034
+- rep_index: 5
+  model_setup_s: 9.320001117885113e-05
+  model_run_s: 0.13588860002346337
+  setup_plus_run_s: 0.13598180003464222
+aggregate:
+  median_model_setup_s: 9.929994121193886e-05
+  median_model_run_s: 0.1366532000247389
+  median_setup_plus_run_s: 0.13675249996595085
+  min_model_run_s: 0.13588860002346337
+  max_model_run_s: 0.14328919991385192
