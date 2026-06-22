@@ -8,9 +8,20 @@ import pytest
 import yaml
 
 from plasma_global.chemistry.models import E_CHARGE
+from plasma_global.config.models import (
+    Boltzmann2TermConfig,
+    SwarmCacheConfig,
+    SwarmConfig,
+    SwarmEnergyGridConfig,
+    SwarmReducedFieldGridConfig,
+)
 from plasma_global.config.loader import load_run_config, resolve_run_paths
 from plasma_global.config.validator import validate_run_config
+from plasma_global.eedf.base import EEDFRequest
+from plasma_global.eedf.boltzmann_2term import Boltzmann2TermSwarmModel
+from plasma_global.electrical.base import SurfaceIED
 from plasma_global.numerics.system import GlobalPlasmaSystem
+from plasma_global.physics.types import SurfaceRateEvaluation
 from plasma_global.reactor.surface_models import (
     bohm_h_factor,
     bohm_ion_loss_frequency_s,
@@ -61,8 +72,8 @@ def test_auto_swarm_closure_uses_electron_energy_state() -> None:
     coupled = system.electrical_adapter.evaluate(0.0, y0, system.current_step(0.0))
 
     for zone_id, eedf in coupled.eedf_by_zone.items():
-        assert eedf.transport['lookup_mode'] == 'mean_energy'
-        assert eedf.transport['mean_energy_eV'] == coupled.mean_e_by_zone[zone_id]
+        assert eedf.transport.lookup_mode == 'mean_energy'
+        assert eedf.transport.mean_energy_eV == coupled.mean_e_by_zone[zone_id]
 
 
 def test_swarm_closure_validation_reports_unrecognized_mode() -> None:
@@ -73,12 +84,12 @@ def test_swarm_closure_validation_reports_unrecognized_mode() -> None:
     assert any(msg.code == 'SWARM_CLOSURE_UNRECOGNIZED' for msg in report.messages)
 
 
-def test_local_field_closure_validation_warns_about_reduced_model() -> None:
+def test_local_field_closure_validation_is_error_free() -> None:
     run_config = load_run_config(SMOKE_CASE)
     run_config.swarm.closure = 'local_field'
     report = validate_run_config(run_config, resolve_run_paths(run_config, SMOKE_CASE))
 
-    assert any(msg.code == 'LOCAL_FIELD_CLOSURE_REDUCED_MODEL' for msg in report.messages)
+    assert not any(msg.level == 'ERROR' for msg in report.messages)
 
 
 def test_recipe_boundary_selects_next_step() -> None:
@@ -120,12 +131,19 @@ def test_ion_loss_area_uses_active_surface_model_flags() -> None:
     assert np.isclose(system.zone_ion_loss_h_factor['source'], 1.0)
 
 
+def test_zone_wall_temperature_is_area_weighted() -> None:
+    built = build_case(load_case_from_yaml(SMOKE_CASE))
+    system = built.system
+
+    assert system.zone_wall_temperature['source'] == pytest.approx(360.0)
+    assert system.zone_wall_temperature['process'] == pytest.approx(329.34773577066886)
+
+
 def test_ion_loss_model_flag_can_disable_surface() -> None:
-    assert ion_loss_enabled({'ion_loss': 'Bohm_like'}) is True
-    assert ion_loss_family({'ion_loss': 'bohm_edge_loss'}) == 'bohm'
-    assert ion_loss_family({'ion_loss': 'bohm_global_loss'}) == 'bohm'
+    assert ion_loss_enabled({'ion_loss': 'bohm'}) is True
+    with pytest.raises(ValueError, match='Unknown ion_loss mode'):
+        ion_loss_family({'ion_loss': 'legacy_bohm'})
     assert ion_loss_family({'ion_loss': 'prescribed_loss_frequency'}) == 'prescribed_loss_frequency'
-    assert ion_loss_family({'ion_loss': 'loss_frequency'}) == 'prescribed_loss_frequency'
     assert ion_loss_family({'ion_loss': 'ambipolar_diffusion'}) == 'ambipolar_diffusion'
     assert ion_loss_enabled({'ion_loss': 'off'}) is False
     assert ion_loss_enabled({}) is True
@@ -140,12 +158,7 @@ def test_ion_loss_helper_frequencies_are_finite_and_compatible() -> None:
         ion_mass_kg=6.63e-26,
     )
     prescribed = effective_ion_loss_frequency_s(
-        {'ion_loss': 'prescribed_loss_frequency', 'loss_rate_s': 3230.0},
-        volume_m3=1.0e-3,
-        area_m2=1.0e-2,
-    )
-    legacy_ambipolar = effective_ion_loss_frequency_s(
-        {'ion_loss': 'ambipolar_diffusion', 'loss_rate_s': 123.0},
+        {'ion_loss': 'prescribed_loss_frequency', 'frequency_s': 3230.0},
         volume_m3=1.0e-3,
         area_m2=1.0e-2,
     )
@@ -158,19 +171,18 @@ def test_ion_loss_helper_frequencies_are_finite_and_compatible() -> None:
     assert np.isfinite(bohm_frequency)
     assert bohm_frequency > 0.0
     assert prescribed == pytest.approx(3230.0)
-    assert legacy_ambipolar == pytest.approx(123.0)
     assert diffusion_rate == pytest.approx(1.0)
 
 
 def test_bohm_h_factor_can_be_auto_or_explicit() -> None:
     explicit = bohm_h_factor(
-        {'ion_loss': 'bohm_edge_loss', 'h_factor': 0.42},
+        {'ion_loss': 'bohm', 'h_factor': 0.42},
         pressure_Pa=10.0,
         gas_temperature_K=300.0,
         characteristic_length_m=0.1,
     )
     auto = bohm_h_factor(
-        {'ion_loss': 'bohm_global_loss'},
+        {'ion_loss': 'bohm', 'h_factor': 'auto'},
         pressure_Pa=10.0,
         gas_temperature_K=300.0,
         characteristic_length_m=0.1,
@@ -180,24 +192,19 @@ def test_bohm_h_factor_can_be_auto_or_explicit() -> None:
     assert 0.02 <= auto <= 1.0
 
 
-def test_observables_report_ion_loss_diagnostics() -> None:
+def test_observables_keep_compact_zone_and_surface_columns() -> None:
     built = build_case(load_case_from_yaml(SMOKE_CASE))
     system = built.system
     y0 = system.initial_state()
     rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
 
-    assert rec['ion_loss_family_source'] == 'bohm'
-    assert rec['ion_loss_area_source_m2'] == system.zone_ion_loss_area['source']
-    assert rec['ion_loss_h_factor_source'] == system.zone_ion_loss_h_factor['source']
-    assert rec['ion_loss_characteristic_length_source_m'] == system.zone_ion_loss_characteristic_length_m['source']
-    assert rec['ambipolar_loss_rate_source_s'] == 0.0
     for zone_id in system.zone_ids:
-        assert np.isfinite(rec[f'ion_wall_loss_frequency_{zone_id}_s'])
-        assert np.isfinite(rec[f'ion_wall_loss_source_{zone_id}_m3_s'])
-        assert np.isfinite(rec[f'ion_wall_flux_{zone_id}_m2_s'])
-        assert rec[f'ion_wall_loss_frequency_{zone_id}_s'] >= 0.0
-        assert rec[f'ion_wall_loss_source_{zone_id}_m3_s'] >= 0.0
-        assert rec[f'ion_wall_flux_{zone_id}_m2_s'] >= 0.0
+        assert np.isfinite(rec[f'ne_{zone_id}_m3'])
+        assert np.isfinite(rec[f'mean_energy_{zone_id}_eV'])
+        assert np.isfinite(rec[f'pabs_{zone_id}_W'])
+        assert np.isfinite(rec[f'EoverN_{zone_id}_Td'])
+    assert rec['ion_flux_wafer_m2_s'] >= 0.0
+    assert not any(key.startswith(('ion_loss_', 'ion_wall_', 'ambipolar_loss_')) for key in rec)
 
 
 def test_prescribed_ion_loss_frequency_validates_and_reports_observable(tmp_path: Path) -> None:
@@ -205,7 +212,7 @@ def test_prescribed_ion_loss_frequency_validates_and_reports_observable(tmp_path
     for surface in chamber['surfaces']:
         if surface['surface_id'] == 'source_wall':
             surface['models']['ion_loss'] = 'prescribed_loss_frequency'
-            surface['models']['loss_rate_s'] = 3230.0
+            surface['models']['frequency_s'] = 3230.0
 
     case_path = _write_case_with_chamber(tmp_path, chamber)
     run_config = load_run_config(case_path)
@@ -219,7 +226,8 @@ def test_prescribed_ion_loss_frequency_validates_and_reports_observable(tmp_path
 
     assert system.zone_ion_loss_family['source'] == 'prescribed_loss_frequency'
     assert system.zone_effective_ion_loss_frequency_s['source'] == pytest.approx(3230.0)
-    assert rec['ion_wall_loss_frequency_source_s'] == pytest.approx(3230.0)
+    assert rec['ion_flux_source_wall_m2_s'] >= 0.0
+    assert 'ion_wall_loss_frequency_source_s' not in rec
 
 
 def test_surface_ion_flux_uses_zone_wall_loss_when_no_ied(tmp_path: Path) -> None:
@@ -227,15 +235,18 @@ def test_surface_ion_flux_uses_zone_wall_loss_when_no_ied(tmp_path: Path) -> Non
     for surface in chamber['surfaces']:
         if surface['surface_id'] == 'source_wall':
             surface['models']['ion_loss'] = 'prescribed_loss_frequency'
-            surface['models']['loss_rate_s'] = 3230.0
+            surface['models']['frequency_s'] = 3230.0
 
     case_path = _write_case_with_chamber(tmp_path, chamber)
     built = build_case(load_case_from_yaml(case_path))
     system = built.system
     y0 = system.initial_state()
     rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
+    coupled = system.electrical_adapter.evaluate(0.0, y0, system.current_step(0.0))
+    gas_row = system.gas_core.gas_row(y0, 'source')
+    expected = system.gas_core.ion_wall_loss_flux_m2_s('source', gas_row, coupled.mean_e_by_zone['source'])
 
-    assert rec['ion_flux_source_wall_m2_s'] == pytest.approx(rec['ion_wall_flux_source_m2_s'])
+    assert rec['ion_flux_source_wall_m2_s'] == pytest.approx(expected)
     assert rec['ion_flux_source_wall_m2_s'] >= 0.0
 
 
@@ -245,10 +256,18 @@ def test_surface_ion_flux_prefers_explicit_ied() -> None:
     y0 = system.initial_state()
     step = system.current_step(0.0)
     coupled = system.electrical_adapter.evaluate(0.0, y0, step)
-    coupled.power.metadata.setdefault('surface_ied', {})['source_wall'] = {'ion_flux_m2_s': 123.0}
+    coupled.power.surface_ied['source_wall'] = SurfaceIED(ion_flux_m2_s=123.0, mean_ion_energy_eV=10.0)
     gas_row = system.gas_core.gas_row(y0, 'source')
 
     assert system.surface_core.surface_ion_flux_m2_s('source_wall', 'source', gas_row, coupled) == pytest.approx(123.0)
+
+
+def test_surface_ied_contract_is_compact() -> None:
+    assert set(SurfaceIED.__dataclass_fields__) == {'ion_flux_m2_s', 'mean_ion_energy_eV'}
+
+
+def test_surface_rate_evaluation_has_no_diagnostics_bus() -> None:
+    assert set(SurfaceRateEvaluation.__dataclass_fields__) == {'rate_m2_s', 'd_gas', 'd_surface', 'dTg'}
 
 
 def test_prescribed_ion_loss_frequency_requires_rate_or_diffusion_data(tmp_path: Path) -> None:
@@ -256,26 +275,22 @@ def test_prescribed_ion_loss_frequency_requires_rate_or_diffusion_data(tmp_path:
     for surface in chamber['surfaces']:
         if surface['surface_id'] == 'source_wall':
             surface['models']['ion_loss'] = 'prescribed_loss_frequency'
-            surface['models'].pop('loss_rate_s', None)
-            surface['models'].pop('ambipolar_loss_rate_s', None)
+            surface['models'].pop('frequency_s', None)
             surface['models'].pop('diffusion_coefficient_m2_s', None)
-            surface['models'].pop('ambipolar_diffusion_coefficient_m2_s', None)
 
     case_path = _write_case_with_chamber(tmp_path, chamber)
     with pytest.raises(ValueError, match='ION_LOSS_FREQUENCY_CONFIG_INVALID'):
         load_case_from_yaml(case_path)
 
 
-def test_observables_flatten_numeric_power_port_diagnostics() -> None:
+def test_observables_do_not_flatten_power_port_diagnostics() -> None:
     built = build_case(load_case_from_yaml(SMOKE_CASE))
     system = built.system
     y0 = system.initial_state()
     rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
 
-    assert rec['port_source_rf_absorbed_power_W'] > 0.0
-    assert rec['port_source_rf_frequency_Hz'] == pytest.approx(13.56e6)
-    assert rec['port_wafer_bias_absorbed_power_W'] >= 0.0
-    assert rec['port_wafer_bias_self_bias_V'] <= 0.0
+    assert rec['total_absorbed_power_W'] > 0.0
+    assert not any(key.startswith('port_') for key in rec)
 
 
 def test_case_validation_rejects_mixed_ion_loss_families(tmp_path: Path) -> None:
@@ -302,7 +317,7 @@ def test_case_validation_rejects_mixed_ion_loss_families(tmp_path: Path) -> None
                 'temperature_K': 300.0,
                 'site_density_m2': 1.0e18,
                 'initial_coverages': {},
-                'models': {'ion_loss': 'bohm_edge_loss'},
+                'models': {'ion_loss': 'bohm'},
             },
             {
                 'surface_id': 'wall_diffusion',
@@ -313,7 +328,7 @@ def test_case_validation_rejects_mixed_ion_loss_families(tmp_path: Path) -> None
                 'temperature_K': 300.0,
                 'site_density_m2': 1.0e18,
                 'initial_coverages': {},
-                'models': {'ion_loss': 'ambipolar_diffusion', 'ambipolar_loss_rate_s': 1000.0},
+                'models': {'ion_loss': 'ambipolar_diffusion', 'diffusion_coefficient_m2_s': 0.01, 'diffusion_length_m': 0.1},
             },
         ],
         'gas_inlets': [
@@ -358,3 +373,48 @@ def test_case_validation_rejects_mixed_ion_loss_families(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match='ION_LOSS_MODE_MIXED_IN_ZONE'):
         load_case_from_yaml(case_path)
+
+
+def test_boltzmann_2term_requires_momentum_transfer_cross_section() -> None:
+    class IonizationOnlyCrossSection:
+        target_species = 'Ar'
+        kind = 'ionization'
+        threshold_eV = 15.76
+        energy_loss_eV = 15.76
+
+        def sigma_interp(self, energy_grid):
+            return np.full_like(energy_grid, 1.0e-20, dtype=float)
+
+    model = Boltzmann2TermSwarmModel()
+    swarm = SwarmConfig(
+        closure='mean_energy',
+        mixture_key_species=['Ar'],
+        cache=SwarmCacheConfig(max_entries=1, fraction_decimals=3),
+        boltzmann_2term=Boltzmann2TermConfig(
+            energy_grid=SwarmEnergyGridConfig(min_eV=0.1, max_eV=5.0, n=12),
+            reduced_field_grid_Td=SwarmReducedFieldGridConfig(min=1.0, max=10.0, n=3),
+            max_shape_iterations=2,
+            max_field_iterations=2,
+        ),
+    )
+    model.prepare(
+        mechanism=SimpleNamespace(cross_sections={'xs_ar_ion': IonizationOnlyCrossSection()}, species_by_id={}),
+        chamber=SimpleNamespace(),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(),
+        swarm_config=swarm,
+    )
+
+    with pytest.raises(ValueError, match="momentum-transfer cross section.*'Ar'"):
+        model.evaluate(
+            EEDFRequest(
+                time_s=0.0,
+                zone_id='plasma',
+                composition={'Ar': 1.0e20},
+                electron_density_m3=1.0e16,
+                mean_energy_eV=3.0,
+                reduced_field_Td=5.0,
+                gas_temperature_K=300.0,
+                pressure_Pa=10.0,
+            )
+        )

@@ -161,23 +161,6 @@ class SurfaceCore:
         override = (step.surface_overrides.get(surface_id, {}) or {}).get('temperature_K')
         return float(override) if override is not None else base
 
-    def surface_site_metrics(self, surface_id: str, y: np.ndarray) -> dict[str, float]:
-        sys = self.system
-        mapping = sys.state_layout.surface_index.get(surface_id, {})
-        occ_map = self.surface_site_occupancy.get(surface_id, {})
-        free_site = self.surface_free_site_species.get(surface_id)
-        total = 0.0
-        occupied = 0.0
-        free = 0.0
-        for sp_id, idx in mapping.items():
-            occ = occ_map.get(sp_id, 1.0) * max(float(np.clip(y[idx], 0.0, 1.0)), 0.0)
-            total += occ
-            if sp_id == free_site:
-                free += occ
-            else:
-                occupied += occ
-        return {'occupied_fraction': occupied, 'free_fraction': free, 'total_fraction': total}
-
     def surface_coverage_factor(self, cfg: dict[str, Any] | None, surface_id: str, y: np.ndarray) -> tuple[float, dict[int, float], set[str]]:
         sys = self.system
         if not cfg:
@@ -242,16 +225,15 @@ class SurfaceCore:
         gas_row: np.ndarray,
         coupled: CoupledPlasmaEvaluation,
     ) -> float:
-        ied = ((coupled.power.metadata or {}).get('surface_ied', {}) or {}).get(surface_id, {})
-        if isinstance(ied, dict) and ied.get('ion_flux_m2_s') is not None:
-            return max(float(ied['ion_flux_m2_s']), 0.0)
+        ied = coupled.power.surface_ied.get(surface_id)
+        if ied is not None:
+            return max(float(ied.ion_flux_m2_s), 0.0)
 
-        wall_loss = self.system.gas_core.ion_wall_loss_diagnostics(
+        wall_flux = self.system.gas_core.ion_wall_loss_flux_m2_s(
             zone_id,
             gas_row,
             coupled.mean_e_by_zone[zone_id],
         )
-        wall_flux = float(wall_loss.get('flux_m2_s', 0.0) or 0.0)
         if wall_flux > 0.0:
             return wall_flux
         return max(self._bohm_proxy_ion_flux_m2_s(zone_id, coupled), 0.0)
@@ -261,8 +243,12 @@ class SurfaceCore:
         model = rxn.rate_model
         backend = str(model.get('backend', '')).lower()
         Ts = self.surface_temperature(rxn.surface_id, step)
-        area_surface_ied = (coupled.power.metadata or {}).get('surface_ied', {}).get(rxn.surface_id, {})
-        ion_energy_eV = float(area_surface_ied.get('mean_ion_energy_eV', max(coupled.power.plasma_potential_V - coupled.power.self_bias_V, 0.0)))
+        area_surface_ied = coupled.power.surface_ied.get(rxn.surface_id)
+        ion_energy_eV = (
+            float(area_surface_ied.mean_ion_energy_eV)
+            if area_surface_ied is not None
+            else max(coupled.power.plasma_potential_V - coupled.power.self_bias_V, 0.0)
+        )
         pos_zone = coupled.pos_by_zone[rxn.zone_id]
         ion_flux_total = self.surface_ion_flux_m2_s(rxn.surface_id, rxn.zone_id, gas_row, coupled)
         rate = 1.0
@@ -320,7 +306,7 @@ class SurfaceCore:
                 if sp_id in used_surface_species:
                     continue
                 add_surface_power(sidx, nu)
-        elif backend in {'ion_assisted', 'sputter_yield'}:
+        elif backend == 'ion_assisted':
             primary = ion_reactants[0] if ion_reactants else (gas_reactants[0] if gas_reactants else None)
             if primary is None:
                 return SurfaceRateEvaluation(0.0)
@@ -352,13 +338,6 @@ class SurfaceCore:
                 add_surface_power(sidx, nu)
             for idx2, nu, _sp in gas_reactants:
                 add_gas_power(idx2, nu)
-        elif backend == 'arrhenius':
-            pref = float(model.get('A', 0.0))
-            rate *= pref * rxn.site_density_m2
-            for sidx, nu, _sp in rxn.surface_reactants:
-                add_surface_power(sidx, nu)
-            for idx2, nu, _sp in gas_reactants:
-                add_gas_power(idx2, nu)
         else:
             raise NotImplementedError(f'Unsupported surface rate backend: {backend}')
 
@@ -370,7 +349,6 @@ class SurfaceCore:
             d_gas=d_gas,
             d_surface=d_surface,
             dTg=float(dTg),
-            diagnostics={'ion_energy_eV': ion_energy_eV, 'ion_flux_total': ion_flux_total},
         )
 
     def apply_rhs(self, time_s: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation, dydt: np.ndarray) -> None:
@@ -401,56 +379,3 @@ class SurfaceCore:
             if film_rhs is not None and abs(rxn.film_factor) > 0.0 and rxn.surface_id in sys.state_layout.film_index:
                 fidx = sys.state_layout.film_index[rxn.surface_id] - film_offset
                 film_rhs[fidx] += MONOLAYER_THICKNESS_M * rxn.film_factor * rate / rxn.site_density_m2
-
-    def apply_jacobian(self, time_s: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation, J) -> None:
-        sys = self.system
-        gas = coupled.gas
-        Tg = coupled.gas_temperature
-        for rxn in self.surface_reactions:
-            z = sys.zone_index[rxn.zone_id]
-            eval_ = self.surface_rate(rxn, gas[z], float(Tg[z]), y, step, coupled)
-            rate = eval_.rate_m2_s
-            if rate == 0.0:
-                continue
-            for s, d_rate_dn in eval_.d_gas.items():
-                col = sys.gas_core.gas_state_idx(z, s)
-                for idx, nu, _sp in rxn.delta_gas:
-                    J[sys.gas_core.gas_state_idx(z, idx), col] += rxn.area_over_volume * nu * d_rate_dn
-                if rxn.inventory_idx is not None:
-                    J[rxn.inventory_idx, col] += rxn.area_m2 * d_rate_dn
-                if abs(rxn.film_factor) > 0.0 and rxn.surface_id in sys.state_layout.film_index:
-                    J[sys.state_layout.film_index[rxn.surface_id], col] += MONOLAYER_THICKNESS_M * rxn.film_factor * d_rate_dn / rxn.site_density_m2
-            for sidx, d_rate_dtheta in eval_.d_surface.items():
-                for idx, nu, _sp in rxn.delta_gas:
-                    J[sys.gas_core.gas_state_idx(z, idx), sidx] += rxn.area_over_volume * nu * d_rate_dtheta
-                for idx, nu, _sp in rxn.delta_surface:
-                    J[idx, sidx] += nu * d_rate_dtheta / rxn.site_density_m2
-                if rxn.inventory_idx is not None:
-                    J[rxn.inventory_idx, sidx] += rxn.area_m2 * d_rate_dtheta
-                if abs(rxn.film_factor) > 0.0 and rxn.surface_id in sys.state_layout.film_index:
-                    J[sys.state_layout.film_index[rxn.surface_id], sidx] += MONOLAYER_THICKNESS_M * rxn.film_factor * d_rate_dtheta / rxn.site_density_m2
-            if 'gas_temperature' in sys.state_layout.slices and eval_.dTg != 0.0:
-                col = sys.state_layout.gas_temperature_index[rxn.zone_id]
-                for idx, nu, _sp in rxn.delta_gas:
-                    J[sys.gas_core.gas_state_idx(z, idx), col] += rxn.area_over_volume * nu * eval_.dTg
-                for idx, nu, _sp in rxn.delta_surface:
-                    J[idx, col] += nu * eval_.dTg / rxn.site_density_m2
-                if rxn.inventory_idx is not None:
-                    J[rxn.inventory_idx, col] += rxn.area_m2 * eval_.dTg
-                if abs(rxn.film_factor) > 0.0 and rxn.surface_id in sys.state_layout.film_index:
-                    J[sys.state_layout.film_index[rxn.surface_id], col] += MONOLAYER_THICKNESS_M * rxn.film_factor * eval_.dTg / rxn.site_density_m2
-
-    def surface_net_gas_fluxes(self, state: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation) -> dict[str, dict[str, float]]:
-        sys = self.system
-        gas = coupled.gas
-        fluxes: dict[str, dict[str, float]] = {surface_id: {} for surface_id in sys.surface_ids}
-        for rxn in self.surface_reactions:
-            z = sys.zone_index[rxn.zone_id]
-            eval_ = self.surface_rate(rxn, gas[z], float(coupled.gas_temperature[z]), state, step, coupled)
-            rate = eval_.rate_m2_s
-            if rate == 0.0:
-                continue
-            bucket = fluxes.setdefault(rxn.surface_id, {})
-            for idx, nu, sp_id in rxn.delta_gas:
-                bucket[sp_id] = bucket.get(sp_id, 0.0) - nu * rate
-        return fluxes

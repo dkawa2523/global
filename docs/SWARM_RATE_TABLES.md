@@ -60,6 +60,11 @@ Supported HDF5 contents are:
 
 The supported table grid is either `mean_energy_eV` or a field grid identified by `EoverN_Td` / `effective_field_Td` in the converter input and stored as `effective_field_Td` in HDF5. The backend clips lookup coordinates to the available table range, so production cases should validate that operating points remain inside the intended range.
 
+At runtime, all EEDF backends expose transport through a typed
+`EEDFTransport` object with `mean_energy_eV`, `mobility_m2_V_s`,
+`diffusion_m2_s`, `effective_field_Td`, and `lookup_mode`. Backend names and
+table metadata are not part of that runtime transport contract.
+
 During case assembly, the backend checks that enabled gas-phase
 `electron_impact_xsec` reactions have matching `rate_coefficients/<cross_section_id>`
 datasets. Missing required rates fail fast instead of silently falling back to

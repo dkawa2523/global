@@ -219,6 +219,10 @@ def validate_mechanism(mechanism: MechanismBundle) -> ValidationReport:
         _check_reaction(rxn)
 
     if not mechanism.momentum_transfer_cross_sections:
-        report.add('WARNING', 'NO_MOMENTUM_XS', 'No momentum-transfer cross sections were provided; swarm models will fall back to synthetic transport channels')
+        report.add(
+            'WARNING',
+            'NO_MOMENTUM_XS',
+            'No momentum-transfer cross sections were provided; boltzmann_2term requires one for each neutral target species.',
+        )
 
     return report

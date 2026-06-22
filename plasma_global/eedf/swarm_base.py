@@ -15,10 +15,18 @@ class SwarmModel:
     without changing the plasma chemistry code.
     """
 
-    def prepare(self, mechanism: Any, chamber: Any, run_config: Any, swarm_config: Any | None = None) -> None:
+    def prepare(
+        self,
+        mechanism: Any,
+        chamber: Any,
+        run_config: Any,
+        resolved_paths: Any,
+        swarm_config: Any | None = None,
+    ) -> None:
         self.mechanism = mechanism
         self.chamber = chamber
         self.run_config = run_config
+        self.resolved_paths = resolved_paths
         self.swarm_config = swarm_config
 
     def evaluate(self, request: EEDFRequest) -> EEDFResult:  # pragma: no cover - interface

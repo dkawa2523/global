@@ -232,36 +232,42 @@ def write_bundle(output: Path, momentum: Block, ionization: Block, excitations: 
         encoding='utf-8',
     )
 
-    model_lines = ['rate_models:']
-    model_lines.extend([
+    electron_model_lines = ['rate_models:']
+    energy_model_lines = ['rate_models:']
+    electron_model_lines.extend([
         '  RM_E_AR_ION:',
         '    backend: electron_impact_xsec',
         '    cross_section_id: xs_ar_ionization_zenodo',
         '    branching_yield: 1.0',
+    ])
+    energy_model_lines.extend([
         '  EM_E_AR_ION:',
         '    backend: constant_event_loss',
         f'    energy_loss_eV: {ionization.threshold_eV:.8g}',
     ])
     for i, block in enumerate(excitations, start=1):
-        model_lines.extend([
+        electron_model_lines.extend([
             f'  RM_E_AR_EXC_{i:02d}:',
             '    backend: electron_impact_xsec',
             f'    cross_section_id: xs_ar_excitation_{i:02d}_zenodo',
             '    branching_yield: 1.0',
+        ])
+        energy_model_lines.extend([
             f'  EM_E_AR_EXC_{i:02d}:',
             '    backend: constant_event_loss',
             f'    energy_loss_eV: {block.threshold_eV:.8g}',
         ])
-    (output / 'reaction_models.yaml').write_text('\n'.join(model_lines) + '\n', encoding='utf-8')
+    (output / 'electron_impact_models.yaml').write_text('\n'.join(electron_model_lines) + '\n', encoding='utf-8')
+    (output / 'energy_loss_models.yaml').write_text('\n'.join(energy_model_lines) + '\n', encoding='utf-8')
 
     (output / 'aliases.yaml').write_text('aliases:\n  Ar+: Ar_plus\n', encoding='utf-8')
     (output / 'chemistry_manifest.yaml').write_text(textwrap.dedent("""\
-        schema_version: 1
-        kind: chemistry_manifest
         species_file: species.csv
         gas_reactions_file: gas_reactions.csv
         surface_reactions_file: surface_reactions.csv
-        reaction_models_file: reaction_models.yaml
+        model_files:
+          electron_impact: electron_impact_models.yaml
+          energy_loss: energy_loss_models.yaml
         cross_sections_manifest: cross_sections_manifest.yaml
         aliases_file: aliases.yaml
     """), encoding='utf-8')

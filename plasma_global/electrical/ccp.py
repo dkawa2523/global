@@ -3,30 +3,35 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from plasma_global.electrical.base import PowerRequest, PowerResult
+from plasma_global.electrical.base import PowerRequest, PowerResult, SurfaceIED, ZoneElectricalState
+from plasma_global.electrical.circuit_models import waveform_multiplier
 from plasma_global.electrical.direct_power import DirectPowerBackend
-from plasma_global.electrical.sheath import build_species_resolved_ied, debye_length_m
+from plasma_global.electrical.sheath import build_surface_ied, debye_length_m
 
 EPS0 = 8.8541878128e-12
 
 
 class CCPBackend(DirectPowerBackend):
-    def prepare(self, chamber: Any, recipe: Any, run_config: Any) -> None:
-        super().prepare(chamber=chamber, recipe=recipe, run_config=run_config)
+    def prepare(self, chamber: Any, recipe: Any, run_config: Any, resolved_paths: Any) -> None:
+        super().prepare(chamber=chamber, recipe=recipe, run_config=run_config, resolved_paths=resolved_paths)
         self._zone_ground_area: dict[str, float] = {}
         for zone in chamber.zones:
             self._zone_ground_area[zone.zone_id] = sum(s.area_m2 for s in chamber.surfaces_by_zone.get(zone.zone_id, []))
 
-    def _zone_meta(self, request: PowerRequest, zone_id: str) -> tuple[float, float, float, float, float, float, dict[str, dict[str, float]]]:
-        md = request.metadata or {}
-        ne = float((md.get('zone_electron_density_m3') or {}).get(zone_id, 1.0e15))
-        te = float((md.get('zone_mean_energy_eV') or {}).get(zone_id, 3.0))
-        ion_mass = float((md.get('zone_dominant_ion_mass_kg') or {}).get(zone_id, 6.63e-26))
-        pos = float((md.get('zone_positive_ion_density_m3') or {}).get(zone_id, ne))
-        pressure = float((md.get('zone_pressure_Pa') or {}).get(zone_id, self.chamber.zone_by_id[zone_id].pressure_Pa))
-        gas_temperature = float((md.get('zone_gas_temperature_K') or {}).get(zone_id, self.chamber.zone_by_id[zone_id].gas_temperature_K))
-        ion_species = dict((md.get('zone_positive_ion_species') or {}).get(zone_id, {}) or {})
-        return ne, te, ion_mass, pos, pressure, gas_temperature, ion_species
+    def _zone_meta(self, request: PowerRequest, zone_id: str) -> ZoneElectricalState:
+        zone = self.chamber.zone_by_id[zone_id]
+        return request.zone_state.get(
+            zone_id,
+            ZoneElectricalState(
+                electron_density_m3=1.0e15,
+                mean_energy_eV=3.0,
+                positive_ion_density_m3=1.0e15,
+                dominant_ion_mass_kg=6.63e-26,
+                pressure_Pa=zone.pressure_Pa,
+                gas_temperature_K=zone.gas_temperature_K,
+                total_density_m3=0.0,
+            ),
+        )
 
     def _surface_area_for_port(self, port_id: str) -> tuple[str | None, float, float]:
         port = self.chamber.power_port_by_id[port_id]
@@ -58,13 +63,13 @@ class CCPBackend(DirectPowerBackend):
         port = self.chamber.power_port_by_id[port_id]
         zone_id = cfg.get('zone_id') or port.zone_id
         zone = self.chamber.zone_by_id[zone_id]
-        ne, te, ion_mass, pos, pressure, gas_temperature, ion_species = self._zone_meta(request, zone_id)
+        state = self._zone_meta(request, zone_id)
+        ne = state.electron_density_m3
+        te = state.mean_energy_eV
         surface_id, area_p, area_g = self._surface_area_for_port(port_id)
         area_ratio = max(area_g / max(area_p, 1.0e-8), 1.0)
         frequency_Hz = float(cfg.get('frequency_Hz') or cfg.get('carrier_frequency_Hz') or port.parameters.get('frequency_Hz') or port.parameters.get('carrier_frequency_Hz') or 2.0e6)
-        waveform = str(cfg.get('waveform', 'cw')).lower()
-        pulsed = waveform.startswith('pulsed')
-        mult = self._waveform_multiplier(request.time_s, cfg)
+        mult = waveform_multiplier(request.time_s, cfg)
         mode = str(cfg.get('mode') or port.parameters.get('control_mode') or 'absorbed_power').lower()
         Rb = self._bulk_resistance_ohm(ne, frequency_Hz, zone.volume_m3, area_p)
         if 'voltage' in mode:
@@ -95,18 +100,14 @@ class CCPBackend(DirectPowerBackend):
         sheath_powered_V = max(0.0, 0.5 * v_rf_pk * (1.0 + eta))
         sheath_ground_V = max(0.0, 0.5 * v_rf_pk * (1.0 - eta))
         plasma_potential = max(3.0 * te, 8.0) + 0.25 * (sheath_powered_V + sheath_ground_V)
-        ion_payload = build_species_resolved_ied(
-            ion_species=ion_species,
+        surface_ied = build_surface_ied(
             ne_m3=ne,
             te_eV=te,
+            ion_mass_kg=state.dominant_ion_mass_kg,
             sheath_voltage_V=sheath_powered_V,
-            rf_frequency_Hz=frequency_Hz,
-            pressure_Pa=pressure,
-            gas_temperature_K=gas_temperature,
+            pressure_Pa=state.pressure_Pa,
+            gas_temperature_K=state.gas_temperature_K,
             area_m2=area_p,
-            pulsed=pulsed,
-            plasma_potential_V=plasma_potential,
-            fallback_ion_mass_kg=ion_mass,
         )
         return {
             'zone_id': zone_id,
@@ -121,17 +122,16 @@ class CCPBackend(DirectPowerBackend):
             'plasma_potential_V': plasma_potential,
             'sheath_voltage_powered_V': sheath_powered_V,
             'sheath_voltage_ground_V': sheath_ground_V,
-            'pressure_Pa': pressure,
-            'gas_temperature_K': gas_temperature,
+            'pressure_Pa': state.pressure_Pa,
+            'gas_temperature_K': state.gas_temperature_K,
             'surface_id': surface_id,
-            'ied': ion_payload,
+            'ied': surface_ied,
         }
 
     def evaluate(self, request: PowerRequest) -> PowerResult:
         p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         p_port: dict[str, float] = {}
-        port_details: dict[str, Any] = {}
-        surface_ied: dict[str, Any] = {}
+        surface_ied: dict[str, SurfaceIED] = {}
         bias_contrib: list[tuple[float, float]] = []
         plasma_potentials: list[tuple[float, float]] = []
 
@@ -144,7 +144,6 @@ class CCPBackend(DirectPowerBackend):
                 absorbed = detail['absorbed_power_W']
                 p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
                 p_port[port_id] = absorbed
-                port_details[port_id] = {k: v for k, v in detail.items() if k != 'ied'}
                 if detail.get('surface_id') is not None:
                     ied = detail['ied']
                     surface_ied[detail['surface_id']] = ied
@@ -154,14 +153,9 @@ class CCPBackend(DirectPowerBackend):
             else:
                 zone_id = cfg.get('zone_id') or port.zone_id
                 base = float(cfg.get('value_W', cfg.get('value', 0.0)))
-                value = base * self._waveform_multiplier(request.time_s, cfg)
+                value = base * waveform_multiplier(request.time_s, cfg)
                 p_zone[zone_id] = p_zone.get(zone_id, 0.0) + value
                 p_port[port_id] = value
-                port_details[port_id] = {
-                    'zone_id': zone_id,
-                    'delivered_power_W': value,
-                    'absorbed_power_W': value,
-                }
         total_w = sum(w for w, _ in bias_contrib)
         self_bias = sum(w * v for w, v in bias_contrib) / max(total_w, 1.0) if bias_contrib else 0.0
         total_pp = sum(w for w, _ in plasma_potentials)
@@ -171,9 +165,6 @@ class CCPBackend(DirectPowerBackend):
             port_power_W=p_port,
             self_bias_V=self_bias,
             plasma_potential_V=plasma_potential,
-            metadata={
-                'port_details': port_details,
-                'surface_ied': surface_ied,
-                'zone_reduced_field_Td': {z: 35.0 + 0.02 * p for z, p in p_zone.items()},
-            },
+            zone_reduced_field_Td={z: 35.0 + 0.02 * p for z, p in p_zone.items()},
+            surface_ied=surface_ied,
         )

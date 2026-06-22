@@ -43,7 +43,6 @@ class SurfaceRateEvaluation:
     d_gas: dict[int, float] = field(default_factory=dict)
     d_surface: dict[int, float] = field(default_factory=dict)
     dTg: float = 0.0
-    diagnostics: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -58,5 +57,4 @@ class CoupledPlasmaEvaluation:
     pos_by_zone: dict[str, float]
     ion_mass_by_zone: dict[str, float]
     pressure_by_zone: dict[str, float]
-    ion_species_by_zone: dict[str, dict[str, dict[str, float]]]
     total_density_by_zone: dict[str, float]

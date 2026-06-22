@@ -9,35 +9,6 @@ from plasma_global.electrical.circuit_models import first_present, waveform_mult
 
 POWER_KEYS = ('absorbed_power_W', 'power_W', 'value_W')
 VOLTAGE_KEYS = ('voltage_rms_V', 'voltage_V', 'value_V')
-HF_ROLE_TOKENS = ('hf', 'source', 'icp')
-LF_ROLE_TOKENS = ('lf', 'bias', 'ccp')
-
-
-def _cfg_role(cfg: dict[str, Any]) -> str:
-    return str(cfg.get('role') or cfg.get('kind') or '').lower()
-
-
-def _range_hint_for_role(cfg: dict[str, Any]) -> dict[str, tuple[float, float]]:
-    role = _cfg_role(cfg)
-    if any(token in role for token in LF_ROLE_TOKENS):
-        return {
-            'coupling_efficiency': (0.05, 0.60),
-            'self_bias_fraction': (0.10, 0.80),
-            'effective_impedance_ohm': (10.0, 1000.0),
-            'reduced_field_per_sqrt_W_Td': (0.0, 10.0),
-        }
-    if any(token in role for token in HF_ROLE_TOKENS):
-        return {
-            'coupling_efficiency': (0.30, 0.90),
-            'effective_impedance_ohm': (5.0, 500.0),
-            'reduced_field_per_sqrt_W_Td': (0.0, 10.0),
-        }
-    return {
-        'coupling_efficiency': (0.05, 1.0),
-        'self_bias_fraction': (0.0, 1.0),
-        'effective_impedance_ohm': (5.0, 1000.0),
-        'reduced_field_per_sqrt_W_Td': (0.0, 10.0),
-    }
 
 
 def rf_frequency_Hz(cfg: dict[str, Any]) -> float:
@@ -68,32 +39,6 @@ def validate_rf_envelope_port(cfg: dict[str, Any]) -> None:
     field_coeff = cfg.get('reduced_field_per_sqrt_W_Td', cfg.get('reduced_field_per_sqrt_W'))
     if field_coeff is not None and float(field_coeff) < 0.0:
         raise ValueError('rf_envelope reduced_field_per_sqrt_W_Td must be non-negative.')
-
-
-def rf_envelope_calibration_warnings(cfg: dict[str, Any]) -> list[str]:
-    warnings: list[str] = []
-    role = _cfg_role(cfg) or 'rf'
-    ranges = _range_hint_for_role(cfg)
-    if 'coupling_efficiency' not in cfg:
-        warnings.append(
-            f'rf_envelope {role} uses the default coupling_efficiency=1.0; calibrate this from absorbed/source power.'
-        )
-    if any(k in cfg and cfg[k] is not None for k in VOLTAGE_KEYS) and 'effective_impedance_ohm' not in cfg:
-        warnings.append(f'rf_envelope {role} uses the default effective_impedance_ohm=50.0; calibrate from V/I or V^2/P.')
-    for key, (lo, hi) in ranges.items():
-        value = cfg.get(key)
-        if value is None and key == 'reduced_field_per_sqrt_W_Td':
-            value = cfg.get('reduced_field_per_sqrt_W')
-        if value is None:
-            continue
-        x = float(value)
-        if x < lo or x > hi:
-            warnings.append(
-                f'rf_envelope {role} {key}={x:g} is outside the suggested calibration range [{lo:g}, {hi:g}].'
-            )
-    if any(token in role for token in LF_ROLE_TOKENS) and 'self_bias_fraction' not in cfg:
-        warnings.append(f'rf_envelope {role} uses the default self_bias_fraction=0.35; calibrate against measured/self-bias voltage.')
-    return warnings
 
 
 def _role(port: Any, cfg: dict[str, Any]) -> str:
@@ -134,7 +79,6 @@ class RFEnvelopeBackend(ElectricalBackend):
     def evaluate(self, request: PowerRequest) -> PowerResult:
         p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         p_port: dict[str, float] = {}
-        port_details: dict[str, dict[str, float | str]] = {}
         zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         bias_terms: list[tuple[float, float]] = []
         plasma_terms: list[tuple[float, float]] = []
@@ -146,14 +90,12 @@ class RFEnvelopeBackend(ElectricalBackend):
             validate_rf_envelope_port(cfg)
             zone_id = str(cfg.get('zone_id') or port.zone_id)
             role = _role(port, cfg)
-            frequency = rf_frequency_Hz(cfg)
             mult = waveform_multiplier(request.time_s, cfg)
-            commanded_power, voltage_rms, impedance = _command_power_and_voltage(cfg)
+            commanded_power, voltage_rms, _impedance = _command_power_and_voltage(cfg)
             delivered = max(commanded_power * mult, 0.0)
             voltage_rms *= mult
             coupling = min(max(float(cfg.get('coupling_efficiency', 1.0)), 0.0), 1.0)
             absorbed = coupling * delivered
-            current_rms = voltage_rms / max(impedance, 1.0e-30)
 
             base_field = float(cfg.get('base_reduced_field_Td', cfg.get('reduced_field_Td', 0.0)))
             field_coeff = float(cfg.get('reduced_field_per_sqrt_W_Td', cfg.get('reduced_field_per_sqrt_W', 0.0)))
@@ -174,21 +116,6 @@ class RFEnvelopeBackend(ElectricalBackend):
 
             p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
             p_port[port_id] = absorbed
-            port_details[port_id] = {
-                'backend': 'rf_envelope',
-                'zone_id': zone_id,
-                'role': role or 'rf',
-                'frequency_Hz': frequency,
-                'delivered_power_W': delivered,
-                'absorbed_power_W': absorbed,
-                'coupling_efficiency': coupling,
-                'voltage_rms_V': voltage_rms,
-                'current_rms_A': current_rms,
-                'effective_impedance_ohm': impedance,
-                'self_bias_V': self_bias,
-                'reduced_field_Td': reduced_field,
-                'waveform_multiplier': mult,
-            }
 
         total_bias_weight = sum(w for w, _ in bias_terms)
         self_bias_V = sum(w * v for w, v in bias_terms) / max(total_bias_weight, 1.0e-30) if bias_terms else 0.0
@@ -202,15 +129,5 @@ class RFEnvelopeBackend(ElectricalBackend):
             port_power_W=p_port,
             self_bias_V=self_bias_V,
             plasma_potential_V=plasma_potential_V,
-            metadata={
-                'port_details': port_details,
-                'surface_ied': {},
-                'zone_reduced_field_Td': zone_reduced_field,
-                'circuit_interface': {
-                    'kind': 'rf_cycle_averaged_envelope',
-                    'model': 'rf_envelope',
-                    'version': 1,
-                    'external_circuit_ready': True,
-                },
-            },
+            zone_reduced_field_Td=zone_reduced_field,
         )

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from plasma_global.electrical.base import PowerRequest
+from plasma_global.electrical.base import PowerRequest, ZoneElectricalState
 from plasma_global.electrical.circuit_models import DCSeriesCircuitConfig, DCSeriesCircuitModel, PlasmaLoadState
 from plasma_global.electrical.dc_series import DCSeriesCircuitBackend
 from plasma_global.workflows.context import ELECTRICAL_REGISTRY, load_case_from_yaml
@@ -109,7 +109,7 @@ def test_dc_series_model_supports_conductance_multiplier() -> None:
     assert boosted_solution.gap_voltage_V < base_solution.gap_voltage_V
 
 
-def test_dc_series_backend_exposes_required_circuit_metadata() -> None:
+def test_dc_series_backend_reports_power_and_reduced_field() -> None:
     zone = SimpleNamespace(zone_id='plasma', pressure_Pa=100.0, gas_temperature_K=300.0)
     port = SimpleNamespace(
         port_id='dc_drive',
@@ -143,7 +143,12 @@ def test_dc_series_backend_exposes_required_circuit_metadata() -> None:
         }
     )
     backend = DCSeriesCircuitBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(),
+    )
 
     on_result = backend.evaluate(
         PowerRequest(
@@ -151,12 +156,17 @@ def test_dc_series_backend_exposes_required_circuit_metadata() -> None:
             state_vector=None,
             recipe_step=step,
             chamber=chamber,
-            metadata={
-                'zone_electron_density_m3': {'plasma': 1.0e16},
-                'zone_mean_energy_eV': {'plasma': 3.0},
-                'zone_pressure_Pa': {'plasma': 100.0},
-                'zone_gas_temperature_K': {'plasma': 300.0},
-                'zone_electron_mobility_m2_V_s': {'plasma': 0.2},
+            zone_state={
+                'plasma': ZoneElectricalState(
+                    electron_density_m3=1.0e16,
+                    mean_energy_eV=3.0,
+                    positive_ion_density_m3=1.0e16,
+                    dominant_ion_mass_kg=6.63e-26,
+                    pressure_Pa=100.0,
+                    gas_temperature_K=300.0,
+                    total_density_m3=0.0,
+                    electron_mobility_m2_V_s=0.2,
+                ),
             },
         )
     )
@@ -166,16 +176,23 @@ def test_dc_series_backend_exposes_required_circuit_metadata() -> None:
             state_vector=None,
             recipe_step=step,
             chamber=chamber,
-            metadata={'zone_electron_density_m3': {'plasma': 1.0e16}},
+            zone_state={
+                'plasma': ZoneElectricalState(
+                    electron_density_m3=1.0e16,
+                    mean_energy_eV=3.0,
+                    positive_ion_density_m3=1.0e16,
+                    dominant_ion_mass_kg=6.63e-26,
+                    pressure_Pa=100.0,
+                    gas_temperature_K=300.0,
+                    total_density_m3=0.0,
+                ),
+            },
         )
     )
 
-    detail = on_result.metadata['port_details']['dc_drive']
-    assert detail['backend'] == 'dc_series_circuit'
-    assert detail['gap_voltage_V'] > 0.0
-    assert detail['current_A'] > 0.0
-    assert detail['electron_mobility_m2_V_s'] == pytest.approx(0.05)
-    assert on_result.metadata['circuit_interface']['external_circuit_ready'] is True
+    assert on_result.port_power_W['dc_drive'] > 0.0
+    assert on_result.absorbed_power_W_by_zone['plasma'] == pytest.approx(on_result.port_power_W['dc_drive'])
+    assert on_result.zone_reduced_field_Td['plasma'] > 0.0
     assert off_result.port_power_W['dc_drive'] == 0.0
 
 

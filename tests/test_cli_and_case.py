@@ -17,9 +17,6 @@ def test_smoke_case_validates() -> None:
     loaded = load_case_from_yaml(SMOKE_CASE)
     assert loaded.run_config.case.name == 'smoke_swarm'
     assert not any(msg['level'] == 'ERROR' for msg in loaded.validation_messages)
-    assert any(msg['code'] == 'SURFACE_MODELS_METADATA_ONLY' for msg in loaded.validation_messages)
-    metadata_messages = [msg['message'] for msg in loaded.validation_messages if msg['code'] == 'SURFACE_MODELS_METADATA_ONLY']
-    assert all('ion_loss' not in msg for msg in metadata_messages)
 
 
 def test_backend_catalog_exposes_descriptions() -> None:
@@ -42,14 +39,6 @@ def test_state_layout_labels_are_stable() -> None:
 
 def test_cli_validate_returns_success() -> None:
     assert main(['validate', str(SMOKE_CASE)]) == 0
-
-
-def test_cli_check_jacobian_reports_grouped_diagnostics(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(['check-jacobian', str(SMOKE_CASE), '--top', '2']) == 0
-    out = capsys.readouterr().out
-    assert 'max_relative_error:' in out
-    assert 'group_max_relative_error:' in out
-    assert 'gas_densities:' in out
 
 
 def test_legacy_run_yaml_shape_is_rejected(tmp_path: Path) -> None:
@@ -81,4 +70,37 @@ def test_schema_version_one_is_validation_error(tmp_path: Path) -> None:
     case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
 
     with pytest.raises(ValueError, match='UNSUPPORTED_SCHEMA_VERSION'):
+        load_case_from_yaml(case_path)
+
+
+def test_chemistry_directory_config_is_rejected(tmp_path: Path) -> None:
+    raw = yaml.safe_load(SMOKE_CASE.read_text(encoding='utf-8'))
+    raw['include'] = str((SMOKE_CASE.parent / raw['include']).resolve())
+    raw['files']['chemistry'] = {'directory': str(ROOT / 'examples' / 'chemistry')}
+    case_path = tmp_path / 'case_chemistry_directory.yaml'
+    case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='Unsupported files.chemistry keys: directory'):
+        load_case_from_yaml(case_path)
+
+
+def test_unknown_outputs_key_is_rejected_at_load_time(tmp_path: Path) -> None:
+    raw = yaml.safe_load(SMOKE_CASE.read_text(encoding='utf-8'))
+    raw['include'] = str((SMOKE_CASE.parent / raw['include']).resolve())
+    raw.setdefault('outputs', {})['debug_bundle'] = True
+    case_path = tmp_path / 'case_unknown_outputs.yaml'
+    case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='Unsupported outputs keys: debug_bundle'):
+        load_case_from_yaml(case_path)
+
+
+def test_unknown_swarm_key_is_rejected_at_load_time(tmp_path: Path) -> None:
+    raw = yaml.safe_load(SMOKE_CASE.read_text(encoding='utf-8'))
+    raw['include'] = str((SMOKE_CASE.parent / raw['include']).resolve())
+    raw.setdefault('swarm', {})['debug_transport_dump'] = True
+    case_path = tmp_path / 'case_unknown_swarm.yaml'
+    case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='Unsupported swarm keys: debug_transport_dump'):
         load_case_from_yaml(case_path)

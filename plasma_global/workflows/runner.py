@@ -9,7 +9,7 @@ from plasma_global.chemistry.provenance import chemistry_provenance_summary
 from plasma_global.config.export import write_effective_config, write_resolved_paths
 from plasma_global.io.hdf5_writer import write_observables_csv, write_solution_h5, write_summary_yaml
 from plasma_global.numerics.solver_base import SolverResult
-from plasma_global.observables.defaults import observables_dataframe, summarize_solution
+from plasma_global.observables.defaults import summarize_solution
 from plasma_global.plotters.defaults import make_requested_plots
 from plasma_global.workflows.context import build_case, load_case_from_yaml
 
@@ -44,23 +44,11 @@ def _concatenate(results: list[SolverResult]) -> SolverResult:
     return SolverResult(t=t, y=y, success=success, status=status, message=message, diagnostics=diagnostics)
 
 
-def _electrical_coupling_summary(system: Any) -> dict[str, Any] | None:
-    power = getattr(getattr(system, 'electrical_adapter', None), 'last_power', None)
-    if power is None:
-        power = getattr(system, '_last_power', None)
-    circuit_interface = ((getattr(power, 'metadata', None) or {}).get('circuit_interface') if power is not None else None)
-    if isinstance(circuit_interface, dict):
-        return {'circuit_interface': circuit_interface}
-    return None
-
-
 def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
     loaded = load_case_from_yaml(run_yaml_path)
     built = build_case(loaded)
 
     system = built.system
-    if hasattr(system, 'reset_numerical_diagnostics'):
-        system.reset_numerical_diagnostics()
     recipe = loaded.recipe
     y0 = system.initial_state()
 
@@ -76,26 +64,17 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
         if not seg.success:
             step_id = getattr(step, 'step_id', f'step_{len(results)}')
             raise RuntimeError(f"Solver failed in recipe step {step_id!r}: {seg.message}")
-        seg.y = system.project_trajectory(seg.y, count_diagnostics=True)
+        seg.y = system.project_trajectory(seg.y)
         results.append(seg)
-        y0 = system.project_state(seg.y[:, -1].copy(), count_diagnostics=False)
+        y0 = system.project_state(seg.y[:, -1].copy())
         if int(seg.diagnostics.get('steady_state_event_count', 0) or 0) > 0:
             break
 
     solution = _concatenate(results)
-    solution.y = system.project_trajectory(solution.y, count_diagnostics=False)
-    if solution.t.size:
-        system.update_final_rhs_diagnostics(float(solution.t[-1]), solution.y[:, -1])
-    system.diagnostics['solver_event_count'] = int(solution.diagnostics.get('solver_event_count', 0) or 0)
-    system.diagnostics['steady_state_event_count'] = int(solution.diagnostics.get('steady_state_event_count', 0) or 0)
-    solution.diagnostics.update(system.diagnostics)
-    solution.diagnostics['chemistry_provenance'] = chemistry_provenance_summary(loaded.mechanism)
-    solution.diagnostics['observables'] = system.compute_observables(solution.t, solution.y)
-    electrical_coupling = _electrical_coupling_summary(system)
-    if electrical_coupling:
-        solution.diagnostics['electrical_coupling'] = electrical_coupling
-    summary = summarize_solution(solution)
-    observables = observables_dataframe(solution)
+    solution.y = system.project_trajectory(solution.y)
+    chemistry_provenance = chemistry_provenance_summary(loaded.mechanism)
+    observables = system.compute_observables(solution.t, solution.y)
+    summary = summarize_solution(solution, observables, chemistry_provenance)
 
     output_dir = Path(loaded.resolved_paths.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -105,11 +84,11 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
     if loaded.run_config.runtime.export_resolved_paths:
         write_resolved_paths(output_dir / 'resolved_paths.yaml', loaded.resolved_paths)
 
-    if getattr(loaded.run_config.outputs.formats, 'solution_h5', False):
+    if loaded.run_config.outputs.formats.solution_h5:
         write_solution_h5(output_dir / 'solution.h5', solution, state_labels=system.state_labels())
-    if getattr(loaded.run_config.outputs.formats, 'observables_csv', False):
+    if loaded.run_config.outputs.formats.observables_csv:
         write_observables_csv(output_dir / 'observables.csv', observables)
-    if getattr(loaded.run_config.outputs.formats, 'summary_yaml', False):
+    if loaded.run_config.outputs.formats.summary_yaml:
         write_summary_yaml(output_dir / 'summary.yaml', summary)
     make_requested_plots(loaded.run_config, observables, output_dir)
 
@@ -120,6 +99,8 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
         'recipe': loaded.recipe,
         'mechanism': loaded.mechanism,
         'validation_messages': loaded.validation_messages,
+        'chemistry_provenance': chemistry_provenance,
+        'observables': observables,
         'summary': summary,
         'output_dir': str(output_dir),
         'solution': solution,

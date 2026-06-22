@@ -4,8 +4,8 @@ from pathlib import Path
 
 import numpy as np
 
-from plasma_global.eedf.base import EEDFRequest, EEDFResult
-from plasma_global.eedf.swarm_backend import SWARM_MODEL_REGISTRY, SwarmEEDFBackend
+from plasma_global.eedf.base import EEDFRequest, EEDFResult, EEDFTransport
+from plasma_global.eedf.swarm_backend import SwarmEEDFBackend
 from plasma_global.eedf.swarm_base import SwarmModel
 
 
@@ -27,12 +27,12 @@ class TabulatedSwarmModel(SwarmModel):
     `maxwell` backend for cheap smoke or development runs.
     """
 
-    def prepare(self, mechanism, chamber, run_config, swarm_config=None) -> None:
-        super().prepare(mechanism, chamber, run_config, swarm_config)
+    def prepare(self, mechanism, chamber, run_config, resolved_paths, swarm_config=None) -> None:
+        super().prepare(mechanism, chamber, run_config, resolved_paths, swarm_config)
         self.table_path = None
-        self.lookup_mode = str(getattr(swarm_config, 'closure', 'auto') or 'auto').lower() if swarm_config else 'auto'
+        self.lookup_mode = str(swarm_config.closure or 'auto').lower() if swarm_config else 'auto'
         if swarm_config is not None:
-            table_cfg = getattr(swarm_config, 'table', None)
+            table_cfg = swarm_config.table
             path = getattr(table_cfg, 'file', None)
             table_lookup = getattr(table_cfg, 'lookup', None)
             if table_lookup:
@@ -40,7 +40,7 @@ class TabulatedSwarmModel(SwarmModel):
             if path:
                 self.table_path = Path(path)
                 if not self.table_path.is_absolute():
-                    self.table_path = Path(run_config.paths.chemistry_dir).joinpath(path).resolve()
+                    self.table_path = Path(resolved_paths.chemistry_dir).joinpath(path).resolve()
         if self.table_path is None:
             raise ValueError('rate_table EEDF backend requires swarm.table.file.')
         if not self.table_path.exists():
@@ -161,21 +161,16 @@ class TabulatedSwarmModel(SwarmModel):
         return EEDFResult(
             rate_coefficients=k_map,
             d_rate_d_mean_energy_eV=dk_map,
-            transport={
-                'mean_energy_eV': self._interp(axis, self.mean_energy, x0),
-                'mobility_m2_V_s': self._interp(axis, self.mobility, x0),
-                'diffusion_m2_s': self._interp(axis, self.diffusion, x0),
-                'effective_field_Td': self._interp(axis, self.eff_field, x0),
-                'swarm_model': 'table',
-                'lookup_mode': lookup,
-                'grid_column': self.grid_column,
-            },
+            transport=EEDFTransport(
+                mean_energy_eV=self._interp(axis, self.mean_energy, x0),
+                mobility_m2_V_s=self._interp(axis, self.mobility, x0),
+                diffusion_m2_s=self._interp(axis, self.diffusion, x0),
+                effective_field_Td=self._interp(axis, self.eff_field, x0),
+                lookup_mode=lookup,
+            ),
         )
 
 
 class TableEEDFBackend(SwarmEEDFBackend):
     def __init__(self) -> None:
         super().__init__(forced_model_name='table')
-
-
-SWARM_MODEL_REGISTRY.register('table', lambda **kwargs: TabulatedSwarmModel())

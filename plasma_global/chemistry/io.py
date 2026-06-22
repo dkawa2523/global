@@ -98,17 +98,31 @@ def _resolve(base_dir: Path, value: str | None) -> Path | None:
 
 def _load_chemistry_manifest(path: Path) -> dict[str, Any]:
     raw = _load_yaml(path)
+    allowed = {
+        'species_file',
+        'gas_reactions_file',
+        'surface_reactions_file',
+        'aliases_file',
+        'cross_sections_manifest',
+        'model_files',
+    }
+    unsupported = sorted(str(k) for k in raw if str(k) not in allowed)
+    if unsupported:
+        raise ValueError(f'Unsupported chemistry manifest keys: {", ".join(unsupported)}. Use model_files instead.')
+    required = ['species_file', 'gas_reactions_file', 'surface_reactions_file']
+    missing = [key for key in required if not raw.get(key)]
+    if missing:
+        raise ValueError(f'Chemistry manifest missing required keys: {", ".join(missing)}')
     model_files = {
         str(k): _resolve(path.parent, v)
         for k, v in (raw.get('model_files', {}) or {}).items()
     }
     return {
-        'species': _resolve(path.parent, raw.get('species_file') or raw.get('species')),
-        'gas_reactions': _resolve(path.parent, raw.get('gas_reactions_file') or raw.get('gas_reactions')),
-        'surface_reactions': _resolve(path.parent, raw.get('surface_reactions_file') or raw.get('surface_reactions')),
-        'reaction_models': _resolve(path.parent, raw.get('reaction_models_file') or raw.get('reaction_models')),
+        'species': _resolve(path.parent, raw.get('species_file')),
+        'gas_reactions': _resolve(path.parent, raw.get('gas_reactions_file')),
+        'surface_reactions': _resolve(path.parent, raw.get('surface_reactions_file')),
         'model_files': model_files,
-        'aliases': _resolve(path.parent, raw.get('aliases_file') or raw.get('aliases')),
+        'aliases': _resolve(path.parent, raw.get('aliases_file')),
         'cross_sections_manifest': _resolve(path.parent, raw.get('cross_sections_manifest')),
     }
 
@@ -117,6 +131,7 @@ _MODEL_FILE_BACKENDS = {
     'electron_impact': {'electron_impact_xsec'},
     'gas_rate': {'arrhenius', 'constant', 'first_order_loss', 'te_power_law', 'electron_temperature_power_law'},
     'energy_loss': {'constant_event_loss'},
+    'surface_rate': {'sticking', 'ion_assisted', 'desorption', 'langmuir_hinshelwood'},
 }
 
 
@@ -125,7 +140,8 @@ def _load_rate_models_from_file(path: Path, category: str) -> dict[str, dict[str
     models = raw.get('rate_models', {}) or {}
     allowed = _MODEL_FILE_BACKENDS.get(category)
     if allowed is None:
-        return models
+        known = ', '.join(sorted(_MODEL_FILE_BACKENDS))
+        raise ValueError(f'unsupported chemistry model_files category {category!r}; expected one of {known}')
     bad = [
         (key, str(model.get('backend', '')).lower())
         for key, model in models.items()
@@ -149,40 +165,23 @@ def _merge_rate_models(target: dict[str, dict[str, Any]], incoming: dict[str, di
 
 
 def load_mechanism_bundle(chemistry_source: str | Path) -> MechanismBundle:
-    """Load chemistry either from a directory or from an explicit manifest YAML.
-
-    Directory mode preserves backward compatibility with the earlier skeleton.
-    Manifest mode is recommended for long-term maintenance because it makes the
-    chemistry file set explicit and reviewable in a single YAML file.
-    """
+    """Load chemistry from an explicit manifest YAML."""
 
     chemistry_source = Path(chemistry_source)
-    if chemistry_source.is_file():
-        files = _load_chemistry_manifest(chemistry_source)
-        species_file = files['species']
-        gas_reactions_file = files['gas_reactions']
-        surface_reactions_file = files['surface_reactions']
-        reaction_models_file = files['reaction_models']
-        model_files = files['model_files']
-        aliases_file = files['aliases']
-        cross_sections_manifest = files['cross_sections_manifest']
-    else:
-        chemistry_dir = chemistry_source
-        species_file = chemistry_dir / 'species.csv'
-        gas_reactions_file = chemistry_dir / 'gas_reactions.csv'
-        surface_reactions_file = chemistry_dir / 'surface_reactions.csv'
-        reaction_models_file = chemistry_dir / 'reaction_models.yaml'
-        model_files = {}
-        aliases_file = chemistry_dir / 'aliases.yaml'
-        cross_sections_manifest = chemistry_dir / 'cross_sections_manifest.yaml'
+    if not chemistry_source.is_file():
+        raise ValueError(f'Chemistry source must be a manifest file: {chemistry_source}')
+    files = _load_chemistry_manifest(chemistry_source)
+    species_file = files['species']
+    gas_reactions_file = files['gas_reactions']
+    surface_reactions_file = files['surface_reactions']
+    model_files = files['model_files']
+    aliases_file = files['aliases']
+    cross_sections_manifest = files['cross_sections_manifest']
 
     species = _load_species(Path(species_file))
     gas_reactions = _load_reactions(Path(gas_reactions_file))
     surface_reactions = _load_reactions(Path(surface_reactions_file))
     rate_models: dict[str, dict[str, Any]] = {}
-    if reaction_models_file and Path(reaction_models_file).exists():
-        legacy_models = _load_rate_models_from_file(Path(reaction_models_file), 'legacy')
-        _merge_rate_models(rate_models, legacy_models, Path(reaction_models_file))
     for category, model_file in model_files.items():
         if model_file and Path(model_file).exists():
             incoming = _load_rate_models_from_file(Path(model_file), category)

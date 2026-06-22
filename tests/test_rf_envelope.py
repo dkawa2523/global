@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from plasma_global.electrical.base import PowerRequest
-from plasma_global.electrical.rf_envelope import RFEnvelopeBackend, rf_envelope_calibration_warnings, validate_rf_envelope_port
+from plasma_global.electrical.rf_envelope import RFEnvelopeBackend, validate_rf_envelope_port
 from plasma_global.workflows.context import ELECTRICAL_REGISTRY, load_case_from_yaml
 
 
@@ -37,7 +37,7 @@ def _rf_chamber() -> SimpleNamespace:
     )
 
 
-def test_rf_envelope_combines_hf_power_and_lf_bias_metadata() -> None:
+def test_rf_envelope_combines_hf_power_and_lf_bias() -> None:
     chamber = _rf_chamber()
     step = SimpleNamespace(
         power_ports={
@@ -63,18 +63,20 @@ def test_rf_envelope_combines_hf_power_and_lf_bias_metadata() -> None:
         }
     )
     backend = RFEnvelopeBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
-
-    result = backend.evaluate(
-        PowerRequest(time_s=0.0, state_vector=None, recipe_step=step, chamber=chamber, metadata={})
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(),
     )
+
+    result = backend.evaluate(PowerRequest(time_s=0.0, state_vector=None, recipe_step=step, chamber=chamber))
 
     assert result.port_power_W['hf_source'] == pytest.approx(100.0)
     assert result.port_power_W['lf_bias'] == pytest.approx(40.0)
     assert result.absorbed_power_W_by_zone['plasma'] == pytest.approx(140.0)
     assert result.self_bias_V < 0.0
-    assert result.metadata['zone_reduced_field_Td']['plasma'] == pytest.approx(40.0)
-    assert result.metadata['port_details']['lf_bias']['current_rms_A'] == pytest.approx(2.0)
+    assert result.zone_reduced_field_Td['plasma'] == pytest.approx(40.0)
 
 
 def test_rf_envelope_pulsed_square_turns_power_off() -> None:
@@ -91,11 +93,14 @@ def test_rf_envelope_pulsed_square_turns_power_off() -> None:
         }
     )
     backend = RFEnvelopeBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
-
-    result = backend.evaluate(
-        PowerRequest(time_s=5.0e-4, state_vector=None, recipe_step=step, chamber=chamber, metadata={})
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(),
     )
+
+    result = backend.evaluate(PowerRequest(time_s=5.0e-4, state_vector=None, recipe_step=step, chamber=chamber))
 
     assert result.port_power_W['hf_source'] == 0.0
 
@@ -109,34 +114,6 @@ def test_rf_envelope_calibration_example_validates_without_hints() -> None:
     loaded = load_case_from_yaml(ROOT / 'examples' / 'configs' / 'case_rf_envelope_calibration.yaml')
     assert loaded.run_config.physics.electrical_backend == 'rf_envelope'
     assert not any(msg['level'] == 'ERROR' for msg in loaded.validation_messages)
-    assert not any(msg['code'] == 'RF_ENVELOPE_CALIBRATION_HINT' for msg in loaded.validation_messages)
-
-
-def test_rf_envelope_calibration_warnings_flag_defaults_and_outliers() -> None:
-    warnings = rf_envelope_calibration_warnings(
-        {
-            'role': 'lf_bias',
-            'frequency_Hz': 400.0e3,
-            'value_W': 10.0,
-            'effective_impedance_ohm': 5000.0,
-        }
-    )
-
-    assert any('default coupling_efficiency' in item for item in warnings)
-    assert any('effective_impedance_ohm' in item for item in warnings)
-    assert any('default self_bias_fraction' in item for item in warnings)
-
-    voltage_warning = rf_envelope_calibration_warnings(
-        {
-            'role': 'lf_bias',
-            'frequency_Hz': 400.0e3,
-            'value_W': 10.0,
-            'voltage_rms_V': 50.0,
-            'coupling_efficiency': 0.2,
-            'self_bias_fraction': 0.35,
-        }
-    )
-    assert any('default effective_impedance_ohm' in item for item in voltage_warning)
 
 
 def test_rf_envelope_validation_rejects_invalid_calibration_values() -> None:

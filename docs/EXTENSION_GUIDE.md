@@ -10,7 +10,7 @@ The extension policy is based on the following goals:
 2. Keep the plasma core independent of external tools.
 3. Prefer data contracts over runtime coupling.
 4. Make physical assumptions explicit.
-5. Make validation and diagnostics part of every new feature.
+5. Make validation part of every new feature, and expose only diagnostics that belong in normal user output.
 6. Avoid adding features that belong to fluid, PIC, feature-scale, or full circuit simulators.
 
 ## Core Boundary
@@ -118,7 +118,7 @@ New configuration sections should be:
 - documented in `docs/CONFIGURATION.md`
 - validated before runtime
 - represented by typed dataclasses when the structure is stable
-- backward compatible when possible
+- migration-friendly when that does not keep obsolete contracts alive
 - explicit about defaults
 
 Avoid unstructured `Any`-style configuration for production-facing features.

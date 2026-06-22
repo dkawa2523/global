@@ -1,8 +1,8 @@
-schema_version: 1
-kind: chemistry_manifest
 species_file: species.csv
 gas_reactions_file: gas_reactions.csv
 surface_reactions_file: surface_reactions.csv
-reaction_models_file: reaction_models.yaml
 cross_sections_manifest: cross_sections_manifest.yaml
 aliases_file: aliases.yaml
+model_files:
+  electron_impact: electron_impact_models.yaml
+  energy_loss: energy_loss_models.yaml

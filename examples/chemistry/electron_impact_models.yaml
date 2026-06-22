@@ -1,0 +1,17 @@
+rate_models:
+  RM_E_AR_ION:
+    backend: electron_impact_xsec
+    cross_section_id: xs_ar_ionization
+    branching_yield: 1.0
+  RM_E_CF4_DISS:
+    backend: electron_impact_xsec
+    cross_section_id: xs_cf4_dissociation
+    branching_yield: 1.0
+  RM_E_O2_DISS:
+    backend: electron_impact_xsec
+    cross_section_id: xs_o2_dissociation
+    branching_yield: 1.0
+  RM_E_O2_ATTACH:
+    backend: electron_impact_xsec
+    cross_section_id: xs_o2_attachment
+    branching_yield: 1.0

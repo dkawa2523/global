@@ -1,6 +1,6 @@
 # Chemistry
 
-Chemistry is loaded from an explicit manifest or a compatible chemistry directory.
+Chemistry is loaded from an explicit manifest.
 
 ## Manifest Inputs
 

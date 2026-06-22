@@ -124,9 +124,9 @@ class DCSeriesCircuitModel:
     """Reduced DC/pulsed series circuit with a conductive plasma load.
 
     The model is intentionally independent of the global ODE system. Electrical
-    backends translate plasma state metadata into `PlasmaLoadState`, and this
-    model returns circuit quantities. That keeps future RLC or external-circuit
-    models isolated from the chemistry and transport code.
+    backends translate typed zone electrical state into `PlasmaLoadState`, and
+    this model returns circuit quantities. That keeps future RLC or
+    external-circuit models isolated from the chemistry and transport code.
     """
 
     def electron_mobility(self, cfg: DCSeriesCircuitConfig, load: PlasmaLoadState) -> float:

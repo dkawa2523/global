@@ -6,16 +6,13 @@ from typing import Any
 import numpy as np
 
 from plasma_global.eedf.base import EEDFRequest
-from plasma_global.electrical.base import PowerRequest
+from plasma_global.electrical.base import PowerRequest, ZoneElectricalState
 from plasma_global.physics.types import CoupledPlasmaEvaluation
 
 
 @dataclass
 class ElectricalCouplingAdapter:
     system: Any
-    last_power: Any = None
-    last_zone_mean_energy_eV: dict[str, float] = field(default_factory=dict)
-    last_zone_electron_density_m3: dict[str, float] = field(default_factory=dict)
     last_zone_electron_mobility_m2_V_s: dict[str, float] = field(default_factory=dict)
 
     def _needs_transport_coupling(self, step: Any) -> bool:
@@ -51,7 +48,7 @@ class ElectricalCouplingAdapter:
         power: Any,
     ) -> tuple[dict[str, Any], dict[str, float]]:
         sys = self.system
-        red_field_map = (power.metadata or {}).get('zone_reduced_field_Td', {})
+        red_field_map = power.zone_reduced_field_Td
         eedf_by_zone = {}
         mobility_by_zone: dict[str, float] = {}
         for z_idx, zone_id in enumerate(sys.zone_ids):
@@ -64,13 +61,10 @@ class ElectricalCouplingAdapter:
                 reduced_field_Td=float(red_field_map[zone_id]) if zone_id in red_field_map else None,
                 gas_temperature_K=float(Tg[z_idx]),
                 pressure_Pa=pressure_by_zone[zone_id],
-                metadata={'absorbed_power_W': power.absorbed_power_W_by_zone.get(zone_id, 0.0)},
             )
             eedf = sys.eedf_backend.evaluate(req)
             eedf_by_zone[zone_id] = eedf
-            mu = eedf.transport.get('mobility_m2_V_s')
-            if mu is not None:
-                mobility_by_zone[zone_id] = float(mu)
+            mobility_by_zone[zone_id] = float(eedf.transport.mobility_m2_V_s)
         return eedf_by_zone, mobility_by_zone
 
     def evaluate(self, time_s: float, y: np.ndarray, step: Any | None = None) -> CoupledPlasmaEvaluation:
@@ -91,28 +85,24 @@ class ElectricalCouplingAdapter:
                 ne_by_zone[zone_id] = max(float(ne), sys.floor_density)
                 mean_e_by_zone[zone_id] = sys.gas_core.mean_energy_eV(float(We[z]), ne_by_zone[zone_id])
         pressure_by_zone: dict[str, float] = {}
-        ion_species_by_zone: dict[str, dict[str, dict[str, float]]] = {}
         total_density_by_zone: dict[str, float] = {}
         for z_idx, zone_id in enumerate(sys.zone_ids):
             pressure_by_zone[zone_id] = sys.gas_core.zone_pressure_from_state_row(gas[z_idx], float(Tg[z_idx]))
             total_density_by_zone[zone_id] = max(float(np.sum(np.clip(gas[z_idx], 0.0, None))), sys.floor_density)
-            ion_species_by_zone[zone_id] = sys.gas_core.ion_species_payload_from_state_row(gas[z_idx])
 
-        metadata: dict[str, Any] = {
-            'zone_electron_density_m3': ne_by_zone,
-            'zone_mean_energy_eV': mean_e_by_zone,
-            'zone_positive_ion_density_m3': pos_by_zone,
-            'zone_dominant_ion_mass_kg': ion_mass_by_zone,
-            'zone_pressure_Pa': pressure_by_zone,
-            'zone_gas_temperature_K': {zone_id: float(Tg[sys.zone_index[zone_id]]) for zone_id in sys.zone_ids},
-            'zone_total_density_m3': total_density_by_zone,
-            'zone_positive_ion_species': ion_species_by_zone,
-            'electron_density_closure': sys.electron_density_closure,
+        zone_state: dict[str, ZoneElectricalState] = {
+            zone_id: ZoneElectricalState(
+                electron_density_m3=ne_by_zone[zone_id],
+                mean_energy_eV=mean_e_by_zone[zone_id],
+                positive_ion_density_m3=pos_by_zone[zone_id],
+                dominant_ion_mass_kg=ion_mass_by_zone[zone_id],
+                pressure_Pa=pressure_by_zone[zone_id],
+                gas_temperature_K=float(Tg[sys.zone_index[zone_id]]),
+                total_density_m3=total_density_by_zone[zone_id],
+                electron_mobility_m2_V_s=self.last_zone_electron_mobility_m2_V_s.get(zone_id),
+            )
+            for zone_id in sys.zone_ids
         }
-        if prescribed_ne is not None and sys.prescribed_electron_profile is not None:
-            metadata['prescribed_electron_profile'] = sys.prescribed_electron_profile.metadata()
-        if self.last_zone_electron_mobility_m2_V_s:
-            metadata['zone_electron_mobility_m2_V_s'] = dict(self.last_zone_electron_mobility_m2_V_s)
 
         needs_transport_coupling = self._needs_transport_coupling(step)
         iterations = self._transport_coupling_iterations(step) if needs_transport_coupling else 1
@@ -127,7 +117,7 @@ class ElectricalCouplingAdapter:
                     state_vector=y,
                     recipe_step=step,
                     chamber=sys.chamber,
-                    metadata=metadata,
+                    zone_state=zone_state,
                 )
             )
 
@@ -143,10 +133,12 @@ class ElectricalCouplingAdapter:
 
             if not needs_transport_coupling or not mobility_by_zone:
                 break
-            previous = metadata.get('zone_electron_mobility_m2_V_s') or {}
-            metadata['zone_electron_mobility_m2_V_s'] = mobility_by_zone
+            previous = {zone_id: state.electron_mobility_m2_V_s for zone_id, state in zone_state.items()}
+            for zone_id, mobility in mobility_by_zone.items():
+                zone_state[zone_id].electron_mobility_m2_V_s = mobility
             converged = all(
-                abs(float(previous.get(zone_id, mu)) - mu) <= max(abs(mu), 1.0e-30) * 1.0e-3
+                previous.get(zone_id) is not None
+                and abs(float(previous[zone_id]) - mu) <= max(abs(mu), 1.0e-30) * 1.0e-3
                 for zone_id, mu in mobility_by_zone.items()
             )
             if converged:
@@ -160,7 +152,7 @@ class ElectricalCouplingAdapter:
                     state_vector=y,
                     recipe_step=step,
                     chamber=sys.chamber,
-                    metadata=metadata,
+                    zone_state=zone_state,
                 )
             )
             eedf_by_zone, mobility_by_zone = self._evaluate_eedf_by_zone(
@@ -175,9 +167,6 @@ class ElectricalCouplingAdapter:
 
         self.last_zone_electron_mobility_m2_V_s = mobility_by_zone
 
-        self.last_power = power
-        self.last_zone_electron_density_m3 = ne_by_zone
-        self.last_zone_mean_energy_eV = mean_e_by_zone
         return CoupledPlasmaEvaluation(
             gas=gas,
             electron_energy=We,
@@ -189,6 +178,5 @@ class ElectricalCouplingAdapter:
             pos_by_zone=pos_by_zone,
             ion_mass_by_zone=ion_mass_by_zone,
             pressure_by_zone=pressure_by_zone,
-            ion_species_by_zone=ion_species_by_zone,
             total_density_by_zone=total_density_by_zone,
         )

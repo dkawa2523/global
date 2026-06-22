@@ -18,13 +18,13 @@ Run on branch `update_2` after the product-core refactor:
 
 ```powershell
 py -m pytest
-py -m plasma_global.cli validate examples/configs/case_smoke.yaml
-py -m plasma_global.cli run examples/configs/case_smoke.yaml
+plasma-global validate examples/configs/case_smoke.yaml
+plasma-global run examples/configs/case_smoke.yaml
 py tools\external_benchmarks\crane_two_reaction_argon.py
-py -m plasma_global.cli run examples/configs/case_zdplaskin_example2.yaml
+plasma-global run examples/configs/case_zdplaskin_example2.yaml
 py tools\external_benchmarks\zdplaskin_example2.py
 py tools\external_benchmarks\zdplaskin_eovern.py
-py -m plasma_global.cli list-backends --json
+plasma-global list-backends --json
 py -m mkdocs build --strict
 ```
 
@@ -33,7 +33,7 @@ py -m mkdocs build --strict
 | Check | Result |
 | --- | --- |
 | Lean pytest gate | OK at the time of this historical review |
-| Smoke case validation | OK; only metadata-only surface-model warnings |
+| Smoke case validation | OK |
 | Smoke run | solver success, 200 samples |
 | MkDocs strict build | OK |
 | Generated output tracking | run outputs stay ignored under `examples/outputs/` |
@@ -64,20 +64,15 @@ Quick analytic checks should use the explicit `maxwell` backend.
 ## Numerics Review
 
 The retained numerical path is a stiff ODE workflow with SciPy BDF, stable state
-layout labels, projected positive state handling, smoke Jacobian coverage, and
-focused external parity tests. This is a practical basis for CLI/API use.
-
-`check-jacobian` remains a diagnostic command rather than an acceptance gate.
-For `case_smoke.yaml`, it exits successfully but reports `max_relative_error: 1`
-on selected diagonal finite-difference comparisons. That means the current
-analytic Jacobian is useful for solver support and smoke inspection, but should
-not be claimed as fully finite-difference exact.
+layout labels, projected positive state handling, and focused external parity
+tests. The analytic Jacobian and CLI checker were removed from the normal
+product surface because the former did not justify its maintenance cost.
 
 ## Architecture Review
 
 The public product surface is now deliberately small:
 
-- CLI: `validate`, `run`, `export-config`, `list-backends`, `check-jacobian`
+- CLI: `validate`, `run`, `export-config`, `list-backends`
 - API: `load_case_from_yaml`, `build_case`, `run_from_yaml`
 - Config: schema version 2 case files only
 - Output: summary, observables, effective case, resolved paths, optional HDF5

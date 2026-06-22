@@ -73,7 +73,6 @@ class ChamberConfig:
     gas_inlets: list[Inlet]
     pumps: list[Pump]
     power_ports: list[PowerPort]
-    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.zone_by_id = {z.zone_id: z for z in self.zones}

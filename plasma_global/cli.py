@@ -9,8 +9,7 @@ from typing import Any
 import yaml
 
 from plasma_global.config import load_run_config, resolve_run_paths, write_effective_config, write_resolved_paths
-from plasma_global.numerics.jacobian_check import check_jacobian
-from plasma_global.workflows.context import EEDF_REGISTRY, ELECTRICAL_REGISTRY, INTEGRATOR_REGISTRY, build_case, load_case_from_yaml
+from plasma_global.workflows.context import EEDF_REGISTRY, ELECTRICAL_REGISTRY, INTEGRATOR_REGISTRY, load_case_from_yaml
 from plasma_global.workflows.runner import run_from_yaml
 
 
@@ -52,12 +51,6 @@ def main(argv: list[str] | None = None) -> int:
     backends_parser = sub.add_parser('list-backends', help='List available model backends')
     backends_parser.add_argument('--json', action='store_true', help='Emit machine-readable JSON')
 
-    jac_parser = sub.add_parser('check-jacobian', help='Finite-difference check the analytic Jacobian at a case state')
-    jac_parser.add_argument('case', type=Path)
-    jac_parser.add_argument('--advance-s', type=float, default=0.0, help='Integrate from the first recipe time before checking')
-    jac_parser.add_argument('--top', type=int, default=10, help='Number of largest mismatches to print')
-    jac_parser.add_argument('--fail-threshold', type=float, default=None, help='Return nonzero if max relative error exceeds this value')
-
     args = parser.parse_args(argv)
 
     if args.command == 'validate':
@@ -95,40 +88,6 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
             _print_registry(payload)
-        return 0
-
-    if args.command == 'check-jacobian':
-        loaded = load_case_from_yaml(args.case)
-        built = build_case(loaded)
-        system = built.system
-        y = system.initial_state()
-        t0 = loaded.recipe.steps[0].t_start_s
-        time_s = t0
-        if args.advance_s > 0.0:
-            time_s = t0 + float(args.advance_s)
-            seg = built.integrator.solve(system=system, y0=y, t_span=(t0, time_s), t_eval=[time_s])
-            if not seg.success:
-                print(f'ERROR: Solver failed before Jacobian check: {seg.message}', file=sys.stderr)
-                return 1
-            y = system.project_state(seg.y[:, -1])
-        result = check_jacobian(system, time_s, y, top_n=args.top)
-        print(f'max_relative_error: {result.max_relative_error:.6g}')
-        for item in result.mismatches:
-            print(
-                f'{item.relative_error:.6g} row={item.row_label} col={item.column_label} '
-                f'fd={item.finite_difference:.6g} jac={item.jacobian_value:.6g}'
-            )
-        if result.group_summaries:
-            print('group_max_relative_error:')
-            for item in result.group_summaries[:max(int(args.top), 0)]:
-                print(
-                    f'  {item.group}: {item.max_relative_error:.6g} '
-                    f'row={item.row_label} col={item.column_label} col_group={item.column_group} '
-                    f'fd={item.finite_difference:.6g} jac={item.jacobian_value:.6g} '
-                    f'checked={item.checked_entry_count}'
-                )
-        if args.fail_threshold is not None and result.max_relative_error > args.fail_threshold:
-            return 2
         return 0
 
     raise AssertionError(f'Unhandled command: {args.command}')

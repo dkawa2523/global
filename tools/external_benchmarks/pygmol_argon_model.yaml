@@ -7,7 +7,7 @@ model:
   guardrails:
     - Do not import this file from plasma_global core modules.
     - Do not use these rates as production LXCat or BOLSIG+ replacement data.
-    - Compare order and trends only unless a separate same-rate parity case is explicitly created.
+    - Compare only order and powered-step trends.
 
 species:
   - id: Ar

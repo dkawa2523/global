@@ -4,7 +4,6 @@ import argparse
 import csv
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +12,14 @@ if str(ROOT) not in sys.path:
 
 from plasma_global.chemistry.io import load_mechanism_bundle
 from plasma_global.chemistry.models import K_B
+from plasma_global.config.models import (
+    Boltzmann2TermConfig,
+    ResolvedPaths,
+    SwarmCacheConfig,
+    SwarmConfig,
+    SwarmEnergyGridConfig,
+    SwarmReducedFieldGridConfig,
+)
 from plasma_global.eedf.base import EEDFRequest
 from plasma_global.eedf.boltzmann_2term import Boltzmann2TermSwarmModel
 from scripts.build_rate_table_h5 import build_rate_table_h5
@@ -21,10 +28,6 @@ from scripts.build_rate_table_h5 import build_rate_table_h5
 DEFAULT_CHEMISTRY = ROOT / 'examples' / 'chemistry_zdplaskin_example2' / 'chemistry_manifest.yaml'
 DEFAULT_TABLE_DIR = ROOT / 'examples' / 'chemistry_zdplaskin_example2' / 'tables' / 'zdplaskin_example2_wide_eovern'
 DEFAULT_OUTPUT = ROOT / 'examples' / 'chemistry_zdplaskin_example2' / 'tables' / 'zdplaskin_example2_wide_eovern_rates.h5'
-
-
-def _ns(**kwargs):
-    return SimpleNamespace(**kwargs)
 
 
 def _write_csv(path: Path, rows: list[dict[str, float]]) -> None:
@@ -46,20 +49,34 @@ def build_zdplaskin_rate_table(
 ) -> Path:
     mechanism = load_mechanism_bundle(chemistry_manifest)
     chemistry_dir = chemistry_manifest.resolve().parent
-    swarm_cfg = _ns(
+    swarm_cfg = SwarmConfig(
         closure='local_field',
         mixture_key_species=['Ar', 'Ar_star'],
-        cache=_ns(max_entries=1, fraction_decimals=1),
-        boltzmann_2term=_ns(
-            energy_grid=_ns(min_eV=1.0e-3, max_eV=500.0, n=220),
-            reduced_field_grid_Td=_ns(min=float(min_EoverN_Td), max=float(max_EoverN_Td), n=int(n_fields)),
+        cache=SwarmCacheConfig(max_entries=1, fraction_decimals=1),
+        boltzmann_2term=Boltzmann2TermConfig(
+            energy_grid=SwarmEnergyGridConfig(min_eV=1.0e-3, max_eV=500.0, n=220),
+            reduced_field_grid_Td=SwarmReducedFieldGridConfig(min=float(min_EoverN_Td), max=float(max_EoverN_Td), n=int(n_fields)),
             max_shape_iterations=24,
             max_field_iterations=20,
         ),
     )
-    run_cfg = _ns(paths=_ns(chemistry_dir=str(chemistry_dir)))
+    resolved_paths = ResolvedPaths(
+        source_config=str(chemistry_manifest),
+        base_dir=str(chemistry_dir),
+        chamber_file='',
+        recipe_file='',
+        chemistry_manifest=str(chemistry_manifest),
+        chemistry_dir=str(chemistry_dir),
+        output_dir=str(table_dir),
+    )
     model = Boltzmann2TermSwarmModel()
-    model.prepare(mechanism=mechanism, chamber=_ns(), run_config=run_cfg, swarm_config=swarm_cfg)
+    model.prepare(
+        mechanism=mechanism,
+        chamber=object(),
+        run_config=object(),
+        resolved_paths=resolved_paths,
+        swarm_config=swarm_cfg,
+    )
 
     pressure_Pa = 13332.0
     gas_temperature_K = 300.0
@@ -73,7 +90,6 @@ def build_zdplaskin_rate_table(
         reduced_field_Td=None,
         gas_temperature_K=gas_temperature_K,
         pressure_Pa=pressure_Pa,
-        metadata={},
     )
     profile = model._build_mixture_profile(request)
     table = model._solve_field_table(request, profile)

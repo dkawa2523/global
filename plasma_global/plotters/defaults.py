@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def make_requested_plots(run_config, observables: list[dict], output_dir: str | Path) -> None:
-    if not getattr(run_config.outputs.plots, 'enabled', False) or not observables:
+    if not run_config.outputs.plots.enabled or not observables:
         return
     try:
         import matplotlib.pyplot as plt
@@ -12,9 +12,9 @@ def make_requested_plots(run_config, observables: list[dict], output_dir: str | 
         raise RuntimeError('Plot output requires the optional matplotlib dependency. Install plasma-global-model[plot].') from exc
 
     output_dir = Path(output_dir)
-    items = set(getattr(run_config.outputs.plots, 'items', []) or [])
-    formats = list(getattr(run_config.outputs.plots, 'format', ['png']) or ['png'])
-    dpi = int(getattr(run_config.outputs.plots, 'dpi', 150))
+    items = set(run_config.outputs.plots.items or [])
+    formats = list(run_config.outputs.plots.format or ['png'])
+    dpi = int(run_config.outputs.plots.dpi)
 
     t = [row['time_s'] for row in observables]
     mapping = {

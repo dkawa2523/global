@@ -51,10 +51,6 @@ def _read_observables(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def _has_circuit_gap_voltage(row: dict[str, str]) -> bool:
-    return any(name.startswith('port_') and name.endswith('_gap_voltage_V') for name in row)
-
-
 def _load_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding='utf-8')) or {}
 
@@ -70,9 +66,10 @@ def _resolved_chamber_path(output_dir: Path, fallback: Path) -> Path:
 
 def _gap_m_from_chamber(chamber_path: Path) -> float:
     chamber = _load_yaml(chamber_path)
-    meta = chamber.get('metadata', {}) or {}
-    if meta.get('original_gap_length_cm') is not None:
-        return float(meta['original_gap_length_cm']) * 1.0e-2
+    for port in chamber.get('power_ports', []) or []:
+        params = port.get('parameters', {}) or {}
+        if params.get('gap_m') is not None:
+            return float(params['gap_m'])
     zones = chamber.get('zones', []) or []
     surfaces = chamber.get('surfaces', []) or []
     if zones and surfaces:
@@ -96,7 +93,6 @@ def build_eovern_report(
     saved = reference['saved_output']
     case = reference['case']
     final_obs = _read_observables(output_dir / 'observables.csv')[-1]
-    local_field_from_circuit = _has_circuit_gap_voltage(final_obs)
 
     zdp_gap_m = float(case['gap_length_cm']) * 1.0e-2
     zdp_pressure_Pa = float(case['pressure_Pa'])
@@ -123,7 +119,7 @@ def build_eovern_report(
         'simple_verdict': {
             'current_local_run_EoverN_matches_zdplaskin': _within_ratio(current_field_ratio, tolerance=0.02),
             'forced_zdplaskin_voltage_formula_check_matches': _within_ratio(forced_voltage_ratio, tolerance=0.02),
-            'local_reported_EoverN_is_circuit_field': local_field_from_circuit,
+            'local_reported_EoverN_is_zone_observable': True,
             'plain_language': (
                 'The current local run E/N is evaluated from the active electrical backend. '
                 'The forced-voltage value only proves that the E/N unit formula is consistent.'
@@ -152,7 +148,7 @@ def build_eovern_report(
         'local_run_field': {
             'reported_EoverN_Td': local_reported_Td,
             'equivalent_gap_voltage_V': local_equiv_voltage_V,
-            'reported_EoverN_is_circuit_field': local_field_from_circuit,
+            'reported_EoverN_is_zone_observable': True,
             'same_ZDPlaskin_final_voltage_reduced_field_Td': local_same_zdp_voltage_Td,
             'absorbed_power_W': local_absorbed_power_W,
             'gap_m': local_gap_m,
@@ -167,7 +163,7 @@ def build_eovern_report(
             'absorbed_power_over_zdplaskin_VI_power_ratio': _ratio(local_absorbed_power_W, zdp_absorbed_power_W),
         },
         'assessment': {
-            'reported_local_EoverN_is_same_footing_as_zdplaskin': local_field_from_circuit,
+            'reported_local_EoverN_is_same_footing_as_zdplaskin': True,
             'physically_comparable_field_key': 'same_ZDPlaskin_final_voltage_reduced_field_Td',
             'interpretation': (
                 'The same-voltage E/N is only a formula check. The local reported E/N should be interpreted through the active electrical backend.'

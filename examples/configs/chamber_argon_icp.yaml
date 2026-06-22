@@ -35,7 +35,7 @@ surfaces:
     initial_coverages:
       wafer:*: 1.0
     models:
-      ion_loss: bohm_edge_loss
+      ion_loss: bohm
 
   - surface_id: grounded_wall
     zone_id: process
@@ -47,7 +47,7 @@ surfaces:
     initial_coverages:
       wall:*: 1.0
     models:
-      ion_loss: bohm_edge_loss
+      ion_loss: bohm
 
   - surface_id: source_wall
     zone_id: source
@@ -59,7 +59,7 @@ surfaces:
     initial_coverages:
       source:*: 1.0
     models:
-      ion_loss: bohm_edge_loss
+      ion_loss: bohm
 
 gas_inlets:
   - inlet_id: showerhead
@@ -89,6 +89,3 @@ power_ports:
     parameters:
       carrier_frequency_Hz: 2.0e6
       control_mode: voltage
-
-metadata:
-  comparison_target: public argon ICP/global-model examples

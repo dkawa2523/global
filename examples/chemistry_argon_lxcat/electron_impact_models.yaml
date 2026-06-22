@@ -3,216 +3,123 @@ rate_models:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_ionization_zenodo
     branching_yield: 1.0
-  EM_E_AR_ION:
-    backend: constant_event_loss
-    energy_loss_eV: 15.76
   RM_E_AR_EXC_01:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_01_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_01:
-    backend: constant_event_loss
-    energy_loss_eV: 11.62
   RM_E_AR_EXC_02:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_02_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_02:
-    backend: constant_event_loss
-    energy_loss_eV: 11.83
   RM_E_AR_EXC_03:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_03_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_03:
-    backend: constant_event_loss
-    energy_loss_eV: 14.153
   RM_E_AR_EXC_04:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_04_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_04:
-    backend: constant_event_loss
-    energy_loss_eV: 14.3
   RM_E_AR_EXC_05:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_05_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_05:
-    backend: constant_event_loss
-    energy_loss_eV: 14.09
   RM_E_AR_EXC_06:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_06_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_06:
-    backend: constant_event_loss
-    energy_loss_eV: 14.255
   RM_E_AR_EXC_07:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_07_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_07:
-    backend: constant_event_loss
-    energy_loss_eV: 15
   RM_E_AR_EXC_08:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_08_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_08:
-    backend: constant_event_loss
-    energy_loss_eV: 11.55
   RM_E_AR_EXC_09:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_09_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_09:
-    backend: constant_event_loss
-    energy_loss_eV: 11.72
   RM_E_AR_EXC_10:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_10_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_10:
-    backend: constant_event_loss
-    energy_loss_eV: 12.91
   RM_E_AR_EXC_11:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_11_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_11:
-    backend: constant_event_loss
-    energy_loss_eV: 13.08
   RM_E_AR_EXC_12:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_12_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_12:
-    backend: constant_event_loss
-    energy_loss_eV: 13.09
   RM_E_AR_EXC_13:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_13_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_13:
-    backend: constant_event_loss
-    energy_loss_eV: 13.15
   RM_E_AR_EXC_14:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_14_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_14:
-    backend: constant_event_loss
-    energy_loss_eV: 13.17
   RM_E_AR_EXC_15:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_15_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_15:
-    backend: constant_event_loss
-    energy_loss_eV: 13.27
   RM_E_AR_EXC_16:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_16_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_16:
-    backend: constant_event_loss
-    energy_loss_eV: 13.3
   RM_E_AR_EXC_17:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_17_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_17:
-    backend: constant_event_loss
-    energy_loss_eV: 13.33
   RM_E_AR_EXC_18:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_18_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_18:
-    backend: constant_event_loss
-    energy_loss_eV: 13.48
   RM_E_AR_EXC_19:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_19_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_19:
-    backend: constant_event_loss
-    energy_loss_eV: 13.84
   RM_E_AR_EXC_20:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_20_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_20:
-    backend: constant_event_loss
-    energy_loss_eV: 13.84
   RM_E_AR_EXC_21:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_21_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_21:
-    backend: constant_event_loss
-    energy_loss_eV: 13.9
   RM_E_AR_EXC_22:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_22_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_22:
-    backend: constant_event_loss
-    energy_loss_eV: 13.98
   RM_E_AR_EXC_23:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_23_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_23:
-    backend: constant_event_loss
-    energy_loss_eV: 14.01
   RM_E_AR_EXC_24:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_24_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_24:
-    backend: constant_event_loss
-    energy_loss_eV: 14.06
   RM_E_AR_EXC_25:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_25_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_25:
-    backend: constant_event_loss
-    energy_loss_eV: 14.09
   RM_E_AR_EXC_26:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_26_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_26:
-    backend: constant_event_loss
-    energy_loss_eV: 14.21
   RM_E_AR_EXC_27:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_27_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_27:
-    backend: constant_event_loss
-    energy_loss_eV: 14.23
   RM_E_AR_EXC_28:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_28_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_28:
-    backend: constant_event_loss
-    energy_loss_eV: 14.24
   RM_E_AR_EXC_29:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_29_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_29:
-    backend: constant_event_loss
-    energy_loss_eV: 14.07
   RM_E_AR_EXC_30:
     backend: electron_impact_xsec
     cross_section_id: xs_ar_excitation_30_zenodo
     branching_yield: 1.0
-  EM_E_AR_EXC_30:
-    backend: constant_event_loss
-    energy_loss_eV: 14.241

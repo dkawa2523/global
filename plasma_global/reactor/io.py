@@ -79,6 +79,10 @@ def _power_port(d: dict) -> PowerPort:
 
 def load_chamber_config(path: str | Path) -> ChamberConfig:
     raw = _load_yaml(Path(path))
+    allowed = {'chamber_id', 'description', 'zones', 'edges', 'surfaces', 'gas_inlets', 'pumps', 'power_ports'}
+    unknown = sorted(str(k) for k in raw if str(k) not in allowed)
+    if unknown:
+        raise ValueError(f'Unsupported chamber keys: {", ".join(unknown)}')
     return ChamberConfig(
         chamber_id=raw['chamber_id'],
         description=raw.get('description', ''),
@@ -88,7 +92,6 @@ def load_chamber_config(path: str | Path) -> ChamberConfig:
         gas_inlets=[_inlet(i) for i in raw.get('gas_inlets', [])],
         pumps=[_pump(p) for p in raw.get('pumps', [])],
         power_ports=[_power_port(p) for p in raw.get('power_ports', [])],
-        metadata=raw.get('metadata', {}),
     )
 
 

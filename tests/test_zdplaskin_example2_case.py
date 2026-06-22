@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
+from plasma_global.config.models import PrescribedElectronProfileConfig
 from plasma_global.workflows.context import build_case, load_case_from_yaml
 from plasma_global.workflows.runner import run_from_yaml
 
@@ -67,9 +67,8 @@ def test_prescribed_electron_profile_overrides_quasineutral_density(tmp_path) ->
     profile.write_text('time_s,electron_density_m3\n0.0,5.0e16\n1.0e-3,6.0e16\n', encoding='utf-8')
     loaded = load_case_from_yaml(ZDP_CASE)
     loaded.run_config.physics.electron_density_closure = 'prescribed_profile'
-    loaded.run_config.swarm.prescribed_electron_profile = SimpleNamespace(
+    loaded.run_config.swarm.prescribed_electron_profile = PrescribedElectronProfileConfig(
         file=str(profile),
-        density_column='electron_density_m3',
     )
     built = build_case(loaded)
     system = built.system

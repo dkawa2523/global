@@ -322,9 +322,6 @@ def generate(out_dir: Path, source_file: Path | None) -> None:
     write_electron_impact_models(out_dir / 'electron_impact_models.yaml')
     write_gas_rate_models(out_dir / 'gas_rate_models.yaml')
     write_energy_models(out_dir / 'energy_loss_models.yaml')
-    legacy_models = out_dir / 'reaction_models.yaml'
-    if legacy_models.exists():
-        legacy_models.unlink()
     write_cross_sections_manifest(out_dir, blocks)
     write_manifest_files(out_dir)
     write_readme(out_dir)

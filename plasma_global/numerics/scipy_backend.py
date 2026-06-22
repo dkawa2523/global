@@ -26,7 +26,6 @@ class SciPyBDFIntegrator(TimeIntegrator):
             'y0': y0,
             'method': 'BDF',
             't_eval': t_eval,
-            'jac': system.jacobian,
             'events': events,
             'rtol': self.rtol,
             'atol': self.atol,

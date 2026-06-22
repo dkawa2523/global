@@ -9,7 +9,7 @@ The package is organized around a small workflow core.
 - `reactor`: chamber, zone, surface, inlet, pump, edge, and recipe models.
 - `eedf`: Maxwell, table, swarm, and internal two-term-like EEDF closures.
 - `electrical`: direct power, DC series, external table, RF envelope, CCP, and ICP reduced backends.
-- `numerics`: state layout, ODE system, Jacobian, and SciPy BDF integration.
+- `numerics`: state layout, ODE system, and SciPy BDF integration.
 - `observables`: compact postprocessed time-series and summary outputs.
 - `workflows`: load/build/run orchestration.
 
@@ -47,3 +47,13 @@ Backends are selected by registry name:
 - integrator backend
 
 Each backend should keep its request/result interface small and avoid reading files directly unless the backend owns that file format.
+
+Electrical backends receive typed `ZoneElectricalState` values through
+`PowerRequest.zone_state`. They return top-level `PowerResult` fields for
+absorbed power, `zone_reduced_field_Td`, and compact `surface_ied` data. Avoid
+using ad hoc metadata dictionaries as hidden extension buses.
+
+EEDF backends return `EEDFResult` with typed `EEDFTransport` values for mean
+energy, mobility, diffusion, reduced field, and lookup mode. Configuration is
+loaded into narrow dataclasses; unknown `swarm`, `outputs`, and chamber
+top-level keys fail fast instead of becoming open-ended extension surfaces.

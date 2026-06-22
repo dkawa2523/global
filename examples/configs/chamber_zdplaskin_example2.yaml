@@ -26,8 +26,8 @@ surfaces:
     site_density_m2: 1.0e18
     initial_coverages: {}
     models:
-      ion_loss: ambipolar_diffusion
-      loss_rate_s: 3230.0
+      ion_loss: prescribed_loss_frequency
+      frequency_s: 3230.0
 
 gas_inlets:
   - inlet_id: initial_argon_seed
@@ -52,12 +52,3 @@ power_ports:
       mobility_source: config
       conductance_multiplier: 1.0
       electron_mobility_m2_V_s: 0.45
-
-metadata:
-  source_repository: https://github.com/Hemadityamalla/ZDPlaskin
-  source_example: example2
-  original_pressure_torr: 100.0
-  original_gap_length_cm: 0.40
-  original_radius_cm: 0.40
-  original_voltage_V: 1000.0
-  original_resistance_ohm: 1.0e5

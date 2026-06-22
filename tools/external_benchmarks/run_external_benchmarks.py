@@ -20,8 +20,6 @@ from tools.external_benchmarks.crane_two_reaction_argon import (
 )
 from tools.external_benchmarks.pygmol_argon import (
     DEFAULT_CASE as PYGMOL_CASE,
-    RATE_MODE_LOCAL_FIT,
-    RATE_MODE_LOCAL_TABLE,
     RATE_MODE_SURROGATE,
     build_report as build_pygmol_report,
 )
@@ -86,14 +84,14 @@ def run_crane() -> dict[str, Any]:
     }
 
 
-def run_pygmol(*, rerun_local: bool = True, rate_mode: str = RATE_MODE_SURROGATE) -> dict[str, Any]:
+def run_pygmol(*, rerun_local: bool = True) -> dict[str, Any]:
     try:
-        report = build_pygmol_report(PYGMOL_CASE, rerun_local=rerun_local, write_solution_csv=False, rate_mode=rate_mode)
+        report = build_pygmol_report(PYGMOL_CASE, rerun_local=rerun_local, write_solution_csv=False)
     except RuntimeError as exc:
         return {
             'id': 'pygmol_argon_global_model_sanity',
             'case': str(PYGMOL_CASE),
-            'rate_mode': rate_mode,
+            'rate_mode': RATE_MODE_SURROGATE,
             'passed': True,
             'skipped': True,
             'skip_reason': str(exc),
@@ -105,20 +103,19 @@ def run_pygmol(*, rerun_local: bool = True, rate_mode: str = RATE_MODE_SURROGATE
         'rate_mode': report['rate_mode'],
         'output_dir': report['output_dir'],
         'comparison_file': report['comparison_file'],
-        'generated_model_file': report.get('generated_model_file'),
         'passed': report['passed'],
         'summary': report['summary'],
     }
 
 
-def run_selected(which: str, *, run_zdplaskin_case: bool = True, pygmol_rate_mode: str = RATE_MODE_SURROGATE) -> dict[str, Any]:
+def run_selected(which: str, *, run_zdplaskin_case: bool = True) -> dict[str, Any]:
     results = []
     if which in {'all', 'zdplaskin'}:
         results.append(run_zdplaskin(run_case=run_zdplaskin_case))
     if which in {'all', 'crane'}:
         results.append(run_crane())
     if which in {'all', 'pygmol'}:
-        results.append(run_pygmol(rerun_local=True, rate_mode=pygmol_rate_mode))
+        results.append(run_pygmol(rerun_local=True))
     return {
         'tool': 'external_benchmarks',
         'benchmark_count': len(results),
@@ -130,14 +127,12 @@ def run_selected(which: str, *, run_zdplaskin_case: bool = True, pygmol_rate_mod
 def main() -> int:
     parser = argparse.ArgumentParser(description='Run external-code benchmark comparisons outside the core solver package.')
     parser.add_argument('--only', choices=['all', 'zdplaskin', 'crane', 'pygmol'], default='all')
-    parser.add_argument('--pygmol-rate-mode', choices=[RATE_MODE_SURROGATE, RATE_MODE_LOCAL_FIT, RATE_MODE_LOCAL_TABLE], default=RATE_MODE_SURROGATE)
     parser.add_argument('--skip-zdplaskin-run', action='store_true', help='Reuse the existing ZDPlaskin surrogate output directory instead of re-running the local case.')
     parser.add_argument('--write', type=Path, default=DEFAULT_WRITE)
     args = parser.parse_args()
     report = run_selected(
         args.only,
         run_zdplaskin_case=not args.skip_zdplaskin_run,
-        pygmol_rate_mode=args.pygmol_rate_mode,
     )
     _write_report(args.write.resolve(), report)
     print(yaml.safe_dump(report, sort_keys=False))

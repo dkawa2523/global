@@ -1,0 +1,13 @@
+rate_models:
+  EM_E_AR_ION:
+    backend: constant_event_loss
+    energy_loss_eV: 15.8
+  EM_E_CF4_DISS:
+    backend: constant_event_loss
+    energy_loss_eV: 12.5
+  EM_E_O2_DISS:
+    backend: constant_event_loss
+    energy_loss_eV: 6.0
+  EM_E_O2_ATTACH:
+    backend: constant_event_loss
+    energy_loss_eV: 4.5

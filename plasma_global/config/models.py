@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 
@@ -17,21 +15,14 @@ class CaseMetadata:
 
 @dataclass
 class ChemistryFilesConfig:
-    manifest: str | None = None
-    directory: str | None = None
-    species: str | None = None
-    gas_reactions: str | None = None
-    surface_reactions: str | None = None
-    reaction_models: str | None = None
-    aliases: str | None = None
-    cross_sections_manifest: str | None = None
+    manifest: str
 
 
 @dataclass
 class FilesConfig:
     chamber: str
     recipe: str
-    chemistry: ChemistryFilesConfig = field(default_factory=ChemistryFilesConfig)
+    chemistry: ChemistryFilesConfig
     output_dir: str = './outputs'
     external_inputs: dict[str, Any] = field(default_factory=dict)
 
@@ -52,9 +43,6 @@ class PhysicsConfig:
     enable_gas_temperature: bool = True
     enable_surface_coverages: bool = True
     enable_wall_inventory: bool = True
-    enable_ied_proxy: bool = True
-    enable_dae_fallback: bool = False
-    quasi_neutrality: str = 'algebraic'
     electron_density_closure: str = 'quasi_neutral'
     gas_heating_fraction: float = 0.15
     wall_relaxation_s_inv: float = 500.0
@@ -66,24 +54,85 @@ class NumericsConfig:
     atol: float = 1.0e-14
     first_step: float | None = 1.0e-10
     max_step: float | None = 1.0e-6
-    jacobian: str = 'analytic_sparse'
-    jacobian_rebuild_policy: str = 'every_step'
     positivity: dict[str, Any] | None = None
     events: dict[str, Any] | None = None
 
 
 @dataclass
-class OutputsConfig:
-    formats: Any = None
-    plots: Any = None
-    save: Any = None
+class OutputFormatsConfig:
+    solution_h5: bool = True
+    observables_csv: bool = True
+    summary_yaml: bool = True
 
 
 @dataclass
-class LoggingConfig:
-    level: str = 'INFO'
-    write_log_file: bool = True
-    log_filename: str = 'run.log'
+class OutputPlotsConfig:
+    enabled: bool = False
+    format: list[str] = field(default_factory=lambda: ['png'])
+    dpi: int = 150
+    items: list[str] = field(default_factory=list)
+
+
+@dataclass
+class OutputsConfig:
+    formats: OutputFormatsConfig = field(default_factory=OutputFormatsConfig)
+    plots: OutputPlotsConfig = field(default_factory=OutputPlotsConfig)
+
+
+@dataclass
+class SwarmCacheConfig:
+    max_entries: int = 12
+    fraction_decimals: int = 3
+
+
+@dataclass
+class SwarmEnergyGridConfig:
+    min_eV: float = 1.0e-3
+    max_eV: float = 160.0
+    n: int = 360
+
+
+@dataclass
+class SwarmReducedFieldGridConfig:
+    min: float = 0.2
+    max: float = 2500.0
+    n: int = 48
+
+
+@dataclass
+class Boltzmann2TermConfig:
+    energy_grid: SwarmEnergyGridConfig = field(default_factory=SwarmEnergyGridConfig)
+    reduced_field_grid_Td: SwarmReducedFieldGridConfig = field(default_factory=SwarmReducedFieldGridConfig)
+    max_shape_iterations: int = 48
+    max_field_iterations: int = 42
+
+
+@dataclass
+class SwarmTableConfig:
+    file: str | None = None
+    lookup: str | None = None
+    electron_energy_mode: str | None = None
+    energy_relaxation_time_s: float = 1.0e-6
+
+
+@dataclass
+class PrescribedElectronProfileConfig:
+    file: str | None = None
+    file_key: str | None = None
+    zone_columns: dict[str, str] = field(default_factory=dict)
+    interpolation: str = 'linear'
+    hold: str = 'edge'
+
+
+@dataclass
+class SwarmConfig:
+    model_name: str = 'boltzmann_2term'
+    closure: str = 'auto'
+    mixture_key_species: list[str] = field(default_factory=list)
+    cache: SwarmCacheConfig = field(default_factory=SwarmCacheConfig)
+    boltzmann_2term: Boltzmann2TermConfig = field(default_factory=Boltzmann2TermConfig)
+    table: SwarmTableConfig = field(default_factory=SwarmTableConfig)
+    prescribed_electron_profile: PrescribedElectronProfileConfig = field(default_factory=PrescribedElectronProfileConfig)
 
 
 @dataclass
@@ -109,81 +158,11 @@ class RunConfig:
     physics: PhysicsConfig
     numerics: NumericsConfig
     outputs: OutputsConfig
-    logging: LoggingConfig
-    swarm: Any = None
-    imports: dict[str, Any] = field(default_factory=dict)
-    raw: dict[str, Any] = field(default_factory=dict)
+    swarm: SwarmConfig = field(default_factory=SwarmConfig)
 
     @property
     def schema_version(self) -> int:
         return int(self.case.schema_version)
 
     def to_dict(self) -> dict[str, Any]:
-        def _plain(obj: Any) -> Any:
-            if isinstance(obj, SimpleNamespace):
-                return {k: _plain(v) for k, v in vars(obj).items()}
-            if isinstance(obj, dict):
-                return {k: _plain(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [_plain(v) for v in obj]
-            return obj
-
-        data = asdict(self)
-        data.pop('raw', None)
-        return _plain(data)
-
-    # ------------------------------------------------------------------
-    # Backward-compatible views used by the rest of the code base.
-    # ------------------------------------------------------------------
-    @property
-    def project(self) -> dict[str, Any]:
-        return {
-            'name': self.case.name,
-            'description': self.case.description,
-            'tags': list(self.case.tags),
-            'schema_version': self.case.schema_version,
-            'kind': self.case.kind,
-        }
-
-    @property
-    def paths(self) -> SimpleNamespace:
-        resolved = getattr(self, '_resolved_paths', None)
-        if resolved is not None:
-            return SimpleNamespace(
-                chamber_file=resolved.chamber_file,
-                recipe_file=resolved.recipe_file,
-                chemistry_dir=resolved.chemistry_dir,
-                chemistry_manifest=resolved.chemistry_manifest,
-                output_dir=resolved.output_dir,
-                external_inputs=resolved.external_inputs,
-            )
-        chemistry_dir = self.files.chemistry.directory
-        if chemistry_dir is None and self.files.chemistry.manifest:
-            chemistry_dir = str(Path(self.files.chemistry.manifest).parent)
-        return SimpleNamespace(
-            chamber_file=self.files.chamber,
-            recipe_file=self.files.recipe,
-            chemistry_dir=chemistry_dir,
-            chemistry_manifest=self.files.chemistry.manifest,
-            output_dir=self.files.output_dir,
-            external_inputs=self.files.external_inputs,
-        )
-
-    @property
-    def model(self) -> SimpleNamespace:
-        return SimpleNamespace(
-            mode=self.physics.mode,
-            gas_model=self.physics.gas_model,
-            eedf_backend=self.physics.eedf_backend,
-            electrical_backend=self.physics.electrical_backend,
-            integrator=self.physics.integrator,
-            enable_gas_temperature=self.physics.enable_gas_temperature,
-            enable_surface_coverages=self.physics.enable_surface_coverages,
-            enable_wall_inventory=self.physics.enable_wall_inventory,
-            enable_ied_proxy=self.physics.enable_ied_proxy,
-            enable_dae_fallback=self.physics.enable_dae_fallback,
-            quasi_neutrality=self.physics.quasi_neutrality,
-            electron_density_closure=self.physics.electron_density_closure,
-            gas_heating_fraction=self.physics.gas_heating_fraction,
-            wall_relaxation_s_inv=self.physics.wall_relaxation_s_inv,
-        )
+        return asdict(self)

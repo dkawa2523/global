@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-import yaml
+from pathlib import Path
 
 from plasma_global.electrical.circuit_models import DCSeriesCircuitConfig, dc_series_config_mapping_at_time
 from plasma_global.electrical.external_table import (
@@ -12,11 +11,10 @@ from plasma_global.electrical.external_table import (
     resolve_circuit_table_path,
     validate_circuit_table_columns,
 )
-from plasma_global.electrical.rf_envelope import rf_envelope_calibration_warnings, validate_rf_envelope_port
+from plasma_global.electrical.rf_envelope import validate_rf_envelope_port
 from plasma_global.config.models import ResolvedPaths, RunConfig
 from plasma_global.physics.prescribed_electrons import build_prescribed_electron_profile
 from plasma_global.reactor.surface_models import (
-    ION_LOSS_CONSUMED_MODEL_KEYS,
     ION_LOSS_KNOWN_MODES,
     bohm_h_factor,
     configured_ion_loss_mode,
@@ -44,85 +42,70 @@ class ConfigValidationReport:
         return any(m.level == 'ERROR' for m in self.messages)
 
 
-def _surface_model_warnings(chamber_path: Path) -> list[ConfigMessage]:
-    if not chamber_path.is_file():
-        return []
-    with chamber_path.open('r', encoding='utf-8') as fh:
-        raw = yaml.safe_load(fh) or {}
+def _surface_ion_loss_messages(chamber: Any) -> list[ConfigMessage]:
     messages: list[ConfigMessage] = []
     families_by_zone: dict[str, set[str]] = {}
     effective_frequency_count_by_zone: dict[str, int] = {}
-    zones = {str(z.get('zone_id')): z for z in raw.get('zones', []) or []}
-    for surface in raw.get('surfaces', []) or []:
-        models = surface.get('models', {}) or {}
-        if models:
-            surface_id = str(surface.get('surface_id', 'unknown_surface'))
-            metadata_only_keys = sorted(str(k) for k in models if str(k) not in ION_LOSS_CONSUMED_MODEL_KEYS)
-            if metadata_only_keys:
-                keys = ', '.join(metadata_only_keys)
+    for surface in getattr(chamber, 'surfaces', []) or []:
+        models = dict(getattr(surface, 'models', {}) or {})
+        surface_id = str(getattr(surface, 'surface_id', 'unknown_surface'))
+        if 'ion_loss' in models:
+            mode = configured_ion_loss_mode(models)
+            if mode not in ION_LOSS_KNOWN_MODES:
                 messages.append(
                     ConfigMessage(
-                        'WARNING',
-                        'SURFACE_MODELS_METADATA_ONLY',
-                        f'surface.models for {surface_id} includes metadata not directly consumed by the current solver: {keys}',
+                        'ERROR',
+                        'ION_LOSS_MODEL_UNRECOGNIZED',
+                        f'surface.models.ion_loss for {surface_id} must be one of bohm, prescribed_loss_frequency, ambipolar_diffusion, off.',
                         surface_id,
                     )
                 )
-            if 'ion_loss' in models:
-                mode = configured_ion_loss_mode(models)
-                if mode not in ION_LOSS_KNOWN_MODES:
+                continue
+        if ion_loss_enabled(models):
+            zone_id = str(getattr(surface, 'zone_id', ''))
+            family = ion_loss_family(models)
+            families_by_zone.setdefault(zone_id, set()).add(family)
+            zone = chamber.zone_by_id.get(zone_id)
+            if zone is None:
+                continue
+            if ion_loss_uses_effective_frequency(family):
+                effective_frequency_count_by_zone[zone_id] = effective_frequency_count_by_zone.get(zone_id, 0) + 1
+                try:
+                    effective_ion_loss_frequency_s(
+                        models,
+                        volume_m3=float(getattr(zone, 'volume_m3', 0.0) or 0.0),
+                        area_m2=float(getattr(surface, 'area_m2', 0.0) or 0.0),
+                    )
+                except Exception as exc:
+                    code = 'AMBIPOLAR_LOSS_CONFIG_INVALID' if family == 'ambipolar_diffusion' else 'ION_LOSS_FREQUENCY_CONFIG_INVALID'
                     messages.append(
                         ConfigMessage(
-                            'WARNING',
-                            'ION_LOSS_MODEL_UNRECOGNIZED',
-                            f'surface.models.ion_loss for {surface_id} uses unrecognized mode {models.get("ion_loss")!r}; treating this surface as active for the Bohm-like ion wall loss.',
+                            'ERROR',
+                            code,
+                            f'effective-frequency ion loss for {surface_id} is invalid: {exc}',
                             surface_id,
                         )
                     )
-            if ion_loss_enabled(models):
-                zone_id = str(surface.get('zone_id', ''))
-                family = ion_loss_family(models)
-                families_by_zone.setdefault(zone_id, set()).add(family)
-                if ion_loss_uses_effective_frequency(family):
-                    effective_frequency_count_by_zone[zone_id] = effective_frequency_count_by_zone.get(zone_id, 0) + 1
-                    try:
-                        zone = zones.get(zone_id, {})
-                        effective_ion_loss_frequency_s(
-                            models,
-                            volume_m3=float(zone.get('volume_m3', 0.0) or 0.0),
-                            area_m2=float(surface.get('area_m2', 0.0) or 0.0),
+            else:
+                try:
+                    area = float(getattr(surface, 'area_m2', 0.0) or 0.0)
+                    volume = float(getattr(zone, 'volume_m3', 0.0) or 0.0)
+                    char_len = float(models.get('characteristic_length_m') or volume / max(area, 1.0e-30))
+                    bohm_h_factor(
+                        models,
+                        pressure_Pa=float(getattr(zone, 'pressure_Pa', 0.0) or 0.0),
+                        gas_temperature_K=float(getattr(zone, 'gas_temperature_K', 300.0) or 300.0),
+                        characteristic_length_m=char_len,
+                    )
+                except Exception as exc:
+                    messages.append(
+                        ConfigMessage(
+                            'ERROR',
+                            'BOHM_H_FACTOR_INVALID',
+                            f'Bohm ion loss h_factor for {surface_id} is invalid: {exc}',
+                            surface_id,
                         )
-                    except Exception as exc:
-                        code = 'AMBIPOLAR_LOSS_CONFIG_INVALID' if family == 'ambipolar_diffusion' else 'ION_LOSS_FREQUENCY_CONFIG_INVALID'
-                        messages.append(
-                            ConfigMessage(
-                                'ERROR',
-                                code,
-                                f'effective-frequency ion loss for {surface_id} needs loss_rate_s, ion_loss_frequency_s, ambipolar_loss_rate_s, or diffusion_coefficient_m2_s: {exc}',
-                                surface_id,
-                            )
-                        )
-                else:
-                    try:
-                        zone = zones.get(zone_id, {})
-                        area = float(surface.get('area_m2', 0.0) or 0.0)
-                        volume = float(zone.get('volume_m3', 0.0) or 0.0)
-                        char_len = float(models.get('characteristic_length_m') or volume / max(area, 1.0e-30))
-                        bohm_h_factor(
-                            models,
-                            pressure_Pa=float(zone.get('pressure_Pa', 0.0) or 0.0),
-                            gas_temperature_K=float(zone.get('gas_temperature_K', 300.0) or 300.0),
-                            characteristic_length_m=char_len,
-                        )
-                    except Exception as exc:
-                        messages.append(
-                            ConfigMessage(
-                                'ERROR',
-                                'BOHM_H_FACTOR_INVALID',
-                                f'Bohm ion loss h_factor for {surface_id} is invalid: {exc}',
-                                surface_id,
-                            )
-                        )
+                    )
     for zone_id, families in families_by_zone.items():
         if len(families) > 1:
             messages.append(
@@ -153,21 +136,16 @@ def validate_run_config(run_config: RunConfig, resolved_paths: ResolvedPaths) ->
     }
     if resolved_paths.chemistry_manifest is not None:
         required_files['chemistry_manifest'] = resolved_paths.chemistry_manifest
-    elif resolved_paths.chemistry_dir is not None:
-        required_files['chemistry_dir'] = resolved_paths.chemistry_dir
     else:
-        messages.append(ConfigMessage('ERROR', 'CHEMISTRY_PATH_MISSING', 'Either files.chemistry.manifest or files.chemistry.directory must be set.'))
+        messages.append(ConfigMessage('ERROR', 'CHEMISTRY_PATH_MISSING', 'files.chemistry.manifest must be set.'))
 
     for name, p_str in required_files.items():
         p = Path(p_str)
         if not p.exists():
             messages.append(ConfigMessage('ERROR', 'FILE_NOT_FOUND', f'Required {name} path does not exist: {p}', name))
 
-    chamber_path = Path(resolved_paths.chamber_file)
-    messages.extend(_surface_model_warnings(chamber_path))
-
     if run_config.physics.integrator != 'scipy_bdf':
-        messages.append(ConfigMessage('WARNING', 'INTEGRATOR_UNVERIFIED', f'Integrator {run_config.physics.integrator} is not part of the smoke-tested default set.', 'integrator'))
+        messages.append(ConfigMessage('ERROR', 'INTEGRATOR_UNSUPPORTED', 'Only scipy_bdf is supported.', 'integrator'))
 
     if not 0.0 <= run_config.physics.gas_heating_fraction <= 1.0:
         messages.append(ConfigMessage('ERROR', 'GAS_HEATING_FRACTION_RANGE', 'physics.gas_heating_fraction must be between 0 and 1.', 'physics.gas_heating_fraction'))
@@ -176,7 +154,7 @@ def validate_run_config(run_config: RunConfig, resolved_paths: ResolvedPaths) ->
         messages.append(ConfigMessage('ERROR', 'WALL_RELAXATION_RANGE', 'physics.wall_relaxation_s_inv must be non-negative.', 'physics.wall_relaxation_s_inv'))
 
     electron_closure = str(getattr(run_config.physics, 'electron_density_closure', 'quasi_neutral') or 'quasi_neutral').lower()
-    allowed_electron_closures = {'quasi_neutral', 'algebraic', 'prescribed_profile', 'external_profile', 'profile'}
+    allowed_electron_closures = {'quasi_neutral', 'prescribed_profile'}
     if electron_closure not in allowed_electron_closures:
         messages.append(
             ConfigMessage(
@@ -186,17 +164,11 @@ def validate_run_config(run_config: RunConfig, resolved_paths: ResolvedPaths) ->
                 'physics.electron_density_closure',
             )
         )
-    elif electron_closure in {'prescribed_profile', 'external_profile', 'profile'}:
+    elif electron_closure == 'prescribed_profile':
         try:
-            profile_cfg = getattr(getattr(run_config, 'swarm', None), 'prescribed_electron_profile', None)
-            zone_columns = getattr(profile_cfg, 'zone_columns', None)
-            if isinstance(zone_columns, dict):
-                validation_zones = [str(zone_id) for zone_id in zone_columns]
-            elif zone_columns is not None:
-                validation_zones = [str(zone_id) for zone_id in vars(zone_columns)]
-            else:
-                validation_zones = ['*']
-            build_prescribed_electron_profile(run_config, validation_zones)
+            zone_columns = run_config.swarm.prescribed_electron_profile.zone_columns
+            validation_zones = [str(zone_id) for zone_id in zone_columns] if zone_columns else ['*']
+            build_prescribed_electron_profile(run_config, resolved_paths, validation_zones)
         except Exception as exc:
             messages.append(
                 ConfigMessage(
@@ -215,15 +187,6 @@ def validate_run_config(run_config: RunConfig, resolved_paths: ResolvedPaths) ->
                 'ERROR',
                 'SWARM_CLOSURE_UNRECOGNIZED',
                 f'swarm.closure must be one of {sorted(allowed_closures)}, got {closure!r}.',
-                'swarm.closure',
-            )
-        )
-    elif closure == 'local_field':
-        messages.append(
-            ConfigMessage(
-                'WARNING',
-                'LOCAL_FIELD_CLOSURE_REDUCED_MODEL',
-                'swarm.closure=local_field uses the electrical backend reduced-field proxy; verify or calibrate zone_reduced_field_Td for production studies.',
                 'swarm.closure',
             )
         )
@@ -256,8 +219,9 @@ def _merged_power_port_configs(chamber: Any, recipe: Any, messages: list[ConfigM
     return merged
 
 
-def validate_loaded_inputs(run_config: RunConfig, chamber: Any, recipe: Any) -> ConfigValidationReport:
+def validate_loaded_inputs(run_config: RunConfig, resolved_paths: ResolvedPaths, chamber: Any, recipe: Any) -> ConfigValidationReport:
     messages: list[ConfigMessage] = []
+    messages.extend(_surface_ion_loss_messages(chamber))
     port_configs = _merged_power_port_configs(chamber, recipe, messages)
     if run_config.physics.electrical_backend == 'dc_series_circuit':
         for step, port_id, cfg in port_configs:
@@ -275,7 +239,7 @@ def validate_loaded_inputs(run_config: RunConfig, chamber: Any, recipe: Any) -> 
     if run_config.physics.electrical_backend == 'external_circuit_table':
         for step, port_id, cfg in port_configs:
             try:
-                table = read_circuit_table(resolve_circuit_table_path(run_config, cfg))
+                table = read_circuit_table(resolve_circuit_table_path(resolved_paths, cfg))
                 validate_circuit_table_columns(table, cfg)
             except Exception as exc:
                 messages.append(
@@ -290,15 +254,6 @@ def validate_loaded_inputs(run_config: RunConfig, chamber: Any, recipe: Any) -> 
         for step, port_id, cfg in port_configs:
             try:
                 validate_rf_envelope_port(cfg)
-                for warning in rf_envelope_calibration_warnings(cfg):
-                    messages.append(
-                        ConfigMessage(
-                            'WARNING',
-                            'RF_ENVELOPE_CALIBRATION_HINT',
-                            f'rf_envelope port {port_id} in step {step.step_id}: {warning}',
-                            port_id,
-                        )
-                    )
             except Exception as exc:
                 messages.append(
                     ConfigMessage(

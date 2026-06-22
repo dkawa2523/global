@@ -1,0 +1,6 @@
+rate_models:
+  RM_NEUTRAL_RECOMB:
+    backend: arrhenius
+    A: 1.0e-19
+    beta: 0.0
+    Ea_eV: 0.0

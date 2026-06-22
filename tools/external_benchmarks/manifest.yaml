@@ -10,12 +10,12 @@ benchmarks:
       final_mean_electron_energy_eV:
         min: 0.5
         max: 3.0
-      final_port_dc_series_drive_absorbed_power_W:
+      final_total_absorbed_power_W:
         min: 0.25
         max: 1.00
-      final_port_dc_series_drive_gap_voltage_V:
-        min: 20.0
-        max: 120.0
+      final_EoverN_plasma_Td:
+        min: 1.0
+        max: 10.0
   - id: crane_two_reaction_argon_ode_parity
     case: ../../examples/configs/case_crane_two_reaction_argon.yaml
     comparison_tool: crane_two_reaction_argon

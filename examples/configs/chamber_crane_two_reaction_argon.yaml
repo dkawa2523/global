@@ -19,6 +19,3 @@ surfaces: []
 gas_inlets: []
 pumps: []
 power_ports: []
-metadata:
-  source: CRANE tutorials/TwoReactionArgon
-  source_repository: https://github.com/lcpp-org/crane

@@ -1,5 +1,3 @@
-kind: chemistry_manifest
-schema_version: 1
 species_file: species.csv
 gas_reactions_file: gas_reactions.csv
 surface_reactions_file: surface_reactions.csv

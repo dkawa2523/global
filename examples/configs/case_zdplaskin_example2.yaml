@@ -23,7 +23,6 @@ physics:
   enable_gas_temperature: false
   enable_surface_coverages: false
   enable_wall_inventory: false
-  enable_ied_proxy: false
 
 swarm:
   model_name: table

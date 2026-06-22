@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from plasma_global.chemistry.models import MechanismBundle, Reaction, Species
 from plasma_global.chemistry.io import load_mechanism_bundle
 from plasma_global.chemistry.provenance import chemistry_provenance_summary
@@ -115,7 +117,7 @@ def test_reaction_provenance_fixture_loads_and_summarizes(tmp_path: Path) -> Non
         'reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_filter,enabled,notes\n',
         encoding='utf-8',
     )
-    (tmp_path / 'reaction_models.yaml').write_text(
+    (tmp_path / 'electron_impact_models.yaml').write_text(
         """
 rate_models:
   RM_E_AR_ION:
@@ -125,6 +127,17 @@ rate_models:
     provenance:
       source: model source
       reference: model reference
+""",
+        encoding='utf-8',
+    )
+    (tmp_path / 'chemistry_manifest.yaml').write_text(
+        """
+species_file: species.csv
+gas_reactions_file: gas_reactions.csv
+surface_reactions_file: surface_reactions.csv
+model_files:
+  electron_impact: electron_impact_models.yaml
+cross_sections_manifest: cross_sections_manifest.yaml
 """,
         encoding='utf-8',
     )
@@ -145,7 +158,7 @@ cross_sections:
         encoding='utf-8',
     )
 
-    mechanism = load_mechanism_bundle(tmp_path)
+    mechanism = load_mechanism_bundle(tmp_path / 'chemistry_manifest.yaml')
     report = validate_mechanism(mechanism)
     summary = chemistry_provenance_summary(mechanism)
 
@@ -156,6 +169,59 @@ cross_sections:
     assert summary['reaction_entries'][0]['reference'] == 'Example reference'
     assert summary['rate_models_with_provenance'] == 1
     assert summary['cross_sections_with_provenance'] == 1
+
+
+def test_chemistry_manifest_rejects_reaction_models_alias(tmp_path: Path) -> None:
+    manifest = tmp_path / 'chemistry_manifest.yaml'
+    manifest.write_text(
+        """
+species_file: species.csv
+gas_reactions_file: gas_reactions.csv
+reaction_models_file: reaction_models.yaml
+""",
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ValueError, match='reaction_models_file.*model_files'):
+        load_mechanism_bundle(manifest)
+
+
+@pytest.mark.parametrize('backend', ['arrhenius', 'sputter_yield'])
+def test_surface_rate_model_file_rejects_unsupported_backends(tmp_path: Path, backend: str) -> None:
+    (tmp_path / 'species.csv').write_text(
+        'canonical_id,display_name,phase,charge,mass_amu,elements,aliases,state_tags,zones,surfaces\n',
+        encoding='utf-8',
+    )
+    (tmp_path / 'gas_reactions.csv').write_text(
+        'reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_filter,enabled,notes\n',
+        encoding='utf-8',
+    )
+    (tmp_path / 'surface_reactions.csv').write_text(
+        'reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_filter,enabled,notes\n',
+        encoding='utf-8',
+    )
+    (tmp_path / 'surface_rate_models.yaml').write_text(
+        f"""
+rate_models:
+  RM_SURFACE_UNSUPPORTED:
+    backend: {backend}
+    A: 1.0
+""",
+        encoding='utf-8',
+    )
+    (tmp_path / 'chemistry_manifest.yaml').write_text(
+        """
+species_file: species.csv
+gas_reactions_file: gas_reactions.csv
+surface_reactions_file: surface_reactions.csv
+model_files:
+  surface_rate: surface_rate_models.yaml
+""",
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ValueError, match='unsupported backends'):
+        load_mechanism_bundle(tmp_path / 'chemistry_manifest.yaml')
 
 
 def test_invalid_rate_model_provenance_warns_without_failing() -> None:

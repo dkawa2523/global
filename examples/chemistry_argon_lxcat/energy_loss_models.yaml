@@ -1,0 +1,94 @@
+rate_models:
+  EM_E_AR_ION:
+    backend: constant_event_loss
+    energy_loss_eV: 15.76
+  EM_E_AR_EXC_01:
+    backend: constant_event_loss
+    energy_loss_eV: 11.62
+  EM_E_AR_EXC_02:
+    backend: constant_event_loss
+    energy_loss_eV: 11.83
+  EM_E_AR_EXC_03:
+    backend: constant_event_loss
+    energy_loss_eV: 14.153
+  EM_E_AR_EXC_04:
+    backend: constant_event_loss
+    energy_loss_eV: 14.3
+  EM_E_AR_EXC_05:
+    backend: constant_event_loss
+    energy_loss_eV: 14.09
+  EM_E_AR_EXC_06:
+    backend: constant_event_loss
+    energy_loss_eV: 14.255
+  EM_E_AR_EXC_07:
+    backend: constant_event_loss
+    energy_loss_eV: 15
+  EM_E_AR_EXC_08:
+    backend: constant_event_loss
+    energy_loss_eV: 11.55
+  EM_E_AR_EXC_09:
+    backend: constant_event_loss
+    energy_loss_eV: 11.72
+  EM_E_AR_EXC_10:
+    backend: constant_event_loss
+    energy_loss_eV: 12.91
+  EM_E_AR_EXC_11:
+    backend: constant_event_loss
+    energy_loss_eV: 13.08
+  EM_E_AR_EXC_12:
+    backend: constant_event_loss
+    energy_loss_eV: 13.09
+  EM_E_AR_EXC_13:
+    backend: constant_event_loss
+    energy_loss_eV: 13.15
+  EM_E_AR_EXC_14:
+    backend: constant_event_loss
+    energy_loss_eV: 13.17
+  EM_E_AR_EXC_15:
+    backend: constant_event_loss
+    energy_loss_eV: 13.27
+  EM_E_AR_EXC_16:
+    backend: constant_event_loss
+    energy_loss_eV: 13.3
+  EM_E_AR_EXC_17:
+    backend: constant_event_loss
+    energy_loss_eV: 13.33
+  EM_E_AR_EXC_18:
+    backend: constant_event_loss
+    energy_loss_eV: 13.48
+  EM_E_AR_EXC_19:
+    backend: constant_event_loss
+    energy_loss_eV: 13.84
+  EM_E_AR_EXC_20:
+    backend: constant_event_loss
+    energy_loss_eV: 13.84
+  EM_E_AR_EXC_21:
+    backend: constant_event_loss
+    energy_loss_eV: 13.9
+  EM_E_AR_EXC_22:
+    backend: constant_event_loss
+    energy_loss_eV: 13.98
+  EM_E_AR_EXC_23:
+    backend: constant_event_loss
+    energy_loss_eV: 14.01
+  EM_E_AR_EXC_24:
+    backend: constant_event_loss
+    energy_loss_eV: 14.06
+  EM_E_AR_EXC_25:
+    backend: constant_event_loss
+    energy_loss_eV: 14.09
+  EM_E_AR_EXC_26:
+    backend: constant_event_loss
+    energy_loss_eV: 14.21
+  EM_E_AR_EXC_27:
+    backend: constant_event_loss
+    energy_loss_eV: 14.23
+  EM_E_AR_EXC_28:
+    backend: constant_event_loss
+    energy_loss_eV: 14.24
+  EM_E_AR_EXC_29:
+    backend: constant_event_loss
+    energy_loss_eV: 14.07
+  EM_E_AR_EXC_30:
+    backend: constant_event_loss
+    energy_loss_eV: 14.241

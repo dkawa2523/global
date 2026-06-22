@@ -2,22 +2,29 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import yaml
 
 from plasma_global.config.models import (
+    Boltzmann2TermConfig,
     CaseMetadata,
     ChemistryFilesConfig,
     FilesConfig,
-    LoggingConfig,
     NumericsConfig,
+    OutputFormatsConfig,
+    OutputPlotsConfig,
     OutputsConfig,
     PhysicsConfig,
+    PrescribedElectronProfileConfig,
     ResolvedPaths,
     RunConfig,
     RuntimeConfig,
+    SwarmCacheConfig,
+    SwarmConfig,
+    SwarmEnergyGridConfig,
+    SwarmReducedFieldGridConfig,
+    SwarmTableConfig,
 )
 
 
@@ -66,16 +73,12 @@ def _load_yaml_with_includes(path: Path, seen: set[Path] | None = None) -> dict[
     return merged
 
 
-def _ns(data: Any) -> Any:
-    if isinstance(data, dict):
-        return SimpleNamespace(**{k: _ns(v) for k, v in data.items()})
-    if isinstance(data, list):
-        return [_ns(v) for v in data]
-    return data
-
-
 def _normalize_raw(raw: dict[str, Any]) -> dict[str, Any]:
     if 'files' in raw or 'physics' in raw or 'case' in raw:
+        allowed = {'case', 'files', 'runtime', 'physics', 'numerics', 'outputs', 'swarm', 'schema_version', 'kind'}
+        unknown = sorted(str(k) for k in raw if str(k) not in allowed)
+        if unknown:
+            raise ValueError(f'Unsupported configuration keys: {", ".join(unknown)}')
         case = raw.get('case', {})
         case.setdefault('schema_version', int(raw.get('schema_version', 2)))
         case.setdefault('kind', raw.get('kind', 'plasma_global_case'))
@@ -86,18 +89,75 @@ def _normalize_raw(raw: dict[str, Any]) -> dict[str, Any]:
             'physics': raw.get('physics', {}),
             'numerics': raw.get('numerics', {}),
             'outputs': raw.get('outputs', {}),
-            'logging': raw.get('logging', {}),
             'swarm': raw.get('swarm', {}),
-            'imports': raw.get('imports', {}),
         }
     raise ValueError('Unsupported configuration schema. Use schema_version 2 with case/files/physics sections.')
 
 
 def _normalize_runtime(raw_runtime: dict[str, Any] | None) -> dict[str, Any]:
-    runtime = dict(raw_runtime or {})
-    runtime.pop('dry_run', None)
-    runtime.pop('continue_from_checkpoint', None)
-    return runtime
+    return dict(raw_runtime or {})
+
+
+def _reject_unknown(raw: dict[str, Any], allowed: set[str], section: str) -> None:
+    unknown = sorted(str(k) for k in raw if str(k) not in allowed)
+    if unknown:
+        raise ValueError(f'Unsupported {section} keys: {", ".join(unknown)}')
+
+
+def _output_formats(raw: dict[str, Any] | None) -> OutputFormatsConfig:
+    data = dict(raw or {})
+    _reject_unknown(data, {'solution_h5', 'observables_csv', 'summary_yaml'}, 'outputs.formats')
+    return OutputFormatsConfig(**data)
+
+
+def _output_plots(raw: dict[str, Any] | None) -> OutputPlotsConfig:
+    data = dict(raw or {})
+    _reject_unknown(data, {'enabled', 'format', 'dpi', 'items'}, 'outputs.plots')
+    if isinstance(data.get('format'), str):
+        data['format'] = [data['format']]
+    return OutputPlotsConfig(**data)
+
+
+def _swarm_config(raw: dict[str, Any] | None) -> SwarmConfig:
+    data = dict(raw or {})
+    _reject_unknown(
+        data,
+        {'model_name', 'closure', 'mixture_key_species', 'cache', 'boltzmann_2term', 'table', 'prescribed_electron_profile'},
+        'swarm',
+    )
+    cache = dict(data.pop('cache', {}) or {})
+    _reject_unknown(cache, {'max_entries', 'fraction_decimals'}, 'swarm.cache')
+
+    boltzmann = dict(data.pop('boltzmann_2term', {}) or {})
+    _reject_unknown(
+        boltzmann,
+        {'energy_grid', 'reduced_field_grid_Td', 'max_shape_iterations', 'max_field_iterations'},
+        'swarm.boltzmann_2term',
+    )
+    energy_grid = dict(boltzmann.pop('energy_grid', {}) or {})
+    _reject_unknown(energy_grid, {'min_eV', 'max_eV', 'n'}, 'swarm.boltzmann_2term.energy_grid')
+    field_grid = dict(boltzmann.pop('reduced_field_grid_Td', {}) or {})
+    _reject_unknown(field_grid, {'min', 'max', 'n'}, 'swarm.boltzmann_2term.reduced_field_grid_Td')
+
+    table = dict(data.pop('table', {}) or {})
+    _reject_unknown(table, {'file', 'lookup', 'electron_energy_mode', 'energy_relaxation_time_s'}, 'swarm.table')
+
+    profile = dict(data.pop('prescribed_electron_profile', {}) or {})
+    _reject_unknown(profile, {'file', 'file_key', 'zone_columns', 'interpolation', 'hold'}, 'swarm.prescribed_electron_profile')
+    if profile.get('zone_columns') is None:
+        profile['zone_columns'] = {}
+
+    return SwarmConfig(
+        cache=SwarmCacheConfig(**cache),
+        boltzmann_2term=Boltzmann2TermConfig(
+            energy_grid=SwarmEnergyGridConfig(**energy_grid),
+            reduced_field_grid_Td=SwarmReducedFieldGridConfig(**field_grid),
+            **boltzmann,
+        ),
+        table=SwarmTableConfig(**table),
+        prescribed_electron_profile=PrescribedElectronProfileConfig(**profile),
+        **data,
+    )
 
 
 def load_run_config(path: str | Path) -> RunConfig:
@@ -105,12 +165,18 @@ def load_run_config(path: str | Path) -> RunConfig:
     raw = _load_yaml_with_includes(path)
     norm = _normalize_raw(raw)
     outputs_raw = norm.get('outputs', {}) or {}
+    _reject_unknown(outputs_raw, {'formats', 'plots'}, 'outputs')
+    formats_raw = outputs_raw.get('formats', {}) or {}
+    chemistry_raw = norm['files'].get('chemistry', {}) or {}
+    _reject_unknown(chemistry_raw, {'manifest'}, 'files.chemistry')
+    if not chemistry_raw.get('manifest'):
+        raise ValueError('files.chemistry.manifest is required')
     return RunConfig(
         case=CaseMetadata(**norm.get('case', {})),
         files=FilesConfig(
             chamber=norm['files']['chamber'],
             recipe=norm['files']['recipe'],
-            chemistry=ChemistryFilesConfig(**(norm['files'].get('chemistry', {}) or {})),
+            chemistry=ChemistryFilesConfig(**chemistry_raw),
             output_dir=norm['files'].get('output_dir', './outputs'),
             external_inputs=norm['files'].get('external_inputs', {}) or {},
         ),
@@ -118,14 +184,10 @@ def load_run_config(path: str | Path) -> RunConfig:
         physics=PhysicsConfig(**norm.get('physics', {})),
         numerics=NumericsConfig(**norm.get('numerics', {})),
         outputs=OutputsConfig(
-            formats=_ns(outputs_raw.get('formats', {})),
-            plots=_ns(outputs_raw.get('plots', {})),
-            save=_ns(outputs_raw.get('save', {})),
+            formats=_output_formats(formats_raw),
+            plots=_output_plots(outputs_raw.get('plots', {})),
         ),
-        logging=LoggingConfig(**norm.get('logging', {})),
-        swarm=_ns(norm.get('swarm', {})),
-        imports=norm.get('imports', {}) or {},
-        raw=raw,
+        swarm=_swarm_config(norm.get('swarm', {})),
     )
 
 
@@ -142,9 +204,7 @@ def resolve_run_paths(run_config: RunConfig, source_path: str | Path) -> Resolve
         return str(p)
 
     chemistry_manifest = _resolve(run_config.files.chemistry.manifest)
-    chemistry_dir = _resolve(run_config.files.chemistry.directory)
-    if chemistry_dir is None and chemistry_manifest is not None:
-        chemistry_dir = str(Path(chemistry_manifest).parent)
+    chemistry_dir = str(Path(chemistry_manifest).parent) if chemistry_manifest is not None else None
 
     return ResolvedPaths(
         source_config=str(source_path),

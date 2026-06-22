@@ -6,13 +6,27 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from plasma_global.electrical.base import PowerRequest
+from plasma_global.electrical.base import PowerRequest, ZoneElectricalState
 from plasma_global.electrical.external_table import ExternalCircuitTableBackend, read_circuit_table, validate_circuit_table_columns
 from plasma_global.workflows.runner import run_from_yaml
 from plasma_global.workflows.context import ELECTRICAL_REGISTRY, load_case_from_yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _zone_state(total_density_m3: float = 0.0) -> dict[str, ZoneElectricalState]:
+    return {
+        'plasma': ZoneElectricalState(
+            electron_density_m3=1.0e16,
+            mean_energy_eV=3.0,
+            positive_ion_density_m3=1.0e16,
+            dominant_ion_mass_kg=6.63e-26,
+            pressure_Pa=100.0,
+            gas_temperature_K=300.0,
+            total_density_m3=total_density_m3,
+        )
+    }
 
 
 def _single_zone_chamber() -> SimpleNamespace:
@@ -49,7 +63,12 @@ def test_external_circuit_table_backend_interpolates_power_and_field(tmp_path: P
         }
     )
     backend = ExternalCircuitTableBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(base_dir=str(tmp_path), external_inputs={}),
+    )
 
     result = backend.evaluate(
         PowerRequest(
@@ -57,23 +76,12 @@ def test_external_circuit_table_backend_interpolates_power_and_field(tmp_path: P
             state_vector=None,
             recipe_step=step,
             chamber=chamber,
-            metadata={},
         )
     )
 
-    detail = result.metadata['port_details']['circuit_waveform']
-    source = result.metadata['circuit_interface']['table_sources']['circuit_waveform']
     assert result.port_power_W['circuit_waveform'] == pytest.approx(15.0)
     assert result.absorbed_power_W_by_zone['plasma'] == pytest.approx(15.0)
-    assert result.metadata['zone_reduced_field_Td']['plasma'] == pytest.approx(50.0)
-    assert detail['backend'] == 'external_circuit_table'
-    assert detail['voltage_V'] == pytest.approx(110.0)
-    assert detail['current_A'] == pytest.approx(0.15)
-    assert source['power_column'] == 'absorbed_power_W'
-    assert source['voltage_column'] == 'voltage_V'
-    assert source['current_column'] == 'current_A'
-    assert source['reduced_field_column'] == 'reduced_field_Td'
-    assert source['power_source'] == 'column'
+    assert result.zone_reduced_field_Td['plasma'] == pytest.approx(50.0)
 
 
 def test_external_circuit_table_can_use_voltage_current_product(tmp_path: Path) -> None:
@@ -85,16 +93,16 @@ def test_external_circuit_table_can_use_voltage_current_product(tmp_path: Path) 
     chamber = _single_zone_chamber()
     step = SimpleNamespace(power_ports={'circuit_waveform': {'file': str(csv_path)}})
     backend = ExternalCircuitTableBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
-
-    result = backend.evaluate(
-        PowerRequest(time_s=1.0e-6, state_vector=None, recipe_step=step, chamber=chamber, metadata={})
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(base_dir=str(tmp_path), external_inputs={}),
     )
 
+    result = backend.evaluate(PowerRequest(time_s=1.0e-6, state_vector=None, recipe_step=step, chamber=chamber))
+
     assert result.port_power_W['circuit_waveform'] == pytest.approx(40.0)
-    source = result.metadata['circuit_interface']['table_sources']['circuit_waveform']
-    assert source['power_column'] is None
-    assert source['power_source'] == 'voltage_current_product'
 
 
 def test_external_circuit_table_derives_reduced_field_from_runtime_density(tmp_path: Path) -> None:
@@ -103,7 +111,12 @@ def test_external_circuit_table_derives_reduced_field_from_runtime_density(tmp_p
     chamber = _single_zone_chamber()
     step = SimpleNamespace(power_ports={'circuit_waveform': {'file': str(csv_path), 'gap_m': 0.1}})
     backend = ExternalCircuitTableBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(base_dir=str(tmp_path), external_inputs={}),
+    )
 
     result = backend.evaluate(
         PowerRequest(
@@ -111,13 +124,11 @@ def test_external_circuit_table_derives_reduced_field_from_runtime_density(tmp_p
             state_vector=None,
             recipe_step=step,
             chamber=chamber,
-            metadata={'zone_total_density_m3': {'plasma': 2.0e20}},
+            zone_state=_zone_state(total_density_m3=2.0e20),
         )
     )
 
-    source = result.metadata['circuit_interface']['table_sources']['circuit_waveform']
-    assert result.metadata['zone_reduced_field_Td']['plasma'] == pytest.approx(5.0e3)
-    assert source['reduced_field_source'] == 'voltage_gap_runtime_density'
+    assert result.zone_reduced_field_Td['plasma'] == pytest.approx(5.0e3)
 
 
 def test_external_circuit_table_config_density_takes_precedence_for_reduced_field(tmp_path: Path) -> None:
@@ -134,7 +145,12 @@ def test_external_circuit_table_config_density_takes_precedence_for_reduced_fiel
         }
     )
     backend = ExternalCircuitTableBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(base_dir=str(tmp_path), external_inputs={}),
+    )
 
     result = backend.evaluate(
         PowerRequest(
@@ -142,13 +158,11 @@ def test_external_circuit_table_config_density_takes_precedence_for_reduced_fiel
             state_vector=None,
             recipe_step=step,
             chamber=chamber,
-            metadata={'zone_total_density_m3': {'plasma': 2.0e20}},
+            zone_state=_zone_state(total_density_m3=2.0e20),
         )
     )
 
-    source = result.metadata['circuit_interface']['table_sources']['circuit_waveform']
-    assert result.metadata['zone_reduced_field_Td']['plasma'] == pytest.approx(1.0e4)
-    assert source['reduced_field_source'] == 'voltage_gap_config_density'
+    assert result.zone_reduced_field_Td['plasma'] == pytest.approx(1.0e4)
 
 
 def test_external_circuit_table_requires_time_column(tmp_path: Path) -> None:
@@ -168,25 +182,21 @@ def test_external_circuit_table_validation_lists_available_columns(tmp_path: Pat
         validate_circuit_table_columns(table, {})
 
 
-def test_external_circuit_table_validation_reports_missing_override_column(tmp_path: Path) -> None:
-    csv_path = tmp_path / 'circuit.csv'
-    csv_path.write_text('time_s,absorbed_power_W\n0.0,10.0\n', encoding='utf-8')
-    table = read_circuit_table(csv_path)
-
-    with pytest.raises(ValueError, match="configured by voltage_column.*Available columns"):
-        validate_circuit_table_columns(table, {'voltage_column': 'missing_voltage_V'})
-
-
 def test_external_circuit_table_hold_error_rejects_out_of_range_time(tmp_path: Path) -> None:
     csv_path = tmp_path / 'circuit.csv'
     csv_path.write_text('time_s,absorbed_power_W\n0.0,10.0\n1e-6,20.0\n', encoding='utf-8')
     chamber = _single_zone_chamber()
     step = SimpleNamespace(power_ports={'circuit_waveform': {'file': str(csv_path), 'hold': 'error'}})
     backend = ExternalCircuitTableBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(base_dir=str(tmp_path), external_inputs={}),
+    )
 
     with pytest.raises(ValueError, match='outside external circuit table range'):
-        backend.evaluate(PowerRequest(time_s=2.0e-6, state_vector=None, recipe_step=step, chamber=chamber, metadata={}))
+        backend.evaluate(PowerRequest(time_s=2.0e-6, state_vector=None, recipe_step=step, chamber=chamber))
 
 
 def test_external_circuit_table_default_out_of_range_clamps_to_edge(tmp_path: Path) -> None:
@@ -195,9 +205,14 @@ def test_external_circuit_table_default_out_of_range_clamps_to_edge(tmp_path: Pa
     chamber = _single_zone_chamber()
     step = SimpleNamespace(power_ports={'circuit_waveform': {'file': str(csv_path)}})
     backend = ExternalCircuitTableBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(base_dir=str(tmp_path), external_inputs={}),
+    )
 
-    result = backend.evaluate(PowerRequest(time_s=2.0e-6, state_vector=None, recipe_step=step, chamber=chamber, metadata={}))
+    result = backend.evaluate(PowerRequest(time_s=2.0e-6, state_vector=None, recipe_step=step, chamber=chamber))
 
     assert result.port_power_W['circuit_waveform'] == pytest.approx(20.0)
 
@@ -208,9 +223,14 @@ def test_external_circuit_table_zero_order_hold_uses_previous_sample(tmp_path: P
     chamber = _single_zone_chamber()
     step = SimpleNamespace(power_ports={'circuit_waveform': {'file': str(csv_path), 'interpolation': 'zoh'}})
     backend = ExternalCircuitTableBackend()
-    backend.prepare(chamber=chamber, recipe=SimpleNamespace(steps=[step]), run_config=SimpleNamespace())
+    backend.prepare(
+        chamber=chamber,
+        recipe=SimpleNamespace(steps=[step]),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(base_dir=str(tmp_path), external_inputs={}),
+    )
 
-    result = backend.evaluate(PowerRequest(time_s=5.0e-7, state_vector=None, recipe_step=step, chamber=chamber, metadata={}))
+    result = backend.evaluate(PowerRequest(time_s=5.0e-7, state_vector=None, recipe_step=step, chamber=chamber))
 
     assert result.port_power_W['circuit_waveform'] == pytest.approx(10.0)
 
@@ -298,7 +318,7 @@ def test_external_circuit_table_validation_reports_missing_columns(tmp_path: Pat
         load_case_from_yaml(case_path)
 
 
-def test_external_circuit_table_file_key_run_summary_includes_sources(tmp_path: Path) -> None:
+def test_external_circuit_table_file_key_run_uses_compact_summary(tmp_path: Path) -> None:
     case_path = tmp_path / 'case_external_table.yaml'
     case_path.write_text(
         yaml.safe_dump(
@@ -326,12 +346,8 @@ def test_external_circuit_table_file_key_run_summary_includes_sources(tmp_path: 
     result = run_from_yaml(case_path)
 
     summary = result['summary']
-    interface = summary['electrical_coupling']['circuit_interface']
-    source = interface['table_sources']['dc_series_drive']
-    assert interface['kind'] == 'external_table_one_way'
-    assert source['power_column'] == 'absorbed_power_W'
-    assert source['voltage_column'] == 'voltage_V'
-    assert source['current_column'] == 'current_A'
-    assert source['power_source'] == 'column'
-    assert source['time_start_s'] <= summary['t_start_s'] + 1.0e-18
-    assert source['time_end_s'] > source['time_start_s']
+    final_obs = result['observables'][-1]
+    assert summary['success'] is True
+    assert summary['final_total_absorbed_power_W'] > 0.0
+    assert final_obs['total_absorbed_power_W'] > 0.0
+    assert 'electrical_coupling' not in summary

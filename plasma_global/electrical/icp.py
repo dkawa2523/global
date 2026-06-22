@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from plasma_global.electrical.base import PowerRequest, PowerResult
+from plasma_global.electrical.circuit_models import waveform_multiplier
 from plasma_global.electrical.ccp import CCPBackend
 
 
@@ -23,9 +24,12 @@ class ICPBackend(CCPBackend):
     def _source_port_result(self, request: PowerRequest, port_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
         port = self.chamber.power_port_by_id[port_id]
         zone_id = cfg.get('zone_id') or port.zone_id
-        ne, te, _ion_mass, _pos, pressure, _gas_temperature, _ion_species = self._zone_meta(request, zone_id)
+        state = self._zone_meta(request, zone_id)
+        ne = state.electron_density_m3
+        te = state.mean_energy_eV
+        pressure = state.pressure_Pa
         f_Hz = float(cfg.get('frequency_Hz') or port.parameters.get('frequency_Hz') or 13.56e6)
-        p_in = float(cfg.get('value_W', cfg.get('value', 0.0))) * self._waveform_multiplier(request.time_s, cfg)
+        p_in = float(cfg.get('value_W', cfg.get('value', 0.0))) * waveform_multiplier(request.time_s, cfg)
         if p_in <= 0.0:
             return {
                 'zone_id': zone_id,
@@ -78,7 +82,6 @@ class ICPBackend(CCPBackend):
     def evaluate(self, request: PowerRequest) -> PowerResult:
         p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         p_port: dict[str, float] = {}
-        port_details: dict[str, Any] = {}
         zone_reduced_field: dict[str, float] = {z.zone_id: 25.0 for z in self.chamber.zones}
         source_plasma_potential = 0.0
 
@@ -100,7 +103,6 @@ class ICPBackend(CCPBackend):
                     p_zone[edge.to_zone] = p_zone.get(edge.to_zone, 0.0) + share
                     zone_reduced_field[edge.to_zone] = max(zone_reduced_field.get(edge.to_zone, 25.0), 0.65 * detail['effective_field_Td'])
             p_port[port_id] = absorbed
-            port_details[port_id] = detail
             zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 25.0), detail['effective_field_Td'])
             source_plasma_potential = max(source_plasma_potential, 5.0 + 0.015 * absorbed + 2.0 * detail['coupling_efficiency'])
 
@@ -118,28 +120,22 @@ class ICPBackend(CCPBackend):
                 state_vector=request.state_vector,
                 recipe_step=bias_only_cfg,
                 chamber=request.chamber,
-                metadata=request.metadata,
+                zone_state=request.zone_state,
             )
         )
         for zone_id, val in bias_result.absorbed_power_W_by_zone.items():
             p_zone[zone_id] = p_zone.get(zone_id, 0.0) + val
         p_port.update(bias_result.port_power_W)
-        for port_id, detail in (bias_result.metadata.get('port_details') or {}).items():
-            port_details[port_id] = detail
-        for zone_id, red in (bias_result.metadata.get('zone_reduced_field_Td') or {}).items():
+        for zone_id, red in bias_result.zone_reduced_field_Td.items():
             zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 0.0), float(red))
 
         self_bias = bias_result.self_bias_V
         plasma_potential = max(source_plasma_potential, bias_result.plasma_potential_V)
-        metadata = {
-            'port_details': port_details,
-            'surface_ied': bias_result.metadata.get('surface_ied', {}),
-            'zone_reduced_field_Td': zone_reduced_field,
-        }
         return PowerResult(
             absorbed_power_W_by_zone=p_zone,
             port_power_W=p_port,
             self_bias_V=self_bias,
             plasma_potential_V=plasma_potential,
-            metadata=metadata,
+            zone_reduced_field_Td=zone_reduced_field,
+            surface_ied=bias_result.surface_ied,
         )

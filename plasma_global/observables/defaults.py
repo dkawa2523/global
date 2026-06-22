@@ -1,53 +1,14 @@
 from __future__ import annotations
 
-import numpy as np
-
 
 BASE_SUMMARY_KEYS = (
     'electron_density_m3',
     'mean_electron_energy_eV',
     'self_bias_V',
     'plasma_potential_V',
-    'mean_ion_energy_wafer_eV',
+    'total_absorbed_power_W',
     'ion_flux_wafer_m2_s',
-    'radical_to_ion_flux_ratio_wafer',
-    'F_to_C_radical_flux_ratio_wafer',
     'film_wafer_m',
-    'etch_deposition_balance_wafer',
-)
-
-PORT_SUMMARY_SUFFIXES = (
-    'absorbed_power_W',
-    'delivered_power_W',
-    'frequency_Hz',
-    'source_voltage_V',
-    'gap_voltage_V',
-    'voltage_V',
-    'voltage_rms_V',
-    'rf_voltage_rms_V',
-    'coil_voltage_rms_V',
-    'current_A',
-    'current_rms_A',
-    'rf_current_rms_A',
-    'coil_current_rms_A',
-    'self_bias_V',
-    'plasma_potential_V',
-    'coupling_efficiency',
-    'reduced_field_Td',
-    'effective_field_Td',
-    'plasma_resistance_ohm',
-    'plasma_resistance_Ohm',
-)
-
-DIAGNOSTIC_SUMMARY_KEYS = (
-    'projection_density_clip_count',
-    'projection_electron_energy_clip_count',
-    'projection_max_abs_delta',
-    'nonfinite_state_count',
-    'final_rhs_norm_inf',
-    'final_relative_rhs_norm_s_inv',
-    'solver_event_count',
-    'steady_state_event_count',
 )
 
 
@@ -60,47 +21,23 @@ def _safe_float(value):
         return None
 
 
-def _is_summary_port_key(key: str) -> bool:
-    if not key.startswith('port_'):
-        return False
-    return any(key.endswith(f'_{suffix}') for suffix in PORT_SUMMARY_SUFFIXES)
+def _allowed_final_observable_key(key: str) -> bool:
+    if key in BASE_SUMMARY_KEYS:
+        return True
+    return (
+        (key.startswith('ne_') and key.endswith('_m3'))
+        or (key.startswith('mean_energy_') and key.endswith('_eV'))
+        or (key.startswith('pabs_') and key.endswith('_W'))
+        or (key.startswith('Tg_') and key.endswith('_K'))
+        or (key.startswith('pressure_') and key.endswith('_Pa'))
+        or (key.startswith('EoverN_') and key.endswith('_Td'))
+        or (key.startswith('ion_flux_') and key.endswith('_m2_s'))
+        or (key.startswith('film_') and key.endswith('_m'))
+    )
 
 
-def _summary_keys(records: list[dict]) -> list[str]:
-    keys = list(BASE_SUMMARY_KEYS)
-    dynamic_port_keys = sorted({k for rec in records for k in rec if _is_summary_port_key(str(k))})
-    for key in dynamic_port_keys:
-        if key not in keys:
-            keys.append(key)
-    return keys
-
-
-def _stepwise_summary(records: list[dict]) -> dict[str, dict]:
-    by_step: dict[str, list[dict]] = {}
-    for rec in records:
-        step_id = str(rec.get('step_id', 'unknown'))
-        by_step.setdefault(step_id, []).append(rec)
-    summary: dict[str, dict] = {}
-    keys_of_interest = _summary_keys(records)
-    for step_id, rows in by_step.items():
-        block: dict[str, float | int] = {
-            'n_points': len(rows),
-            't_start_s': _safe_float(rows[0].get('time_s')),
-            't_end_s': _safe_float(rows[-1].get('time_s')),
-        }
-        for key in keys_of_interest:
-            values = [float(r[key]) for r in rows if key in r and r[key] is not None]
-            if values:
-                block[f'mean_{key}'] = float(np.mean(values))
-                block[f'final_{key}'] = float(values[-1])
-                block[f'min_{key}'] = float(np.min(values))
-                block[f'max_{key}'] = float(np.max(values))
-        summary[step_id] = block
-    return summary
-
-
-def summarize_solution(solution) -> dict:
-    obs = solution.diagnostics.get('observables', []) or []
+def summarize_solution(solution, observables: list[dict] | None = None, chemistry_provenance: dict | None = None) -> dict:
+    obs = observables or []
     out = {
         'success': bool(solution.success),
         'status': int(solution.status),
@@ -112,33 +49,22 @@ def summarize_solution(solution) -> dict:
         'njev': solution.diagnostics.get('njev'),
         'nlu': solution.diagnostics.get('nlu'),
     }
-    for key in DIAGNOSTIC_SUMMARY_KEYS:
+    for key in ('solver_event_count', 'steady_state_event_count'):
         value = solution.diagnostics.get(key)
-        if value is None:
-            out[key] = None
-        elif isinstance(value, bool):
-            out[key] = bool(value)
-        elif isinstance(value, int):
+        if value is not None:
             out[key] = int(value)
-        else:
-            out[key] = float(value)
     event_counts = solution.diagnostics.get('event_counts') or {}
     if event_counts:
         out['event_counts'] = {str(k): int(v) for k, v in event_counts.items()}
-    chemistry_provenance = solution.diagnostics.get('chemistry_provenance')
     if chemistry_provenance:
         out['chemistry_provenance'] = chemistry_provenance
-    electrical_coupling = solution.diagnostics.get('electrical_coupling')
-    if electrical_coupling:
-        out['electrical_coupling'] = electrical_coupling
     if obs:
         final = obs[-1]
-        for key in _summary_keys(obs):
+        for key in sorted(str(k) for k in final):
+            if not _allowed_final_observable_key(key):
+                continue
             if key in final and final[key] is not None:
-                out[f'final_{key}'] = float(final[key])
-        out['step_summary'] = _stepwise_summary(obs)
+                value = _safe_float(final[key])
+                if value is not None:
+                    out[f'final_{key}'] = value
     return out
-
-
-def observables_dataframe(solution) -> list[dict]:
-    return solution.diagnostics.get('observables', [])

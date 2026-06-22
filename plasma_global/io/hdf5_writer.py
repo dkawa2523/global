@@ -19,13 +19,6 @@ def write_solution_h5(path: str | Path, solution, state_labels: list[str] | None
         h5.create_dataset('y', data=solution.y)
         if state_labels is not None:
             h5.create_dataset('state_labels', data=[s.encode('utf-8') for s in state_labels])
-        for k, v in solution.diagnostics.items():
-            if v is None:
-                continue
-            try:
-                h5.attrs[k] = v
-            except TypeError:
-                pass
 
 
 def write_observables_csv(path: str | Path, records: list[dict[str, Any]]) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from types import SimpleNamespace
 
-from plasma_global.eedf.base import EEDFRequest
+from plasma_global.eedf.base import EEDFRequest, EEDFTransport
 from plasma_global.eedf.table import TabulatedSwarmModel
 from scripts.build_rate_table_h5 import build_rate_table_h5
 
@@ -65,8 +65,14 @@ def test_rate_table_backend_can_lookup_by_reduced_field(tmp_path) -> None:
 
     model = TabulatedSwarmModel()
     swarm = SimpleNamespace(closure='local_field', table=SimpleNamespace(file=str(out)))
-    run_config = SimpleNamespace(paths=SimpleNamespace(chemistry_dir=str(tmp_path)))
-    model.prepare(mechanism=SimpleNamespace(cross_sections={}), chamber=SimpleNamespace(), run_config=run_config, swarm_config=swarm)
+    resolved_paths = SimpleNamespace(chemistry_dir=str(tmp_path))
+    model.prepare(
+        mechanism=SimpleNamespace(cross_sections={}),
+        chamber=SimpleNamespace(),
+        run_config=SimpleNamespace(),
+        resolved_paths=resolved_paths,
+        swarm_config=swarm,
+    )
     result = model.evaluate(
         EEDFRequest(
             time_s=0.0,
@@ -81,9 +87,10 @@ def test_rate_table_backend_can_lookup_by_reduced_field(tmp_path) -> None:
     )
 
     assert result.rate_coefficients['xs_ion'] == pytest.approx(2.0e-16)
-    assert result.transport['mean_energy_eV'] == pytest.approx(1.5)
-    assert result.transport['effective_field_Td'] == pytest.approx(15.0)
-    assert result.transport['lookup_mode'] == 'field'
+    assert isinstance(result.transport, EEDFTransport)
+    assert result.transport.mean_energy_eV == pytest.approx(1.5)
+    assert result.transport.effective_field_Td == pytest.approx(15.0)
+    assert result.transport.lookup_mode == 'field'
 
 
 def test_field_rate_table_builder_keeps_sorted_field_axis_consistent(tmp_path) -> None:
@@ -118,10 +125,16 @@ def test_rate_table_fails_fast_when_required_cross_section_rate_is_missing(tmp_p
         rate_models={'rm_ion': {'backend': 'electron_impact_xsec', 'cross_section_id': 'xs_ion'}},
     )
     swarm = SimpleNamespace(closure='mean_energy', table=SimpleNamespace(file=str(table_path)))
-    run_config = SimpleNamespace(paths=SimpleNamespace(chemistry_dir=str(tmp_path)))
+    resolved_paths = SimpleNamespace(chemistry_dir=str(tmp_path))
 
     with pytest.raises(ValueError, match='missing rate_coefficients.*xs_ion'):
-        model.prepare(mechanism=mechanism, chamber=SimpleNamespace(), run_config=run_config, swarm_config=swarm)
+        model.prepare(
+            mechanism=mechanism,
+            chamber=SimpleNamespace(),
+            run_config=SimpleNamespace(),
+            resolved_paths=resolved_paths,
+            swarm_config=swarm,
+        )
 
 
 def test_rate_table_rejects_invalid_dataset_shape(tmp_path) -> None:
@@ -135,7 +148,13 @@ def test_rate_table_rejects_invalid_dataset_shape(tmp_path) -> None:
         group.create_dataset('xs_ion', data=[1.0e-16, 2.0e-16])
     model = TabulatedSwarmModel()
     swarm = SimpleNamespace(closure='mean_energy', table=SimpleNamespace(file=str(table_path)))
-    run_config = SimpleNamespace(paths=SimpleNamespace(chemistry_dir=str(tmp_path)))
+    resolved_paths = SimpleNamespace(chemistry_dir=str(tmp_path))
 
     with pytest.raises(ValueError, match='mobility_m2_V_s.*does not match'):
-        model.prepare(mechanism=SimpleNamespace(rate_models={}, gas_reactions=[]), chamber=SimpleNamespace(), run_config=run_config, swarm_config=swarm)
+        model.prepare(
+            mechanism=SimpleNamespace(rate_models={}, gas_reactions=[]),
+            chamber=SimpleNamespace(),
+            run_config=SimpleNamespace(),
+            resolved_paths=resolved_paths,
+            swarm_config=swarm,
+        )

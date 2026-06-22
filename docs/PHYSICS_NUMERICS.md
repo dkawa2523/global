@@ -31,8 +31,8 @@ Electron density is normally algebraic from quasi-neutrality. A prescribed elect
 ## Power, Wall, and Surface Assumptions
 
 Absorbed power enters the electron-energy balance as zone-level power density.
-Electrical backends may also provide reduced-field or ion-energy proxy
-diagnostics, but these are not detailed electromagnetic or sheath solutions.
+Electrical backends may also provide compact reduced-field or ion-energy proxy
+outputs, but these are not detailed electromagnetic or sheath solutions.
 
 `external_circuit_table` is a one-way waveform coupling backend. It can read
 measured or SPICE-generated CSV tables containing absorbed power, optional
@@ -51,16 +51,14 @@ site balances, wall inventory, and film thickness are intended as compact
 reactor-model terms. Case-specific calibration or validation is required before
 making quantitative process claims.
 
-Implemented ion wall-loss families are intentionally small:
+Implemented ion wall-loss modes are intentionally small:
 
-- Bohm-like global loss uses active wall area, zone volume, ion sound speed,
-  and an edge-to-center `h_factor`. It is a global sheath-edge closure, not a
-  detailed RF sheath or spatial diffusion model.
-- Prescribed loss frequency uses a fixed global ion-loss frequency such as
-  `loss_rate_s`. This is the preferred name when a calibrated or externally
-  estimated loss rate is provided.
-- `ambipolar_diffusion` remains a backward-compatible effective-frequency mode
-  and can derive the frequency from `D / L^2`.
+- `bohm` uses active wall area, zone volume, ion sound speed, and `h_factor`.
+  It is a global sheath-edge closure, not a detailed RF sheath or spatial
+  diffusion model.
+- `prescribed_loss_frequency` uses a fixed global ion-loss `frequency_s`.
+- `ambipolar_diffusion` derives the frequency from `D / L^2`.
+- `off` disables ion wall loss on that surface.
 
 Electronegative global wall-loss closure is not implemented as a separate
 family in the core. For now, electronegative cases should use calibrated Bohm
@@ -68,17 +66,10 @@ factors or prescribed loss frequency. More detailed sheath, 2D diffusion,
 PIC/fluid coupling, and feature-scale models are outside the core boundary; see
 the [Extension Guide](EXTENSION_GUIDE.md).
 
-Observable output includes zone-level ion wall-loss diagnostics derived from
-the same terms used by the RHS:
-
-- `ion_wall_loss_frequency_<zone>_s`
-- `ion_wall_loss_source_<zone>_m3_s`
-- `ion_wall_flux_<zone>_m2_s`
-
-Surface ion-flux observables and ion-enhanced surface rates use explicit IED
-flux when provided. Without explicit IED data, they use the zone wall-loss flux
-from the same global closure; the older Bohm proxy remains only as a fallback
-when no active wall-loss flux is available.
+Surface ion-flux observables and ion-enhanced surface rates use compact surface
+IED data when provided: ion flux and mean ion energy only. Species-resolved IEDF
+details are outside the normal output contract. Without explicit compact IED
+data, surface terms use the zone wall-loss flux from the same global closure.
 
 For field-gridded `rate_table` cases, `swarm.table.electron_energy_mode:
 table_relaxation` relaxes the electron-energy state toward the table mean
@@ -87,36 +78,19 @@ electron power balance.
 
 ## Numerics
 
-The default integrator is SciPy `solve_ivp(method="BDF")` with an analytic sparse Jacobian. State projection is applied between recipe segments to keep densities, electron energy, gas temperature, and surface coverage values admissible.
+The default integrator is SciPy `solve_ivp(method="BDF")` without an analytic
+Jacobian. State projection is applied between recipe segments to keep
+densities, electron energy, gas temperature, and surface coverage values
+admissible.
 
 Initial states include small charged-species seeds for numerical robustness.
 For ignition studies or quantitative early transients, set explicit
 `initial_densities_m3` in the chamber file.
 
-The Jacobian covers the main gas/surface reaction and transport terms. Backend coupling derivatives are intentionally limited; use finite-difference checks before relying on the Jacobian for new backend work.
-
-`check-jacobian` is a diagnostic command, not a release acceptance criterion.
-It compares the analytic sparse Jacobian with centered finite differences and
-reports both the largest entries and state-layout group summaries, making it
-easier to distinguish gas-density, electron-energy, surface, inventory, and
-film-thickness mismatch sources. Solver counters, projected state histories,
-observables, and generated config snapshots are the main lightweight
-diagnostics in the normal run path.
-
-## Numerical Diagnostics
-
-Run summaries include lightweight scalar diagnostics:
-
-- density and electron-energy projection clip counts
-- maximum absolute projection change
-- non-finite state entry count
-- final RHS infinity norm
-- final relative RHS norm in `s^-1`
-- solver event counts
-
-These diagnostics are intended to flag questionable runs, especially cases that
-require repeated positivity projection. They are not a substitute for case
-validation or benchmark comparison.
+Run summaries include success state, time range, solver counters, event counts,
+chemistry provenance, and final compact observables. They intentionally omit
+projection counters, final RHS norms, port internals, and ion-loss internals
+from the normal output contract.
 
 An optional steady-state event can stop a run when the relative RHS norm falls
 below a configured threshold. It is disabled by default and should be enabled

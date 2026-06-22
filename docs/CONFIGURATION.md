@@ -26,6 +26,10 @@ Common optional sections:
 - `outputs`: output formats and plots.
 - `swarm`: EEDF/swarm backend configuration.
 
+Schema-v2 cases are intentionally strict. Unknown keys under `outputs`,
+`swarm`, `files.chemistry`, or chamber top-level configuration are rejected at
+load time.
+
 ## EEDF and Rate Tables
 
 Select the EEDF backend through `physics.eedf_backend`. The compact analytic
@@ -87,29 +91,23 @@ power_ports:
     current_scale: 1.0
 ```
 
-The CSV file must include `time_s` and either a power column or both voltage
-and current columns:
+The CSV file must include `time_s` and either `absorbed_power_W` or both
+`voltage_V` and `current_A`. `reduced_field_Td` is optional.
 
 | Purpose | Supported columns |
 |---|---|
-| absorbed power | `absorbed_power_W`, `power_W`, `plasma_power_W`, `P_abs_W` |
-| voltage | `voltage_V`, `gap_voltage_V`, `plasma_voltage_V` |
-| current | `current_A`, `plasma_current_A` |
-| reduced field, optional | `reduced_field_Td`, `EoverN_Td`, `E_over_N_Td` |
+| absorbed power | `absorbed_power_W` |
+| voltage | `voltage_V` |
+| current | `current_A` |
+| reduced field, optional | `reduced_field_Td` |
 
-Column names can be overridden with `power_column`, `voltage_column`,
-`current_column`, and `reduced_field_column`. `file` or `csv_file` may be used
-instead of `file_key`; relative file paths are resolved from the case file
-directory. `interpolation` defaults to linear, while `previous`, `zoh`, and
-`zero_order_hold` select zero-order hold. Outside the table range, the default
-policy holds the edge value; use `hold: error` to reject out-of-range times.
-If no reduced-field column is present, `gap_m` plus voltage can derive E/N.
-Configured `total_density_m3` is used first; otherwise the current zone total
-density from the plasma state is used when available.
-
-Run summaries include `electrical_coupling.circuit_interface.table_sources`
-with the resolved file path, time range, selected columns, interpolation mode,
-hold policy, and power source.
+Use `file_key` to read from `files.external_inputs`, or `file` for a direct
+case-relative path. `interpolation` defaults to linear, while `previous`,
+`zoh`, and `zero_order_hold` select zero-order hold. Outside the table range,
+the default policy holds the edge value; use `hold: error` to reject
+out-of-range times. If no reduced-field column is present, `gap_m` plus voltage
+can derive E/N. Configured `total_density_m3` is used first; otherwise the
+current zone total density from the plasma state is used when available.
 
 ## Wall-Loss Models
 
@@ -121,17 +119,17 @@ Preferred fixed-frequency configuration:
 ```yaml
 models:
   ion_loss: prescribed_loss_frequency
-  loss_rate_s: 3230.0
+  frequency_s: 3230.0
 ```
 
 Implemented ion-loss families:
 
 | `ion_loss` value | Meaning |
 |---|---|
-| omitted, `bohm`, `bohm_edge_loss`, `bohm_global_loss` | Bohm-like global ion loss using active wall area, zone volume, ion sound speed, and an edge-to-center `h_factor` |
-| `prescribed_loss_frequency`, `loss_frequency`, `global_loss_frequency` | Fixed global ion-loss frequency from `loss_rate_s` or `ion_loss_frequency_s` |
-| `ambipolar_diffusion` | Backward-compatible effective-frequency mode using `loss_rate_s`, `ambipolar_loss_rate_s`, or `diffusion_coefficient_m2_s / diffusion_length_m^2` |
-| `disabled`, `off`, `none` | No ion wall loss on that surface |
+| omitted, `bohm` | Bohm global ion loss using active wall area, zone volume, ion sound speed, and `h_factor` |
+| `prescribed_loss_frequency` | Fixed global ion-loss frequency from `frequency_s` |
+| `ambipolar_diffusion` | Effective frequency from `diffusion_coefficient_m2_s / diffusion_length_m^2` |
+| `off` | No ion wall loss on that surface |
 
 Do not mix Bohm-like and effective-frequency ion-loss families within the same
 zone. The validator rejects mixed families to avoid double counting.
@@ -143,7 +141,7 @@ Bohm-like surfaces may also provide:
 
 ```yaml
 models:
-  ion_loss: bohm_global_loss
+  ion_loss: bohm
   h_factor: auto
   ion_neutral_cross_section_m2: 1.0e-18
   characteristic_length_m: 0.05
@@ -156,10 +154,10 @@ outside the core scope; see the [Extension Guide](EXTENSION_GUIDE.md).
 
 ## Numerical Diagnostics and Events
 
-Projection and solver diagnostics are written to `summary.yaml` automatically.
-Large projection counts or large projection magnitudes indicate that a run is
-leaning on numerical clipping and should be reviewed before interpreting the
-physics.
+`summary.yaml` is intentionally compact: success state, time range, solver
+counters, chemistry provenance, and final major physical quantities. Detailed
+internal clipping, RHS-norm, port, and wall-loss internals are not part of the
+normal output contract.
 
 Initial states include small charged-species seeds for numerical robustness.
 For quantitative ignition or early-transient studies, set species-specific
