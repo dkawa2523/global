@@ -1,0 +1,38 @@
+tool: pygmol_precision
+case: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+output_dir: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\external_benchmarks\diagnostic_suite\pygmol_precision
+pygmol:
+  pygmol_version: 1.1.0
+local_solver:
+  success: true
+  nfev: 517
+  njev: 22
+  nlu: 84
+  sample_count: 186
+artifacts:
+  time_series_csv: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\external_benchmarks\diagnostic_suite\pygmol_precision\pygmol_precision_timeseries.csv
+  metrics_csv: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\external_benchmarks\diagnostic_suite\pygmol_precision\pygmol_precision_metrics.csv
+  fixture_yaml: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\external_benchmarks\diagnostic_suite\pygmol_precision\pygmol_precision_fixture.yaml
+  report_yaml: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\outputs\external_benchmarks\diagnostic_suite\pygmol_precision\pygmol_precision_report.yaml
+metrics:
+  same_footing_axes_aligned: 1.0
+  final_Ar_relative_error: 2.1371197944629093e-09
+  Ar_waveform_nrmse: 5.687965606458156e-10
+  final_Ar_plus_relative_error: 3.124374260767181e-05
+  Ar_plus_waveform_nrmse: 6.633630691393758e-06
+  final_e_relative_error: 3.124374260767181e-05
+  e_waveform_nrmse: 6.633630691393758e-06
+  final_T_e_relative_error: 0.00010880551642708843
+  T_e_waveform_nrmse: 2.323612904379139e-05
+  final_T_n_relative_error: 0.0
+  T_n_waveform_nrmse: 0.0
+  final_p_relative_error: 3.4794389591747524e-13
+  p_waveform_nrmse: 2.752702178503694e-13
+  final_P_relative_error: 0.0
+  P_waveform_nrmse: 0.0
+  max_final_relative_error: 0.00010880551642708843
+  max_waveform_nrmse: 2.323612904379139e-05
+interpretation: This is a tools-only same-footing precision benchmark. It checks that
+  a local implementation of the PyGMol compact equations matches PyGMol when geometry,
+  chemistry, power, wall return, initial state, and sampled times are aligned. It
+  does not claim that the production plasma_global low-pressure model matches PyGMol.

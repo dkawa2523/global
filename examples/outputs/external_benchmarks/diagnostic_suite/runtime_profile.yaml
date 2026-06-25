@@ -1,0 +1,56 @@
+repetitions: 1
+cases:
+- case_id: CRANE-1
+  case_path: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_crane_two_reaction_argon.yaml
+  runs:
+  - rep_index: 1
+    run_kind: cold
+    wall_time_s: 0.1085143000818789
+    success: true
+    nfev: 1634
+    njev: 1
+    nlu: 86
+    n_times: 200
+  aggregate:
+    median_wall_time_s: 0.1085143000818789
+    min_wall_time_s: 0.1085143000818789
+    max_wall_time_s: 0.1085143000818789
+    warm_median_wall_time_s: null
+    nfev_median: 1634.0
+    nlu_median: 86.0
+- case_id: ZDPlaskin-1
+  case_path: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_zdplaskin_example2.yaml
+  runs:
+  - rep_index: 1
+    run_kind: cold
+    wall_time_s: 0.5298539998475462
+    success: true
+    nfev: 3497
+    njev: 16
+    nlu: 218
+    n_times: 200
+  aggregate:
+    median_wall_time_s: 0.5298539998475462
+    min_wall_time_s: 0.5298539998475462
+    max_wall_time_s: 0.5298539998475462
+    warm_median_wall_time_s: null
+    nfev_median: 3497.0
+    nlu_median: 218.0
+- case_id: PyGMol-local
+  case_path: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\configs\case_argon_lxcat.yaml
+  runs:
+  - rep_index: 1
+    run_kind: cold
+    wall_time_s: 2.792185500031337
+    success: true
+    nfev: 5006
+    njev: 67
+    nlu: 398
+    n_times: 196
+  aggregate:
+    median_wall_time_s: 2.792185500031337
+    min_wall_time_s: 2.792185500031337
+    max_wall_time_s: 2.792185500031337
+    warm_median_wall_time_s: null
+    nfev_median: 5006.0
+    nlu_median: 398.0

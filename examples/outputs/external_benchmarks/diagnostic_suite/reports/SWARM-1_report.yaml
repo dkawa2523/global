@@ -1,0 +1,80 @@
+metrics:
+  zdp_table_required_datasets_present: 1.0
+  zdp_table_field_axis_strictly_increasing: 1.0
+  zdp_table_required_rates_present: 1.0
+  zdp_table_final_field_inside_table: 1.0
+  zdp_table_local_field_interpolation_finite: 1.0
+  zdp_table_lookup_diagnostics_present: 1.0
+  zdp_table_clipping_diagnostics_present: 1.0
+  swarm_table_reader_prepares: 1.0
+  swarm_lookup_mode_is_field: 1.0
+  swarm_transport_values_finite: 1.0
+  swarm_rate_values_finite: 1.0
+  swarm_lookup_diagnostics_present: 1.0
+  swarm_clipping_diagnostics_present: 1.0
+details:
+  table: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\chemistry_zdplaskin_example2\tables\zdplaskin_example2_eovern_rates.h5
+  required_cross_section_ids:
+  - xs_zdp_ar_excitation
+  - xs_zdp_ar_ionization
+  - xs_zdp_ar_star_deexcitation
+  - xs_zdp_ar_star_ionization
+  field_min_Td: 1.597044
+  field_max_Td: 77.66399
+  final_reference_EoverN_Td: 2.561342
+  available_rate_ids:
+  - xs_zdp_ar_effective
+  - xs_zdp_ar_excitation
+  - xs_zdp_ar_ionization
+  - xs_zdp_ar_star_deexcitation
+  - xs_zdp_ar_star_ionization
+  interpolated_lookup_mode: field
+  interpolated_transport:
+    mean_energy_eV: 3.9007374595522326
+    mobility_m2_V_s: 0.45927392665372113
+    diffusion_m2_s: 0.0
+    effective_field_Td: 2.561342
+  interpolated_lookup_diagnostics:
+    backend: rate_table
+    table_path: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\chemistry_zdplaskin_example2\tables\zdplaskin_example2_eovern_rates.h5
+    grid_column: EoverN_Td
+    lookup_mode: field
+    lookup_value: 2.561342
+    lookup_clipped_value: 2.561342
+    axis_min: 1.597044
+    axis_max: 77.66399
+    lookup_clipped: false
+    lookup_clipped_low: false
+    lookup_clipped_high: false
+    metadata:
+      generator: tools/external_benchmarks/build_zdplaskin_output_rate_table.py
+      grid_column: EoverN_Td
+      note: Rates are reverse-engineered from saved ZDPlaskin reaction-rate columns,
+        including the BOLSIG+/superelastic behavior present in that run.
+      source: ZDPlaskin example2 committed output
+      source_directory: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\chemistry_zdplaskin_example2\tables\zdplaskin_example2_eovern
+  out_of_range_lookup_diagnostics:
+    backend: rate_table
+    table_path: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\chemistry_zdplaskin_example2\tables\zdplaskin_example2_eovern_rates.h5
+    grid_column: EoverN_Td
+    lookup_mode: field
+    lookup_value: 776.6399
+    lookup_clipped_value: 77.66399
+    axis_min: 1.597044
+    axis_max: 77.66399
+    lookup_clipped: true
+    lookup_clipped_low: false
+    lookup_clipped_high: true
+    metadata:
+      generator: tools/external_benchmarks/build_zdplaskin_output_rate_table.py
+      grid_column: EoverN_Td
+      note: Rates are reverse-engineered from saved ZDPlaskin reaction-rate columns,
+        including the BOLSIG+/superelastic behavior present in that run.
+      source: ZDPlaskin example2 committed output
+      source_directory: C:\Users\user\Desktop\Global_model\plasma_review_updated\examples\chemistry_zdplaskin_example2\tables\zdplaskin_example2_eovern
+  interpolated_rate_ids:
+  - xs_zdp_ar_effective
+  - xs_zdp_ar_excitation
+  - xs_zdp_ar_ionization
+  - xs_zdp_ar_star_deexcitation
+  - xs_zdp_ar_star_ionization
