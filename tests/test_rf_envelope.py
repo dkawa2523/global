@@ -8,7 +8,8 @@ import yaml
 
 from plasma_global.electrical.base import PowerRequest
 from plasma_global.electrical.rf_envelope import RFEnvelopeBackend, validate_rf_envelope_port
-from plasma_global.workflows.context import ELECTRICAL_REGISTRY, load_case_from_yaml
+from plasma_global.workflows.context import load_case_from_yaml
+from plasma_global.workflows.registries import ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -166,7 +166,7 @@ cross_sections:
     assert mechanism.gas_reactions[0].provenance['source'] == 'LXCat'
     assert mechanism.gas_reactions[0].provenance['cross_section_id'] == 'xs_ar_ion'
     assert summary['reactions_with_provenance'] == 1
-    assert summary['reaction_entries'][0]['reference'] == 'Example reference'
+    assert 'reaction_entries' not in summary
     assert summary['rate_models_with_provenance'] == 1
     assert summary['cross_sections_with_provenance'] == 1
 

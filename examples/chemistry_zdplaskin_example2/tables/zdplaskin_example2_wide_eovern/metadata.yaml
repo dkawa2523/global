@@ -4,4 +4,4 @@ grid: EoverN_Td
 min_EoverN_Td: 0.5
 max_EoverN_Td: 250.0
 n_fields: 64
-note: Diagnostic wide-range table generated from the repository internal two-term-like solver using the ZDPlaskin cross-section bundle; not a BOLSIG+ executable rerun and not the ZDPlaskin parity table.
+note: Wide-range E/N table generated from the repository internal two-term-like solver using the ZDPlaskin cross-section bundle; not a BOLSIG+ executable rerun and not the ZDPlaskin parity table.

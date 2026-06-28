@@ -17,7 +17,6 @@ dependencies = [
 [project.optional-dependencies]
 io = ["h5py>=3.10"]
 plot = ["matplotlib>=3.7"]
-compare = ["pygmol>=1.1,<2"]
 docs = ["mkdocs>=1.6"]
 dev = ["pytest>=8.0", "ruff>=0.5", "h5py>=3.10"]
 

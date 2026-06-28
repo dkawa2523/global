@@ -8,14 +8,6 @@ htmlcov/
 site/
 site_ja/
 examples/outputs/*
-!examples/outputs/external_benchmarks/
-examples/outputs/external_benchmarks/*
-!examples/outputs/external_benchmarks/**/
-!examples/outputs/external_benchmarks/diagnostic_suite/benchmark_summary.md
-!examples/outputs/external_benchmarks/diagnostic_suite/benchmark_findings.md
-!examples/outputs/external_benchmarks/diagnostic_suite/benchmark_metrics.csv
-!examples/outputs/external_benchmarks/remediation/*.md
-!examples/outputs/external_benchmarks/remediation/*.csv
 examples/external/loki_o2_dc_glow_digitized/
 examples/external/loki_o2_dc_glow_*report.yaml
 examples/external/zdplaskin_examples_inventory.yaml

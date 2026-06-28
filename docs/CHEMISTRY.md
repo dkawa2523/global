@@ -65,7 +65,7 @@ rate_models:
       version: 2024
 ```
 
-When available, chemistry provenance is copied into `summary.yaml` under
+When available, `summary.yaml` records compact provenance counts under
 `chemistry_provenance`. Missing optional provenance does not fail validation.
 
 ## Rate Tables
@@ -77,5 +77,5 @@ backend for cheap smoke/debug runs.
 
 For production electron-impact kinetics, prefer externally generated
 rate/transport tables from BOLSIG+, LoKI-B, Magboltz, or similar tools. The
-current table contract is described in [External Swarm and Rate
+current table format is described in [External Swarm and Rate
 Tables](SWARM_RATE_TABLES.md).

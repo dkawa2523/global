@@ -7,8 +7,6 @@ BASE_SUMMARY_KEYS = (
     'self_bias_V',
     'plasma_potential_V',
     'total_absorbed_power_W',
-    'ion_flux_wafer_m2_s',
-    'film_wafer_m',
 )
 
 

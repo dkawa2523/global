@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -58,9 +58,6 @@ class CompiledSurfaceReaction:
 @dataclass
 class SurfaceRateEvaluation:
     rate_m2_s: float
-    d_gas: dict[int, float] = field(default_factory=dict)
-    d_surface: dict[int, float] = field(default_factory=dict)
-    dTg: float = 0.0
 
 
 @dataclass

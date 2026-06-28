@@ -1,17 +1,18 @@
 # Architecture
 
-The package is organized around a small workflow core.
+The package is organized around a small 0D / multi-zone global-model core.
 
 ## Main Layers
 
-- `config`: case loading, includes, schema-v2 normalization, path resolution, and validation.
+- `config`: case loading, path resolution, schema-v2 normalization, and validation.
 - `chemistry`: species, reactions, cross sections, rate models, and mechanism validation.
-- `reactor`: chamber, zone, surface, inlet, pump, edge, and recipe models.
-- `eedf`: Maxwell, table, swarm, and internal two-term-like EEDF closures.
-- `electrical`: direct power, DC series, external table, RF envelope, CCP, and ICP reduced backends.
-- `numerics`: state layout, ODE system, and SciPy BDF integration.
-- `observables`: compact postprocessed time-series and summary outputs.
-- `workflows`: load/build/run orchestration.
+- `reactor`: chamber, zone, surface, inlet, pump, edge, and recipe data.
+- `eedf`: analytic, internal approximate, swarm-wrapper, and rate-table EEDF backends.
+- `electrical`: direct, table, RF-envelope, CCP, ICP, and DC reduced power backends.
+- `numerics`: state layout, ODE system, solver result containers, and SciPy BDF integration.
+- `physics`: gas-phase and optional surface RHS contributions.
+- `observables`: postprocessed time-series and summary fields.
+- `workflows`: load/build/run orchestration and output writing.
 
 ## Stable Entry Points
 
@@ -23,37 +24,29 @@ The supported Python entry points are:
 
 The supported CLI commands are documented in [CLI and API](CLI_API.md).
 
-## Core Contracts
+## Core Boundary
 
-The core plasma system consumes stable internal objects: mechanism data,
-reactor/recipe configuration, EEDF results, electrical coupling results,
-numerical options, and observables. It should not know whether rate
-coefficients came from `maxwell`, `boltzmann_2term`, `rate_table`, BOLSIG+,
-LoKI-B, Magboltz, or another offline source. It should also not know whether
-electrical waveforms came from measurements, a simple reduced backend, or a
-SPICE-generated table.
+`GlobalPlasmaSystem` is the solver-facing coordinator. It owns the state layout,
+initial state, RHS composition, projection, labels, and solver events. Gas,
+surface, EEDF, and electrical details are delegated to their modules.
 
-External solver integration belongs in offline tools, adapters, or backend
-file readers. Avoid direct calls to external executables from the ODE RHS,
-Jacobian, or core workflow. See the [Extension Guide](EXTENSION_GUIDE.md) for
-the project boundary policy.
+Observables and file outputs are postprocessing. They read the solution and
+system state after the solver path; they should not add requirements to the RHS
+or state vector.
 
-## Extension Points
+The core consumes prepared data. External swarm solvers, SPICE tools, plotting,
+benchmark reports, and generated output files belong outside the RHS and normal
+case-building path.
 
-Backends are selected by registry name:
+## Backends
 
-- EEDF backend
-- electrical backend
-- integrator backend
+Backends are selected by simple registries in `workflows/registries.py`.
 
-Each backend should keep its request/result interface small and avoid reading files directly unless the backend owns that file format.
+- EEDF backends return rate coefficients and transport data.
+- Electrical backends return zone absorbed power; reduced field, port values,
+  and compact surface IED data are optional backend outputs.
+- Integrator backends solve the ODE system.
 
-Electrical backends receive typed `ZoneElectricalState` values through
-`PowerRequest.zone_state`. They return top-level `PowerResult` fields for
-absorbed power, `zone_reduced_field_Td`, and compact `surface_ied` data. Avoid
-using ad hoc metadata dictionaries as hidden extension buses.
-
-EEDF backends return `EEDFResult` with typed `EEDFTransport` values for mean
-energy, mobility, diffusion, reduced field, and lookup mode. Configuration is
-loaded into narrow dataclasses; unknown `swarm`, `outputs`, and chamber
-top-level keys fail fast instead of becoming open-ended extension surfaces.
+Do not add plugin discovery, hidden metadata buses, or executable calls to the
+core workflow. Add small backend code only when the existing registry and result
+objects are enough for the job.

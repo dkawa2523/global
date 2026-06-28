@@ -17,10 +17,13 @@ from plasma_global.config.models import (
 )
 from plasma_global.config.loader import load_run_config, resolve_run_paths
 from plasma_global.config.validator import validate_run_config
+from plasma_global.diagnostics.budgets import reaction_source_loss_budget
 from plasma_global.eedf.base import EEDFRequest
 from plasma_global.eedf.boltzmann_2term import Boltzmann2TermSwarmModel
 from plasma_global.electrical.base import SurfaceIED
 from plasma_global.numerics.system import GlobalPlasmaSystem
+from plasma_global.observables.adapter import compute_observables
+from plasma_global.physics.gas_closure import electron_density_from_state_row
 from plasma_global.physics.types import SurfaceRateEvaluation
 from plasma_global.reactor.surface_models import (
     bohm_h_factor,
@@ -112,10 +115,10 @@ def test_global_electron_energy_observable_is_volume_weighted() -> None:
 
     for zone_id, mean_e in {'source': 3.0, 'process': 30.0}.items():
         gas = system.gas_core.gas_row(y, zone_id)
-        ne = system.gas_core.electron_density_from_state_row(gas)
+        ne = electron_density_from_state_row(system, gas)
         y[system.state_layout.electron_energy_index[zone_id]] = mean_e * ne * E_CHARGE
 
-    rec = system.compute_observables(np.array([0.0]), y.reshape(-1, 1))[0]
+    rec = compute_observables(system, np.array([0.0]), y.reshape(-1, 1))[0]
 
     assert np.isclose(rec['mean_electron_energy_eV'], 23.25)
 
@@ -196,14 +199,15 @@ def test_observables_keep_compact_zone_and_surface_columns() -> None:
     built = build_case(load_case_from_yaml(SMOKE_CASE))
     system = built.system
     y0 = system.initial_state()
-    rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
+    rec = compute_observables(system, np.array([0.0]), y0.reshape(-1, 1))[0]
 
     for zone_id in system.zone_ids:
         assert np.isfinite(rec[f'ne_{zone_id}_m3'])
         assert np.isfinite(rec[f'mean_energy_{zone_id}_eV'])
         assert np.isfinite(rec[f'pabs_{zone_id}_W'])
         assert np.isfinite(rec[f'EoverN_{zone_id}_Td'])
-    assert rec['ion_flux_wafer_m2_s'] >= 0.0
+    surface_id = system.surface_ids[0]
+    assert rec[f'ion_flux_{surface_id}_m2_s'] >= 0.0
     assert not any(key.startswith(('ion_loss_', 'ion_wall_', 'ambipolar_loss_')) for key in rec)
     assert not any(key.startswith(('reaction_rate_', 'species_source_', 'species_loss_')) for key in rec)
 
@@ -223,7 +227,7 @@ def test_prescribed_ion_loss_frequency_validates_and_reports_observable(tmp_path
     built = build_case(load_case_from_yaml(case_path))
     system = built.system
     y0 = system.initial_state()
-    rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
+    rec = compute_observables(system, np.array([0.0]), y0.reshape(-1, 1))[0]
 
     assert system.zone_ion_loss_family['source'] == 'prescribed_loss_frequency'
     assert system.zone_effective_ion_loss_frequency_s['source'] == pytest.approx(3230.0)
@@ -242,7 +246,7 @@ def test_surface_ion_flux_uses_zone_wall_loss_when_no_ied(tmp_path: Path) -> Non
     built = build_case(load_case_from_yaml(case_path))
     system = built.system
     y0 = system.initial_state()
-    rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
+    rec = compute_observables(system, np.array([0.0]), y0.reshape(-1, 1))[0]
     coupled = system.electrical_adapter.evaluate(0.0, y0, system.current_step(0.0))
     gas_row = system.gas_core.gas_row(y0, 'source')
     expected = system.gas_core.ion_wall_loss_flux_m2_s('source', gas_row, coupled.mean_e_by_zone['source'])
@@ -268,7 +272,7 @@ def test_surface_ied_contract_is_compact() -> None:
 
 
 def test_surface_rate_evaluation_has_no_diagnostics_bus() -> None:
-    assert set(SurfaceRateEvaluation.__dataclass_fields__) == {'rate_m2_s', 'd_gas', 'd_surface', 'dTg'}
+    assert set(SurfaceRateEvaluation.__dataclass_fields__) == {'rate_m2_s'}
 
 
 def test_prescribed_ion_loss_frequency_requires_rate_or_diffusion_data(tmp_path: Path) -> None:
@@ -288,7 +292,7 @@ def test_observables_do_not_flatten_power_port_diagnostics() -> None:
     built = build_case(load_case_from_yaml(SMOKE_CASE))
     system = built.system
     y0 = system.initial_state()
-    rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
+    rec = compute_observables(system, np.array([0.0]), y0.reshape(-1, 1))[0]
 
     assert rec['total_absorbed_power_W'] > 0.0
     assert not any(key.startswith('port_') for key in rec)
@@ -298,7 +302,7 @@ def test_observables_include_model_budget_and_electrical_waveform_columns() -> N
     built = build_case(load_case_from_yaml(ROOT / 'examples' / 'configs' / 'case_zdplaskin_example2.yaml'))
     system = built.system
     y0 = system.initial_state()
-    rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
+    rec = compute_observables(system, np.array([0.0]), y0.reshape(-1, 1))[0]
 
     assert rec['electrical_dc_series_drive_source_voltage_V'] == pytest.approx(1000.0)
     assert rec['electrical_dc_series_drive_current_A'] != 0.0
@@ -316,7 +320,7 @@ def test_gas_terms_and_budget_share_reaction_values() -> None:
     coupled = system.electrical_adapter.evaluate(0.0, y0, system.current_step(0.0))
 
     terms = system.gas_core.gas_reaction_terms(coupled)
-    budget = system.gas_core.reaction_source_loss_budget(coupled)
+    budget = reaction_source_loss_budget(system.gas_core, coupled)
     expected_source: dict[tuple[str, str], float] = {}
     expected_loss: dict[tuple[str, str], float] = {}
 
@@ -344,7 +348,7 @@ def test_ion_wall_loss_terms_and_budget_share_loss_values() -> None:
     coupled = system.electrical_adapter.evaluate(0.0, y0, system.current_step(0.0))
 
     terms = system.gas_core.ion_wall_loss_terms(coupled)
-    budget = system.gas_core.reaction_source_loss_budget(coupled)
+    budget = reaction_source_loss_budget(system.gas_core, coupled)
     expected_wall: dict[tuple[str, str], float] = {}
 
     assert terms

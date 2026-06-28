@@ -122,7 +122,7 @@ def build_zdplaskin_rate_table(
                 f'min_EoverN_Td: {float(min_EoverN_Td)}',
                 f'max_EoverN_Td: {float(max_EoverN_Td)}',
                 f'n_fields: {int(n_fields)}',
-                'note: Diagnostic wide-range table generated from the repository internal two-term-like solver using the ZDPlaskin cross-section bundle; not a BOLSIG+ executable rerun and not the ZDPlaskin parity table.',
+                'note: Wide-range E/N table generated from the repository internal two-term-like solver using the ZDPlaskin cross-section bundle; not a BOLSIG+ executable rerun and not the ZDPlaskin parity table.',
                 '',
             ]
         ),
@@ -132,7 +132,7 @@ def build_zdplaskin_rate_table(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Build a wide diagnostic ZDPlaskin example2 E/N-rate HDF5 table for stress benchmarks.')
+    parser = argparse.ArgumentParser(description='Build a wide-range ZDPlaskin example2 E/N-rate HDF5 table.')
     parser.add_argument('--chemistry', type=Path, default=DEFAULT_CHEMISTRY)
     parser.add_argument('--table-dir', type=Path, default=DEFAULT_TABLE_DIR)
     parser.add_argument('--output', type=Path, default=DEFAULT_OUTPUT)

@@ -33,10 +33,13 @@ Electron density is normally algebraic from quasi-neutrality. A prescribed elect
 Absorbed power enters the electron-energy balance as zone-level power density.
 Electrical backends may also provide compact reduced-field or ion-energy proxy
 outputs, but these are not detailed electromagnetic or sheath solutions.
+The gas-phase RHS consumes only zone absorbed power; reduced field supports
+EEDF table lookup, while IED and sheath-potential values remain optional
+surface/wall and observable inputs.
 
 `external_circuit_table` is a one-way waveform coupling backend. It can read
 measured or SPICE-generated CSV tables containing absorbed power, optional
-voltage/current diagnostics, and optional reduced field. The backend
+voltage/current columns, and optional reduced field. The backend
 interpolates those tabulated values and passes stable `PowerResult` data to the
 global model; it does not run ngspice, solve a circuit DAE, or iterate plasma
 and circuit states bidirectionally.
@@ -68,8 +71,8 @@ the [Extension Guide](EXTENSION_GUIDE.md).
 
 Surface ion-flux observables and ion-enhanced surface rates use compact surface
 IED data when provided: ion flux and mean ion energy only. Species-resolved IEDF
-details are outside the normal output contract. Without explicit compact IED
-data, surface terms use the zone wall-loss flux from the same global closure.
+details are outside normal outputs. Without explicit compact IED data, surface
+terms use the zone wall-loss flux from the same global closure.
 
 For field-gridded `rate_table` cases, `swarm.table.electron_energy_mode:
 table_relaxation` relaxes the electron-energy state toward the table mean
@@ -88,20 +91,17 @@ For ignition studies or quantitative early transients, set explicit
 `initial_densities_m3` in the chamber file.
 
 Run summaries include success state, time range, solver counters, event counts,
-chemistry provenance, EEDF table provenance when available, and final compact
-observables. Solver diagnostics intentionally stay limited to solver counters
-and event counts.
+compact chemistry provenance counts, and final compact observables.
 
 `observables.csv` includes compact physical observables and may include
 rate-table lookup bounds and electrical waveform quantities when a backend
 provides them. Detailed reaction-rate source/loss budget columns are opt-in via
-`outputs.diagnostics.budgets: true`; they are validation output, not solver
-diagnostics, and they do not change the ODE right-hand side.
+`outputs.diagnostics.budgets: true`; they are postprocessing output and do not
+change the ODE right-hand side.
 
 An optional steady-state event can stop a run when the relative RHS norm falls
 below a configured threshold. It is disabled by default and should be enabled
 only for cases where early steady-state termination is expected.
 
-The package currently reports absorbed-power observables, but it does not emit a
-term-by-term power balance residual. That diagnostic should only be added when
-the required source, loss, transport, and storage terms are available explicitly.
+The package reports absorbed-power observables, but it does not emit a
+term-by-term power-balance residual.

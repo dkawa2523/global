@@ -9,7 +9,8 @@ from typing import Any
 import yaml
 
 from plasma_global.config import load_run_config, resolve_run_paths, write_effective_config, write_resolved_paths
-from plasma_global.workflows.context import EEDF_REGISTRY, ELECTRICAL_REGISTRY, INTEGRATOR_REGISTRY, load_case_from_yaml
+from plasma_global.workflows.context import load_case_from_yaml
+from plasma_global.workflows.registries import EEDF_REGISTRY, ELECTRICAL_REGISTRY, INTEGRATOR_REGISTRY
 from plasma_global.workflows.runner import run_from_yaml
 
 

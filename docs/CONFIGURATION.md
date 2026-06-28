@@ -60,11 +60,10 @@ supports `auto`, `mean_energy`, and `local_field`.
 For field lookup, `electron_energy_mode: table_relaxation` is optional. It
 relaxes the electron-energy state toward the table mean energy using
 `energy_relaxation_time_s`. Use it as a prescribed table closure, not as a
-detailed power-balance diagnostic.
+detailed power-balance model.
 
 The currently supported HDF5 layout is documented in [External Swarm and Rate
-Tables](SWARM_RATE_TABLES.md). Interchange metadata guidance on that page is
-for table producers, not additional current configuration keys.
+Tables](SWARM_RATE_TABLES.md).
 
 ## External Circuit Tables
 
@@ -82,7 +81,7 @@ files:
 
 # In the recipe step:
 power_ports:
-  wafer_bias:
+  powered_port:
     file_key: circuit_result_csv
     interpolation: linear
     hold: edge
@@ -152,12 +151,11 @@ For calibrated electronegative or strongly nonlocal cases, use a calibrated
 spatial diffusion, PIC/fluid coupling, and feature-scale wall models are
 outside the core scope; see the [Extension Guide](EXTENSION_GUIDE.md).
 
-## Numerical Diagnostics and Events
+## Events and Optional Budget Columns
 
 `summary.yaml` is intentionally compact: success state, time range, solver
-counters, chemistry provenance, and final major physical quantities. Detailed
-internal clipping, RHS-norm, port, and wall-loss internals are not part of the
-normal output contract.
+counters, compact chemistry provenance counts, and final major physical quantities. Internal
+clipping, RHS-norm, port, and wall-loss details are not normal run outputs.
 
 Detailed reaction/source/loss budget columns are opt-in:
 
@@ -207,4 +205,4 @@ Runs normally write:
 - `effective_case.yaml`
 - `resolved_paths.yaml`
 
-These are review artifacts. Regenerate them instead of committing generated outputs.
+These are generated run artifacts. Regenerate them instead of committing generated outputs.

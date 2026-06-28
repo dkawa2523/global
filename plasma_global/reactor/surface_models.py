@@ -14,17 +14,6 @@ EFFECTIVE_FREQUENCY_ION_LOSS_FAMILIES = {'prescribed_loss_frequency', 'ambipolar
 ION_LOSS_ACTIVE_MODES = BOHM_ION_LOSS_MODES | PRESCRIBED_ION_LOSS_MODES | AMBIPOLAR_ION_LOSS_MODES
 ION_LOSS_DISABLED_MODES = {'off'}
 ION_LOSS_KNOWN_MODES = ION_LOSS_ACTIVE_MODES | ION_LOSS_DISABLED_MODES
-ION_LOSS_CONSUMED_MODEL_KEYS = {
-    'ion_loss',
-    'h_factor',
-    'ion_neutral_cross_section_m2',
-    'characteristic_length_m',
-    'min_h_factor',
-    'max_h_factor',
-    'frequency_s',
-    'diffusion_coefficient_m2_s',
-    'diffusion_length_m',
-}
 
 
 def normalized_model_value(value: Any) -> str:

@@ -22,11 +22,11 @@ Input files are split by model type:
   parity table.
 - `tables/zdplaskin_example2_eovern/`: CSV and metadata sidecar files used to
   inspect the generated table.
-- `tables/zdplaskin_example2_wide_eovern_rates.h5`: wider diagnostic E/N table
-  for pressure/voltage stress benchmarks, generated from the imported
+- `tables/zdplaskin_example2_wide_eovern_rates.h5`: wider E/N table
+  generated from the imported
   ZDPlaskin cross sections by the local two-term-like solver.
 - `tables/zdplaskin_example2_wide_eovern/`: CSV and metadata sidecars for the
-  wide diagnostic table.
+  wide table.
 
 The active table is regenerated with:
 
@@ -35,6 +35,5 @@ py tools\external_benchmarks\build_zdplaskin_output_rate_table.py
 ```
 
 `tools/external_benchmarks/build_zdplaskin_rate_table.py` remains available as
-a local two-term/cross-section table generator for diagnostic work. Its default
-output is the wide table used by robustness stress cases, not the strict
-ZDPlaskin parity table.
+a local two-term/cross-section table generator. Its default output is the wide
+table, not the strict ZDPlaskin parity table.

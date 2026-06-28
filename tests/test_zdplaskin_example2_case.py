@@ -51,6 +51,12 @@ def test_zdplaskin_example2_surrogate_loads_extended_argon_mechanism() -> None:
     assert 'ZDP_ARSTAR_POOLING' in reaction_ids
     assert 'ZDP_ARPLUS_CLUSTERING' in reaction_ids
 
+    built = build_case(loaded)
+    assert 'film_thickness' not in built.state_layout.slices
+    assert not any(label.startswith('film[') for label in built.system.state_labels())
+    assert built.system.surface_core.enabled is False
+    assert built.system.surface_core.surface_reactions == []
+
 
 def test_zdplaskin_example2_run_writes_core_outputs() -> None:
     result = run_from_yaml(ZDP_CASE)
