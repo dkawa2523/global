@@ -14,32 +14,9 @@ This suite separates benchmark claims by external software and problem setup, th
 | SWARM-1 | BOLSIG+/LoKI-compatible table | strong | pass | 0 |
 | Runtime-1 | this code | context | pass | 0 |
 
-## Generated Figures
-
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/benchmark_threshold_margin.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/benchmark_claim_support_matrix.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/benchmark_status_by_software.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/CRANE-1_metrics.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/ZDPlaskin-1_metrics.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/ZDPlaskin-2_metrics.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/PyGMol-1_metrics.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/PyGMol-Precision-1_metrics.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/SWARM-1_metrics.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/CRANE-1_density_timeseries.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/ZDPlaskin-1_density_timeseries.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/ZDPlaskin-2_rate_table_vs_EoverN.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/Runtime-1_solver_stats.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/pygmol/pygmol_sanity_density_ratio_by_powered_step.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/pygmol/pygmol_sanity_powered_final_values.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/pygmol/pygmol_precision_species_timeseries_overlay.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/pygmol/pygmol_precision_energy_power_overlay.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/pygmol/pygmol_precision_error_metrics.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/pygmol/pygmol_benchmark_scope_matrix.png`
-- `examples/outputs/external_benchmarks/diagnostic_suite/figures/failure_to_module_heatmap.png`
-
-## Generated Tables
+## Tracked Review Artifacts
 
 - `examples/outputs/external_benchmarks/diagnostic_suite/benchmark_metrics.csv`
 - `examples/outputs/external_benchmarks/diagnostic_suite/benchmark_findings.md`
-- `examples/outputs/external_benchmarks/diagnostic_suite/benchmark_report.md`
-- `examples/outputs/external_benchmarks/diagnostic_suite/diagnostic_report.yaml`
+
+Detailed reports, figures, runtime profiles, and per-benchmark YAML files are regenerated artifacts and are intentionally not tracked.

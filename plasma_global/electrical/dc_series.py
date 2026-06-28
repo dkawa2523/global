@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from plasma_global.electrical.base import ElectricalBackend, PowerRequest, PowerResult, ZoneElectricalState
+from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult, ZoneElectricalState
 from plasma_global.electrical.circuit_models import (
     DCSeriesCircuitConfig,
     DCSeriesCircuitModel,
@@ -45,6 +45,7 @@ class DCSeriesCircuitBackend(ElectricalBackend):
     def evaluate(self, request: PowerRequest) -> PowerResult:
         p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         p_port: dict[str, float] = {}
+        port_observables: dict[str, ElectricalPortSnapshot] = {}
         zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         plasma_potential = 0.0
 
@@ -61,12 +62,25 @@ class DCSeriesCircuitBackend(ElectricalBackend):
             solution = self.model.solve(circuit_cfg, self._zone_load(request, zone_id))
             p_zone[zone_id] = p_zone.get(zone_id, 0.0) + solution.absorbed_power_W
             p_port[port_id] = solution.absorbed_power_W
+            port_observables[port_id] = ElectricalPortSnapshot({
+                'source_voltage_V': float(solution.source_voltage_V),
+                'gap_voltage_V': float(solution.gap_voltage_V),
+                'current_A': float(solution.current_A),
+                'absorbed_power_W': float(solution.absorbed_power_W),
+                'delivered_power_W': float(solution.delivered_power_W),
+                'plasma_resistance_ohm': float(solution.plasma_resistance_ohm),
+                'plasma_conductance_S': float(solution.plasma_conductance_S),
+                'electron_mobility_m2_V_s': float(solution.electron_mobility_m2_V_s),
+                'electric_field_V_m': float(solution.electric_field_V_m),
+                'reduced_field_Td': float(solution.reduced_field_Td),
+            })
             zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 0.0), solution.reduced_field_Td)
             plasma_potential = max(plasma_potential, 0.05 * abs(solution.gap_voltage_V))
 
         return PowerResult(
             absorbed_power_W_by_zone=p_zone,
             port_power_W=p_port,
+            port_observables=port_observables,
             self_bias_V=0.0,
             plasma_potential_V=plasma_potential,
             zone_reduced_field_Td=zone_reduced_field,

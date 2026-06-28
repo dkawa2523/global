@@ -74,9 +74,15 @@ class OutputPlotsConfig:
 
 
 @dataclass
+class OutputDiagnosticsConfig:
+    budgets: bool = False
+
+
+@dataclass
 class OutputsConfig:
     formats: OutputFormatsConfig = field(default_factory=OutputFormatsConfig)
     plots: OutputPlotsConfig = field(default_factory=OutputPlotsConfig)
+    diagnostics: OutputDiagnosticsConfig = field(default_factory=OutputDiagnosticsConfig)
 
 
 @dataclass

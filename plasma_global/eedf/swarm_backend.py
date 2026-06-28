@@ -40,3 +40,9 @@ class SwarmEEDFBackend(EEDFBackend):
         if not hasattr(self, 'swarm_model'):
             self.prepare(self.mechanism, self.chamber, self.run_config, self.resolved_paths)
         return self.swarm_model.evaluate(request)
+
+    def provenance(self) -> dict:
+        if not hasattr(self, 'swarm_model'):
+            self.prepare(self.mechanism, self.chamber, self.run_config, self.resolved_paths)
+        provenance = getattr(self.swarm_model, 'provenance', None)
+        return provenance() if callable(provenance) else {}

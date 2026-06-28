@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from types import SimpleNamespace
 
-from plasma_global.eedf.base import EEDFRequest, EEDFTransport
+from plasma_global.eedf.base import EEDFRequest, EEDFTransport, RateTableLookupDiagnostics
 from plasma_global.eedf.table import TabulatedSwarmModel
 from scripts.build_rate_table_h5 import build_rate_table_h5
 
@@ -91,6 +91,30 @@ def test_rate_table_backend_can_lookup_by_reduced_field(tmp_path) -> None:
     assert result.transport.mean_energy_eV == pytest.approx(1.5)
     assert result.transport.effective_field_Td == pytest.approx(15.0)
     assert result.transport.lookup_mode == 'field'
+    assert isinstance(result.diagnostics, RateTableLookupDiagnostics)
+    assert result.diagnostics['backend'] == 'rate_table'
+    assert result.diagnostics['lookup_mode'] == 'field'
+    assert result.diagnostics['lookup_value'] == pytest.approx(15.0)
+    assert result.diagnostics['axis_min'] == pytest.approx(10.0)
+    assert result.diagnostics['axis_max'] == pytest.approx(20.0)
+    assert result.diagnostics['lookup_clipped'] is False
+
+    clipped = model.evaluate(
+        EEDFRequest(
+            time_s=0.0,
+            zone_id='plasma',
+            composition={},
+            electron_density_m3=1.0e16,
+            mean_energy_eV=99.0,
+            reduced_field_Td=200.0,
+            gas_temperature_K=300.0,
+            pressure_Pa=100.0,
+        )
+    )
+
+    assert clipped.diagnostics['lookup_clipped'] is True
+    assert clipped.diagnostics['lookup_clipped_high'] is True
+    assert clipped.diagnostics['lookup_clipped_value'] == pytest.approx(20.0)
 
 
 def test_field_rate_table_builder_keeps_sorted_field_axis_consistent(tmp_path) -> None:

@@ -12,6 +12,7 @@ from plasma_global.config.models import (
     ChemistryFilesConfig,
     FilesConfig,
     NumericsConfig,
+    OutputDiagnosticsConfig,
     OutputFormatsConfig,
     OutputPlotsConfig,
     OutputsConfig,
@@ -118,6 +119,12 @@ def _output_plots(raw: dict[str, Any] | None) -> OutputPlotsConfig:
     return OutputPlotsConfig(**data)
 
 
+def _output_diagnostics(raw: dict[str, Any] | None) -> OutputDiagnosticsConfig:
+    data = dict(raw or {})
+    _reject_unknown(data, {'budgets'}, 'outputs.diagnostics')
+    return OutputDiagnosticsConfig(**data)
+
+
 def _swarm_config(raw: dict[str, Any] | None) -> SwarmConfig:
     data = dict(raw or {})
     _reject_unknown(
@@ -165,7 +172,7 @@ def load_run_config(path: str | Path) -> RunConfig:
     raw = _load_yaml_with_includes(path)
     norm = _normalize_raw(raw)
     outputs_raw = norm.get('outputs', {}) or {}
-    _reject_unknown(outputs_raw, {'formats', 'plots'}, 'outputs')
+    _reject_unknown(outputs_raw, {'formats', 'plots', 'diagnostics'}, 'outputs')
     formats_raw = outputs_raw.get('formats', {}) or {}
     chemistry_raw = norm['files'].get('chemistry', {}) or {}
     _reject_unknown(chemistry_raw, {'manifest'}, 'files.chemistry')
@@ -186,6 +193,7 @@ def load_run_config(path: str | Path) -> RunConfig:
         outputs=OutputsConfig(
             formats=_output_formats(formats_raw),
             plots=_output_plots(outputs_raw.get('plots', {})),
+            diagnostics=_output_diagnostics(outputs_raw.get('diagnostics', {})),
         ),
         swarm=_swarm_config(norm.get('swarm', {})),
     )

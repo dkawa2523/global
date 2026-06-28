@@ -88,9 +88,15 @@ For ignition studies or quantitative early transients, set explicit
 `initial_densities_m3` in the chamber file.
 
 Run summaries include success state, time range, solver counters, event counts,
-chemistry provenance, and final compact observables. They intentionally omit
-projection counters, final RHS norms, port internals, and ion-loss internals
-from the normal output contract.
+chemistry provenance, EEDF table provenance when available, and final compact
+observables. Solver diagnostics intentionally stay limited to solver counters
+and event counts.
+
+`observables.csv` includes compact physical observables and may include
+rate-table lookup bounds and electrical waveform quantities when a backend
+provides them. Detailed reaction-rate source/loss budget columns are opt-in via
+`outputs.diagnostics.budgets: true`; they are validation output, not solver
+diagnostics, and they do not change the ODE right-hand side.
 
 An optional steady-state event can stop a run when the relative RHS norm falls
 below a configured threshold. It is disabled by default and should be enabled

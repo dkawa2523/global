@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-from plasma_global.eedf.base import EEDFRequest, EEDFResult, EEDFTransport
+from plasma_global.eedf.base import EEDFRequest, EEDFResult, EEDFTransport, RateTableLookupDiagnostics
 from plasma_global.eedf.swarm_backend import SwarmEEDFBackend
 from plasma_global.eedf.swarm_base import SwarmModel
 
@@ -55,6 +56,7 @@ class TabulatedSwarmModel(SwarmModel):
             raise RuntimeError('The rate_table EEDF backend requires the optional h5py dependency. Install plasma-global-model[io].') from exc
 
         with h5py.File(path, 'r') as h5:
+            self.table_metadata = {str(key): self._coerce_attr(value) for key, value in h5.attrs.items()}
             self.mean_energy = self._read_1d_dataset(h5, 'mean_energy_eV')
             self.mobility = self._read_1d_dataset(h5, 'mobility_m2_V_s')
             self.diffusion = self._read_1d_dataset(h5, 'diffusion_m2_s')
@@ -80,6 +82,16 @@ class TabulatedSwarmModel(SwarmModel):
                     raise ValueError(f'rate_table rate_coefficients/{name} contains non-finite values.')
                 self.k_tables[name] = arr
             self.grid_column = str(h5.attrs.get('grid_column', 'mean_energy_eV'))
+
+    @staticmethod
+    def _coerce_attr(value: Any) -> Any:
+        if isinstance(value, bytes):
+            return value.decode('utf-8', errors='replace')
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return [TabulatedSwarmModel._coerce_attr(item) for item in value.tolist()]
+        return value
 
     @staticmethod
     def _read_1d_dataset(h5, name: str) -> np.ndarray:
@@ -137,6 +149,26 @@ class TabulatedSwarmModel(SwarmModel):
         x_clip = float(np.clip(x0, x[0], x[-1]))
         return float(np.interp(x_clip, x, y))
 
+    def _lookup_diagnostics(self, *, lookup: str, axis: np.ndarray, x0: float) -> RateTableLookupDiagnostics:
+        axis_min = float(np.nanmin(axis))
+        axis_max = float(np.nanmax(axis))
+        clipped_value = float(np.clip(x0, axis_min, axis_max))
+        clipped_low = bool(x0 < axis_min)
+        clipped_high = bool(x0 > axis_max)
+        return RateTableLookupDiagnostics(
+            table_path=str(self.table_path),
+            grid_column=str(self.grid_column),
+            lookup_mode=lookup,
+            lookup_value=float(x0),
+            lookup_clipped_value=clipped_value,
+            axis_min=axis_min,
+            axis_max=axis_max,
+            lookup_clipped=bool(clipped_low or clipped_high),
+            lookup_clipped_low=clipped_low,
+            lookup_clipped_high=clipped_high,
+            metadata=dict(getattr(self, 'table_metadata', {}) or {}),
+        )
+
     def _use_field_lookup(self, request: EEDFRequest) -> bool:
         if self.lookup_mode in {'local_field', 'field', 'eovern', 'eovern_td'}:
             return request.reduced_field_Td is not None
@@ -158,6 +190,7 @@ class TabulatedSwarmModel(SwarmModel):
             lookup = 'mean_energy'
             k_map = {cs_id: self._interp(axis, table, x0) for cs_id, table in self.k_tables.items()}
             dk_map = {cs_id: self._interp_slope(axis, table, x0) for cs_id, table in self.k_tables.items()}
+        diagnostics = self._lookup_diagnostics(lookup=lookup, axis=axis, x0=x0)
         return EEDFResult(
             rate_coefficients=k_map,
             d_rate_d_mean_energy_eV=dk_map,
@@ -168,7 +201,21 @@ class TabulatedSwarmModel(SwarmModel):
                 effective_field_Td=self._interp(axis, self.eff_field, x0),
                 lookup_mode=lookup,
             ),
+            diagnostics=diagnostics,
         )
+
+    def provenance(self) -> dict[str, Any]:
+        return {
+            'backend': 'rate_table',
+            'table_path': str(self.table_path),
+            'grid_column': str(self.grid_column),
+            'axis_ranges': {
+                'mean_energy_eV': [float(np.nanmin(self.mean_energy)), float(np.nanmax(self.mean_energy))],
+                'effective_field_Td': [float(np.nanmin(self.eff_field)), float(np.nanmax(self.eff_field))],
+            },
+            'rate_ids': sorted(self.k_tables),
+            'metadata': dict(getattr(self, 'table_metadata', {}) or {}),
+        }
 
 
 class TableEEDFBackend(SwarmEEDFBackend):

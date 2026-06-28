@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from plasma_global.electrical.base import ElectricalBackend, PowerRequest, PowerResult
+from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult
 from plasma_global.electrical.circuit_models import first_present, waveform_multiplier
 
 
@@ -79,6 +79,7 @@ class RFEnvelopeBackend(ElectricalBackend):
     def evaluate(self, request: PowerRequest) -> PowerResult:
         p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         p_port: dict[str, float] = {}
+        port_observables: dict[str, ElectricalPortSnapshot] = {}
         zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         bias_terms: list[tuple[float, float]] = []
         plasma_terms: list[tuple[float, float]] = []
@@ -116,6 +117,12 @@ class RFEnvelopeBackend(ElectricalBackend):
 
             p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
             p_port[port_id] = absorbed
+            port_observables[port_id] = ElectricalPortSnapshot({
+                'voltage_rms_V': float(voltage_rms),
+                'absorbed_power_W': float(absorbed),
+                'delivered_power_W': float(delivered),
+                'reduced_field_Td': float(reduced_field),
+            })
 
         total_bias_weight = sum(w for w, _ in bias_terms)
         self_bias_V = sum(w * v for w, v in bias_terms) / max(total_bias_weight, 1.0e-30) if bias_terms else 0.0
@@ -127,6 +134,7 @@ class RFEnvelopeBackend(ElectricalBackend):
         return PowerResult(
             absorbed_power_W_by_zone=p_zone,
             port_power_W=p_port,
+            port_observables=port_observables,
             self_bias_V=self_bias_V,
             plasma_potential_V=plasma_potential_V,
             zone_reduced_field_Td=zone_reduced_field,

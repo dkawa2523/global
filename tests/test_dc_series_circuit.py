@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from plasma_global.electrical.base import PowerRequest, ZoneElectricalState
+from plasma_global.electrical.base import ElectricalPortSnapshot, PowerRequest, ZoneElectricalState
 from plasma_global.electrical.circuit_models import DCSeriesCircuitConfig, DCSeriesCircuitModel, PlasmaLoadState
 from plasma_global.electrical.dc_series import DCSeriesCircuitBackend
 from plasma_global.workflows.context import ELECTRICAL_REGISTRY, load_case_from_yaml
@@ -193,6 +193,11 @@ def test_dc_series_backend_reports_power_and_reduced_field() -> None:
     assert on_result.port_power_W['dc_drive'] > 0.0
     assert on_result.absorbed_power_W_by_zone['plasma'] == pytest.approx(on_result.port_power_W['dc_drive'])
     assert on_result.zone_reduced_field_Td['plasma'] > 0.0
+    assert isinstance(on_result.port_observables['dc_drive'], ElectricalPortSnapshot)
+    assert on_result.port_observables['dc_drive']['source_voltage_V'] == pytest.approx(500.0)
+    assert on_result.port_observables['dc_drive']['gap_voltage_V'] > 0.0
+    assert on_result.port_observables['dc_drive']['current_A'] > 0.0
+    assert on_result.port_observables['dc_drive']['plasma_conductance_S'] > 0.0
     assert off_result.port_power_W['dc_drive'] == 0.0
 
 

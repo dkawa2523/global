@@ -6,11 +6,22 @@ from typing import Any
 import numpy as np
 
 from plasma_global.chemistry.models import E_CHARGE, K_B
-from plasma_global.physics.types import CompiledGasReaction, CoupledPlasmaEvaluation
+from plasma_global.diagnostics.budgets import ReactionBudget
+from plasma_global.physics.types import CompiledGasReaction, CoupledPlasmaEvaluation, GasReactionTerm, IonWallLossTerm
 from plasma_global.reactor.surface_models import bohm_ion_loss_frequency_s, ion_loss_uses_effective_frequency
 
 SCCM_TO_PARTICLES_PER_S = 4.477962e17
 EV_TO_K = E_CHARGE / K_B
+
+
+@dataclass
+class _GasRhsViews:
+    gas: np.ndarray
+    electron_energy: np.ndarray
+    gas_temperature: np.ndarray
+    gas_rhs: np.ndarray
+    electron_energy_rhs: np.ndarray
+    gas_temperature_rhs: np.ndarray | None
 
 
 @dataclass
@@ -301,8 +312,24 @@ class GasPhaseCore:
         R = k * self.reaction_mass_action(rxn, gas_row, ne)
         return float(R), float(dk_de), float(dk_dT)
 
-    def apply_ion_wall_losses_rhs(self, gas: np.ndarray, coupled: CoupledPlasmaEvaluation, gas_rhs: np.ndarray, We_rhs: np.ndarray) -> None:
+    def gas_reaction_terms(self, coupled: CoupledPlasmaEvaluation) -> list[GasReactionTerm]:
         sys = self.system
+        terms: list[GasReactionTerm] = []
+        for rxn in self.gas_reactions:
+            for zone_id in rxn.zones:
+                z = sys.zone_index[zone_id]
+                ne = coupled.ne_by_zone[zone_id]
+                R, _, _ = self.reaction_rate(rxn, coupled.gas[z], float(coupled.gas_temperature[z]), coupled.eedf_by_zone[zone_id], ne)
+                if R == 0.0:
+                    continue
+                energy_loss = self.reaction_energy_loss_J_m3_s(rxn, R)
+                changes = [(idx, float(nu) * R, sp_id) for idx, nu, sp_id in rxn.delta_gas]
+                terms.append(GasReactionTerm(zone_id, rxn.reaction_id, R, changes, energy_loss))
+        return terms
+
+    def ion_wall_loss_terms(self, coupled: CoupledPlasmaEvaluation) -> list[IonWallLossTerm]:
+        sys = self.system
+        terms: list[IonWallLossTerm] = []
         for zone_id in sys.zone_ids:
             family = sys.zone_ion_loss_family.get(zone_id, 'disabled')
             if family == 'disabled':
@@ -310,7 +337,7 @@ class GasPhaseCore:
             z = sys.zone_index[zone_id]
             mean_e = coupled.mean_e_by_zone[zone_id]
             for idx in sys.positive_ion_local_indices:
-                n_i = max(float(gas[z, idx]), 0.0)
+                n_i = max(float(coupled.gas[z, idx]), 0.0)
                 if n_i <= 0.0:
                     continue
                 frequency = self.ion_wall_loss_frequency_s(zone_id, idx, mean_e)
@@ -318,33 +345,46 @@ class GasPhaseCore:
                     continue
                 loss = frequency * n_i
                 charge = max(float(sys.gas_charges[idx]), 1.0)
-                gas_rhs[z, idx] -= loss
-                We_rhs[z] -= charge * mean_e * E_CHARGE * loss
+                terms.append(IonWallLossTerm(zone_id, idx, sys.gas_species_ids[idx], loss, charge * mean_e * E_CHARGE * loss))
+        return terms
 
-    def apply_rhs(self, time_s: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation, dydt: np.ndarray) -> None:
+    def reaction_energy_loss_J_m3_s(self, rxn: CompiledGasReaction, rate_m3_s: float) -> float:
+        if rxn.energy_model and str(rxn.energy_model.get('backend', '')).lower() == 'constant_event_loss':
+            return float(rxn.energy_model.get('energy_loss_eV', 0.0)) * E_CHARGE * rate_m3_s
+        return 0.0
+
+    def reaction_source_loss_budget(self, coupled: CoupledPlasmaEvaluation) -> ReactionBudget:
+        budget = ReactionBudget()
+        for term in self.gas_reaction_terms(coupled):
+            budget.add_reaction_rate(term.zone_id, term.reaction_id, term.rate_m3_s)
+            for _idx, change, sp_id in term.species_changes:
+                budget.add_species_change(term.zone_id, sp_id, change)
+            budget.add_electron_energy_loss(term.zone_id, term.reaction_id, term.electron_energy_loss_J_m3_s)
+        wall_energy_loss_by_zone: dict[str, float] = {}
+        for term in self.ion_wall_loss_terms(coupled):
+            budget.add_wall_loss(term.zone_id, term.species_id, term.loss_m3_s)
+            wall_energy_loss_by_zone[term.zone_id] = wall_energy_loss_by_zone.get(term.zone_id, 0.0) + term.electron_energy_loss_J_m3_s
+        for zone_id, loss in wall_energy_loss_by_zone.items():
+            budget.add_electron_energy_loss(zone_id, 'ion_wall', loss)
+        return budget
+
+    def apply_reaction_terms(self, terms: list[GasReactionTerm], gas_rhs: np.ndarray, We_rhs: np.ndarray) -> None:
         sys = self.system
-        gas = coupled.gas
-        We = coupled.electron_energy
-        Tg = coupled.gas_temperature
-        gas_rhs = dydt[sys.state_layout.slice('gas_densities')].reshape(sys.n_zones, sys.n_gas_species)
-        We_rhs = dydt[sys.state_layout.slice('electron_energy')]
-        Tg_rhs = dydt[sys.state_layout.slice('gas_temperature')] if 'gas_temperature' in sys.state_layout.slices else None
+        for term in terms:
+            z = sys.zone_index[term.zone_id]
+            for idx, change, _sp in term.species_changes:
+                gas_rhs[z, idx] += change
+            We_rhs[z] -= term.electron_energy_loss_J_m3_s
 
-        for rxn in self.gas_reactions:
-            for zone_id in rxn.zones:
-                z = sys.zone_index[zone_id]
-                ne = coupled.ne_by_zone[zone_id]
-                R, _, _ = self.reaction_rate(rxn, gas[z], float(Tg[z]), coupled.eedf_by_zone[zone_id], ne)
-                if R == 0.0:
-                    continue
-                for idx, nu, _sp in rxn.delta_gas:
-                    gas_rhs[z, idx] += nu * R
-                if rxn.energy_model and str(rxn.energy_model.get('backend', '')).lower() == 'constant_event_loss':
-                    loss = float(rxn.energy_model.get('energy_loss_eV', 0.0)) * E_CHARGE
-                    We_rhs[z] -= loss * R
+    def apply_ion_wall_loss_terms(self, terms: list[IonWallLossTerm], gas_rhs: np.ndarray, We_rhs: np.ndarray) -> None:
+        sys = self.system
+        for term in terms:
+            z = sys.zone_index[term.zone_id]
+            gas_rhs[z, term.species_index] -= term.loss_m3_s
+            We_rhs[z] -= term.electron_energy_loss_J_m3_s
 
-        self.apply_ion_wall_losses_rhs(gas, coupled, gas_rhs, We_rhs)
-
+    def apply_inlet_terms(self, step: Any, gas: np.ndarray, Tg: np.ndarray, gas_rhs: np.ndarray, Tg_rhs: np.ndarray | None) -> None:
+        sys = self.system
         for inlet_id, default_inlet in sys.chamber.inlet_by_id.items():
             flows = step.gas_inlets.get(inlet_id, default_inlet.flow_sccm)
             z = sys.zone_index[default_inlet.zone_id]
@@ -358,44 +398,74 @@ class GasPhaseCore:
                 particle_source = sum(float(v) for v in flows.values()) * SCCM_TO_PARTICLES_PER_S / max(V, 1.0e-30)
                 Tg_rhs[z] += particle_source / n_tot * (default_inlet.temperature_K - Tg[z])
 
+    def apply_pump_terms(self, gas: np.ndarray, We: np.ndarray, gas_rhs: np.ndarray, We_rhs: np.ndarray) -> None:
+        sys = self.system
         for pump in sys.chamber.pumps:
             z = sys.zone_index[pump.zone_id]
             lam = pump.speed_m3_s / max(sys.chamber.zone_by_id[pump.zone_id].volume_m3, 1.0e-30)
             gas_rhs[z, :] -= lam * gas[z, :]
             We_rhs[z] -= lam * We[z]
 
+    def apply_interzone_terms(self, view: _GasRhsViews) -> None:
+        sys = self.system
         for edge in sys.chamber.edges:
             zi = sys.zone_index[edge.from_zone]
             zj = sys.zone_index[edge.to_zone]
             Vi = sys.chamber.zone_by_id[edge.from_zone].volume_m3
             Vj = sys.chamber.zone_by_id[edge.to_zone].volume_m3
             Ci = edge.conductance_m3_s
-            gas_rhs[zi, :] -= Ci / max(Vi, 1.0e-30) * gas[zi, :]
-            gas_rhs[zj, :] += Ci / max(Vj, 1.0e-30) * gas[zi, :]
-            We_rhs[zi] -= Ci / max(Vi, 1.0e-30) * We[zi]
-            We_rhs[zj] += Ci / max(Vj, 1.0e-30) * We[zi]
-            if Tg_rhs is not None:
-                n_i = max(float(np.sum(gas[zi])), sys.floor_density)
-                n_j = max(float(np.sum(gas[zj])), sys.floor_density)
-                Tg_rhs[zj] += Ci / max(Vj, 1.0e-30) * n_i / n_j * (Tg[zi] - Tg[zj])
+            view.gas_rhs[zi, :] -= Ci / max(Vi, 1.0e-30) * view.gas[zi, :]
+            view.gas_rhs[zj, :] += Ci / max(Vj, 1.0e-30) * view.gas[zi, :]
+            view.electron_energy_rhs[zi] -= Ci / max(Vi, 1.0e-30) * view.electron_energy[zi]
+            view.electron_energy_rhs[zj] += Ci / max(Vj, 1.0e-30) * view.electron_energy[zi]
+            if view.gas_temperature_rhs is not None:
+                n_i = max(float(np.sum(view.gas[zi])), sys.floor_density)
+                n_j = max(float(np.sum(view.gas[zj])), sys.floor_density)
+                view.gas_temperature_rhs[zj] += Ci / max(Vj, 1.0e-30) * n_i / n_j * (view.gas_temperature[zi] - view.gas_temperature[zj])
 
+    def apply_power_terms(self, coupled: CoupledPlasmaEvaluation, We_rhs: np.ndarray) -> None:
+        sys = self.system
         for zone_id, pabs in coupled.power.absorbed_power_W_by_zone.items():
             z = sys.zone_index[zone_id]
             V = sys.chamber.zone_by_id[zone_id].volume_m3
             We_rhs[z] += pabs / max(V, 1.0e-30)
 
-        self.apply_field_table_energy_relaxation(coupled, We_rhs)
+    def apply_gas_temperature_terms(self, coupled: CoupledPlasmaEvaluation, gas: np.ndarray, Tg: np.ndarray, Tg_rhs: np.ndarray | None) -> None:
+        if Tg_rhs is None:
+            return
+        sys = self.system
+        gas_heating_fraction = float(sys.run_config.physics.gas_heating_fraction)
+        wall_relax = float(sys.run_config.physics.wall_relaxation_s_inv)
+        for zone_id in sys.zone_ids:
+            z = sys.zone_index[zone_id]
+            n_tot = max(float(np.sum(gas[z])), sys.floor_density)
+            V = sys.chamber.zone_by_id[zone_id].volume_m3
+            pabs = coupled.power.absorbed_power_W_by_zone.get(zone_id, 0.0)
+            Tg_rhs[z] += gas_heating_fraction * pabs / max(V, 1.0e-30) / (1.5 * K_B * n_tot)
+            Tg_rhs[z] -= wall_relax * (Tg[z] - self.zone_wall_temperature[zone_id])
 
-        if Tg_rhs is not None:
-            gas_heating_fraction = float(sys.run_config.physics.gas_heating_fraction)
-            wall_relax = float(sys.run_config.physics.wall_relaxation_s_inv)
-            for zone_id in sys.zone_ids:
-                z = sys.zone_index[zone_id]
-                n_tot = max(float(np.sum(gas[z])), sys.floor_density)
-                V = sys.chamber.zone_by_id[zone_id].volume_m3
-                pabs = coupled.power.absorbed_power_W_by_zone.get(zone_id, 0.0)
-                Tg_rhs[z] += gas_heating_fraction * pabs / max(V, 1.0e-30) / (1.5 * K_B * n_tot)
-                Tg_rhs[z] -= wall_relax * (Tg[z] - self.zone_wall_temperature[zone_id])
+    def apply_rhs(self, _time_s: float, _y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation, dydt: np.ndarray) -> None:
+        sys = self.system
+        gas = coupled.gas
+        We = coupled.electron_energy
+        Tg = coupled.gas_temperature
+        view = _GasRhsViews(
+            gas=gas,
+            electron_energy=We,
+            gas_temperature=Tg,
+            gas_rhs=dydt[sys.state_layout.slice('gas_densities')].reshape(sys.n_zones, sys.n_gas_species),
+            electron_energy_rhs=dydt[sys.state_layout.slice('electron_energy')],
+            gas_temperature_rhs=dydt[sys.state_layout.slice('gas_temperature')] if 'gas_temperature' in sys.state_layout.slices else None,
+        )
+
+        self.apply_reaction_terms(self.gas_reaction_terms(coupled), view.gas_rhs, view.electron_energy_rhs)
+        self.apply_ion_wall_loss_terms(self.ion_wall_loss_terms(coupled), view.gas_rhs, view.electron_energy_rhs)
+        self.apply_inlet_terms(step, gas, Tg, view.gas_rhs, view.gas_temperature_rhs)
+        self.apply_pump_terms(gas, We, view.gas_rhs, view.electron_energy_rhs)
+        self.apply_interzone_terms(view)
+        self.apply_power_terms(coupled, view.electron_energy_rhs)
+        self.apply_field_table_energy_relaxation(coupled, view.electron_energy_rhs)
+        self.apply_gas_temperature_terms(coupled, gas, Tg, view.gas_temperature_rhs)
 
     def field_table_energy_relaxation_tau_s(self) -> float | None:
         table_cfg = self.system.run_config.swarm.table

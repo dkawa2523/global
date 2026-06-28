@@ -7,10 +7,11 @@ Numerics](PHYSICS_NUMERICS.md), [Configuration](CONFIGURATION.md),
 [Chemistry](CHEMISTRY.md), [External Swarm and Rate
 Tables](SWARM_RATE_TABLES.md), and the [Extension Guide](EXTENSION_GUIDE.md).
 
-Generated comparison files under `examples/outputs/` are intentionally not
-tracked. They are reproducible run products, and `.gitignore` keeps them out of
-the repository. This page records the review-relevant results so reviewers can
-understand the branch without checking in large YAML, CSV, HDF5, or PNG output.
+Large generated run files under `examples/outputs/` are intentionally not
+tracked. Lightweight external-benchmark review artifacts are tracked only under
+`examples/outputs/external_benchmarks/diagnostic_suite/` and
+`examples/outputs/external_benchmarks/remediation/` so reviewers have one
+current benchmark surface without large HDF5 outputs or older dashboards.
 
 ## Verification Commands
 
@@ -18,6 +19,7 @@ Run on branch `update_2` after the product-core refactor:
 
 ```powershell
 py -m pytest
+py tools\external_benchmarks\diagnostic_suite.py
 plasma-global validate examples/configs/case_smoke.yaml
 plasma-global run examples/configs/case_smoke.yaml
 py tools\external_benchmarks\crane_two_reaction_argon.py
@@ -36,7 +38,7 @@ py -m mkdocs build --strict
 | Smoke case validation | OK |
 | Smoke run | solver success, 200 samples |
 | MkDocs strict build | OK |
-| Generated output tracking | run outputs stay ignored under `examples/outputs/` |
+| Generated output tracking | large run outputs stay ignored; current lightweight benchmark artifacts may be tracked |
 
 The smoke run writes only the product-core output set:
 
@@ -84,6 +86,12 @@ readable and maintainable.
 
 ## Comparison Results
 
+Problem-scoped external benchmark diagnostics are generated with
+`tools/external_benchmarks/diagnostic_suite.py`. The suite separates accuracy,
+runtime, and diagnostic findings, then maps threshold misses to likely core-code
+areas. Lightweight artifacts are written under
+`examples/outputs/external_benchmarks/diagnostic_suite/`.
+
 | Reference | Main result | Interpretation |
 | --- | --- | --- |
 | CRANE TwoReactionArgon | final electron density relative error `2.366e-6` | Scalar ODE chemistry and unit conversion reproduce the reference tightly. |
@@ -120,5 +128,59 @@ Smoke run details:
 ## Reproducibility Notes
 
 The comparison YAML files can be regenerated locally with the commands above.
-They should remain ignored unless the project deliberately adopts fixed
-benchmark artifacts as versioned reference data.
+Lightweight external-benchmark review artifacts (`md`, `csv`, `yaml`, `png`)
+are limited to the current diagnostic/remediation output directories. Large run
+products such as `solution.h5` remain regenerated artifacts.
+
+Current diagnostic-suite findings:
+
+- `ZDPlaskin-1 / peak_e_relative_error`: final values agree, but the peak
+  electron density differs beyond the 5% transient threshold. Next checks should
+  isolate rate-table relaxation, circuit loading, and diffusion-loss closure.
+- `PyGMol-1`: the current PyGMol comparison is a useful sanity check only.
+  Precision parity is explicitly scoped out of the pass/fail gate until a true
+  single-cylinder, same-chemistry, same-wall-loss local case exists.
+- `PyGMol-Precision-1`: a separate tools-only same-footing harness compares the
+  compact PyGMol Ar equations against a local implementation with identical
+  geometry, chemistry, power, wall return, initial state, and sample times. The
+  current run passes with max final relative error `1.09e-4` and max waveform
+  NRMSE `2.32e-5`.
+
+PyGMol-specific figures are generated under
+`examples/outputs/external_benchmarks/diagnostic_suite/figures/pygmol/`. They
+include powered-step sanity ratios, production-vs-PyGMol final values,
+same-footing species/energy/power overlays, precision error bars, and a scope
+matrix explaining which comparison axes are aligned.
+
+Remediation actions can be regenerated with:
+
+```powershell
+py tools\external_benchmarks\benchmark_remediation.py
+```
+
+Current remediation result:
+
+- ZDPlaskin peak-density sensitivity was run over electron-energy relaxation,
+  wall-loss frequency, and circuit electron mobility. The best simple variant
+  was `wall_0p5x`, improving peak relative error from `9.86%` to `6.85%`, but
+  it still did not meet the 5% gate. The recommended next step is not scalar
+  tuning; it is a transient decomposition benchmark with E/N, voltage/current,
+  mean energy, and per-reaction Ar2+ source/loss terms around the first 20 us.
+- PyGMol precision validation is not counted as a current failure. It remains a
+  scoped tools benchmark rather than a production-core claim. The same-footing
+  harness checks compact-equation parity, while the production LXCat/two-zone
+  comparison remains sanity only.
+- The model-implementation candidate report separates generally useful
+  low-pressure plasma improvements from benchmark-fit changes. The P1 items
+  now have initial implementations: reaction source/loss observables,
+  rate-table boundary/provenance diagnostics, and standardized electrical
+  waveform observables. Re-running the diagnostic suite kept the existing
+  accuracy interpretation unchanged: CRANE and final ZDPlaskin quantities pass,
+  ZDPlaskin peak timing remains a transient-model finding, and PyGMol passes as
+  a sanity/scoping benchmark rather than a precision claim.
+- Cleanup findings are written to
+  `examples/outputs/external_benchmarks/remediation/code_simplification_findings.md`.
+  The current cleanup removes stale benchmark dashboards, a legacy external
+  benchmark runner, one-off plot scripts, and the empty core benchmark runner,
+  while keeping the current diagnostic/remediation suite as the single review
+  surface.

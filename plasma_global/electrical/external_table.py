@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from plasma_global.electrical.base import ElectricalBackend, PowerRequest, PowerResult
+from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult
 from plasma_global.io.time_series import TimeSeriesTable, read_time_series_csv
 
 
@@ -113,6 +113,7 @@ class ExternalCircuitTableBackend(ElectricalBackend):
     def evaluate(self, request: PowerRequest) -> PowerResult:
         p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         p_port: dict[str, float] = {}
+        port_observables: dict[str, ElectricalPortSnapshot] = {}
         zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
         plasma_potential = 0.0
 
@@ -153,12 +154,21 @@ class ExternalCircuitTableBackend(ElectricalBackend):
 
             p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
             p_port[port_id] = absorbed
+            port_observables[port_id] = ElectricalPortSnapshot({
+                'source_voltage_V': float(voltage),
+                'gap_voltage_V': float(voltage),
+                'current_A': float(current),
+                'absorbed_power_W': float(absorbed),
+                'delivered_power_W': float(absorbed),
+                'reduced_field_Td': float(reduced_field),
+            })
             zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 0.0), reduced_field)
             plasma_potential = max(plasma_potential, float(cfg.get('plasma_potential_V', 0.0)))
 
         return PowerResult(
             absorbed_power_W_by_zone=p_zone,
             port_power_W=p_port,
+            port_observables=port_observables,
             self_bias_V=0.0,
             plasma_potential_V=plasma_potential,
             zone_reduced_field_Td=zone_reduced_field,

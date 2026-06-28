@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from plasma_global.diagnostics.names import observable_id
+
 
 @dataclass
 class ZoneElectricalState:
@@ -32,9 +34,37 @@ class PowerRequest:
 
 
 @dataclass
+class ElectricalPortSnapshot:
+    values: dict[str, float] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, float]:
+        return dict(self.values)
+
+    def to_observable_fields(self, port_id: str) -> dict[str, float]:
+        port_key = observable_id(port_id)
+        return {
+            f'electrical_{port_key}_{observable_id(name)}': float(value)
+            for name, value in self.values.items()
+        }
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.values.get(key, default)
+
+    def __getitem__(self, key: str) -> float:
+        return self.values[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.values
+
+    def items(self):
+        return self.values.items()
+
+
+@dataclass
 class PowerResult:
     absorbed_power_W_by_zone: dict[str, float]
     port_power_W: dict[str, float] = field(default_factory=dict)
+    port_observables: dict[str, ElectricalPortSnapshot] = field(default_factory=dict)
     self_bias_V: float = 0.0
     plasma_potential_V: float = 0.0
     zone_reduced_field_Td: dict[str, float] = field(default_factory=dict)

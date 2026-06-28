@@ -63,7 +63,12 @@ The supported table grid is either `mean_energy_eV` or a field grid identified b
 At runtime, all EEDF backends expose transport through a typed
 `EEDFTransport` object with `mean_energy_eV`, `mobility_m2_V_s`,
 `diffusion_m2_s`, `effective_field_Td`, and `lookup_mode`. Backend names and
-table metadata are not part of that runtime transport contract.
+table metadata stay outside that runtime transport object.
+
+The `rate_table` backend also reports compact lookup diagnostics: lookup
+coordinate, clipped coordinate, axis bounds, clip flags, table path, grid
+column, and HDF5 metadata. These diagnostics are copied into observables and
+the table provenance is copied into `summary.yaml` as `eedf_provenance`.
 
 During case assembly, the backend checks that enabled gas-phase
 `electron_impact_xsec` reactions have matching `rate_coefficients/<cross_section_id>`
@@ -153,7 +158,9 @@ Every externally generated table should identify:
 - generation script or command
 - creation date
 
-This information should be preserved near the generated table and copied to simulation output when supported.
+This information should be preserved near the generated table and copied to
+simulation output. Current `rate_table` runs copy available HDF5 attributes to
+`eedf_provenance`.
 
 ## Validation Checklist
 

@@ -6,9 +6,43 @@ from typing import Any
 import numpy as np
 
 from plasma_global.chemistry.models import E_CHARGE, K_B
-from plasma_global.physics.types import CompiledSurfaceReaction, CoupledPlasmaEvaluation, SurfaceRateEvaluation
+from plasma_global.physics.types import CompiledSurfaceReaction, CoupledPlasmaEvaluation, SurfaceRateContext, SurfaceRateEvaluation
 
 MONOLAYER_THICKNESS_M = 3.0e-10
+
+
+@dataclass
+class _SurfaceRateAccumulator:
+    core: Any
+    context: SurfaceRateContext
+    rate: float = 1.0
+    dlog_gas: dict[int, float] = field(default_factory=dict)
+    dlog_surface: dict[int, float] = field(default_factory=dict)
+    dlog_Tg: float = 0.0
+    used_surface_species: set[str] = field(default_factory=set)
+
+    def add_gas_power(self, idx: int, power_exp: float) -> None:
+        n = max(float(self.context.gas_row[idx]), self.core.system.floor_density)
+        self.rate *= n ** power_exp
+        self.dlog_gas[idx] = self.dlog_gas.get(idx, 0.0) + power_exp / n
+
+    def add_surface_power(self, state_idx: int, power_exp: float) -> None:
+        theta = max(float(np.clip(self.context.state[state_idx], 0.0, 1.0)), 1.0e-12)
+        self.rate *= theta ** power_exp
+        self.dlog_surface[state_idx] = self.dlog_surface.get(state_idx, 0.0) + power_exp / theta
+
+    def add_surface_reactants(self, reactants: list[tuple[int, float, str]]) -> None:
+        for state_idx, nu, species_id in reactants:
+            if species_id not in self.used_surface_species:
+                self.add_surface_power(state_idx, nu)
+
+    def result(self) -> SurfaceRateEvaluation:
+        return SurfaceRateEvaluation(
+            rate_m2_s=float(self.rate),
+            d_gas={idx: self.rate * val for idx, val in self.dlog_gas.items()},
+            d_surface={idx: self.rate * val for idx, val in self.dlog_surface.items()},
+            dTg=float(self.rate * self.dlog_Tg),
+        )
 
 
 @dataclass
@@ -42,62 +76,77 @@ class SurfaceCore:
         return out
 
     def _compile_surface_reactions(self) -> list[CompiledSurfaceReaction]:
-        sys = self.system
         compiled: list[CompiledSurfaceReaction] = []
-        for rxn in sys.mechanism.surface_reactions:
+        for rxn in self.system.mechanism.surface_reactions:
             if not rxn.enabled:
                 continue
             for surface_id in rxn.surface_filter:
-                surface = sys.chamber.surface_by_id[surface_id]
-                zone_id = surface.zone_id
-                if rxn.zone_filter and zone_id not in rxn.zone_filter:
-                    continue
-                gas_reactants: list[tuple[int, float, str]] = []
-                for sp_id, nu in rxn.reactants.items():
-                    if sp_id in sys.gas_species_index:
-                        gas_reactants.append((sys.gas_species_index[sp_id], float(nu), sp_id))
-                surf_reactants: list[tuple[int, float, str]] = []
-                surf_delta: list[tuple[int, float, str]] = []
-                for sp_id, nu in rxn.reactants.items():
-                    if sp_id in sys.state_layout.surface_index.get(surface_id, {}):
-                        surf_reactants.append((sys.state_layout.surface_index[surface_id][sp_id], float(nu), sp_id))
-                for sp_id, idx in sys.state_layout.surface_index.get(surface_id, {}).items():
-                    nu = rxn.products.get(sp_id, 0.0) - rxn.reactants.get(sp_id, 0.0)
-                    if abs(nu) > 0.0:
-                        surf_delta.append((idx, float(nu), sp_id))
-                gas_delta = []
-                for sp_id, idx in sys.gas_species_index.items():
-                    nu = rxn.products.get(sp_id, 0.0) - rxn.reactants.get(sp_id, 0.0)
-                    if abs(nu) > 0.0:
-                        gas_delta.append((idx, float(nu), sp_id))
-                inventory_idx = None
-                if gas_reactants:
-                    primary_species_id = gas_reactants[0][2]
-                    candidate = f'{primary_species_id}_reservoir'
-                    if candidate in sys.state_layout.inventory_index.get(surface_id, {}):
-                        inventory_idx = sys.state_layout.inventory_index[surface_id][candidate]
-                film_factor = 0.0
-                for _, nu, sp_id in surf_delta:
-                    if 'film_fragment' in sys.surface_species_tags.get(sp_id, set()):
-                        film_factor += nu
-                compiled.append(
-                    CompiledSurfaceReaction(
-                        reaction_id=rxn.reaction_id,
-                        zone_id=zone_id,
-                        surface_id=surface_id,
-                        gas_reactants=gas_reactants,
-                        surface_reactants=surf_reactants,
-                        delta_gas=gas_delta,
-                        delta_surface=surf_delta,
-                        area_over_volume=surface.area_m2 / max(sys.chamber.zone_by_id[zone_id].volume_m3, 1.0e-30),
-                        area_m2=surface.area_m2,
-                        site_density_m2=max(surface.site_density_m2, 1.0),
-                        rate_model=sys.mechanism.model(rxn.rate_model_key),
-                        inventory_idx=inventory_idx,
-                        film_factor=film_factor,
-                    )
-                )
+                compiled_rxn = self._compile_surface_reaction(rxn, surface_id)
+                if compiled_rxn is not None:
+                    compiled.append(compiled_rxn)
         return compiled
+
+    def _compile_surface_reaction(self, rxn: Any, surface_id: str) -> CompiledSurfaceReaction | None:
+        sys = self.system
+        surface = sys.chamber.surface_by_id[surface_id]
+        zone_id = surface.zone_id
+        if rxn.zone_filter and zone_id not in rxn.zone_filter:
+            return None
+        gas_reactants = self._gas_side(rxn.reactants)
+        surface_delta = self._surface_delta(rxn, surface_id)
+        return CompiledSurfaceReaction(
+            reaction_id=rxn.reaction_id,
+            zone_id=zone_id,
+            surface_id=surface_id,
+            gas_reactants=gas_reactants,
+            surface_reactants=self._surface_side(rxn.reactants, surface_id),
+            delta_gas=self._gas_delta(rxn),
+            delta_surface=surface_delta,
+            area_over_volume=surface.area_m2 / max(sys.chamber.zone_by_id[zone_id].volume_m3, 1.0e-30),
+            area_m2=surface.area_m2,
+            site_density_m2=max(surface.site_density_m2, 1.0),
+            rate_model=sys.mechanism.model(rxn.rate_model_key),
+            inventory_idx=self._inventory_index(surface_id, gas_reactants),
+            film_factor=self._film_factor(surface_delta),
+        )
+
+    def _gas_side(self, side: dict[str, float]) -> list[tuple[int, float, str]]:
+        return [
+            (self.system.gas_species_index[sp_id], float(nu), sp_id)
+            for sp_id, nu in side.items()
+            if sp_id in self.system.gas_species_index
+        ]
+
+    def _surface_side(self, side: dict[str, float], surface_id: str) -> list[tuple[int, float, str]]:
+        mapping = self.system.state_layout.surface_index.get(surface_id, {})
+        return [(mapping[sp_id], float(nu), sp_id) for sp_id, nu in side.items() if sp_id in mapping]
+
+    def _surface_delta(self, rxn: Any, surface_id: str) -> list[tuple[int, float, str]]:
+        return self._delta_side(rxn, self.system.state_layout.surface_index.get(surface_id, {}))
+
+    def _gas_delta(self, rxn: Any) -> list[tuple[int, float, str]]:
+        return self._delta_side(rxn, self.system.gas_species_index)
+
+    @staticmethod
+    def _delta_side(rxn: Any, mapping: dict[str, int]) -> list[tuple[int, float, str]]:
+        return [
+            (idx, float(rxn.products.get(sp_id, 0.0) - rxn.reactants.get(sp_id, 0.0)), sp_id)
+            for sp_id, idx in mapping.items()
+            if abs(rxn.products.get(sp_id, 0.0) - rxn.reactants.get(sp_id, 0.0)) > 0.0
+        ]
+
+    def _inventory_index(self, surface_id: str, gas_reactants: list[tuple[int, float, str]]) -> int | None:
+        if not gas_reactants:
+            return None
+        candidate = f'{gas_reactants[0][2]}_reservoir'
+        return self.system.state_layout.inventory_index.get(surface_id, {}).get(candidate)
+
+    def _film_factor(self, surface_delta: list[tuple[int, float, str]]) -> float:
+        return sum(
+            nu
+            for _idx, nu, species_id in surface_delta
+            if 'film_fragment' in self.system.surface_species_tags.get(species_id, set())
+        )
 
     def initialize_state(self, y0: np.ndarray) -> None:
         sys = self.system
@@ -116,37 +165,49 @@ class SurfaceCore:
     def project_state(self, y: np.ndarray) -> np.ndarray:
         sys = self.system
         if 'surface_coverages' in sys.state_layout.slices:
-            for surface_id, mapping in sys.state_layout.surface_index.items():
-                free_site = self.surface_free_site_species.get(surface_id)
-                occ_map = self.surface_site_occupancy.get(surface_id, {})
-                for idx in mapping.values():
-                    y[idx] = np.clip(y[idx], 0.0, 1.0)
-                if not mapping:
-                    continue
-                if free_site is not None and free_site in mapping:
-                    occ_other = 0.0
-                    for sp_id, idx in mapping.items():
-                        if sp_id == free_site:
-                            continue
-                        occ_other += occ_map.get(sp_id, 1.0) * y[idx]
-                    if occ_other > 1.0:
-                        scale = 1.0 / occ_other
-                        for sp_id, idx in mapping.items():
-                            if sp_id != free_site:
-                                y[idx] *= scale
-                        occ_other = 1.0
-                    free_occ = max(1.0 - occ_other, 0.0)
-                    y[mapping[free_site]] = free_occ / max(occ_map.get(free_site, 1.0), 1.0e-12)
-                else:
-                    total = sum(occ_map.get(sp_id, 1.0) * y[idx] for sp_id, idx in mapping.items())
-                    if total > 1.0:
-                        scale = 1.0 / total
-                        for idx in mapping.values():
-                            y[idx] *= scale
+            self._project_surface_coverages(y)
         if 'wall_inventory' in sys.state_layout.slices:
-            inv_slice = sys.state_layout.slice('wall_inventory')
-            y[inv_slice] = np.clip(y[inv_slice], 0.0, None)
+            self._project_wall_inventory(y)
         return y
+
+    def _project_surface_coverages(self, y: np.ndarray) -> None:
+        for surface_id, mapping in self.system.state_layout.surface_index.items():
+            for idx in mapping.values():
+                y[idx] = np.clip(y[idx], 0.0, 1.0)
+            if not mapping:
+                continue
+            free_site = self.surface_free_site_species.get(surface_id)
+            if free_site is not None and free_site in mapping:
+                self._project_coverages_with_free_site(y, surface_id, mapping, free_site)
+            else:
+                self._project_coverages_without_free_site(y, surface_id, mapping)
+
+    def _project_coverages_with_free_site(self, y: np.ndarray, surface_id: str, mapping: dict[str, int], free_site: str) -> None:
+        occ_map = self.surface_site_occupancy.get(surface_id, {})
+        occ_other = sum(
+            occ_map.get(sp_id, 1.0) * y[idx]
+            for sp_id, idx in mapping.items()
+            if sp_id != free_site
+        )
+        if occ_other > 1.0:
+            scale = 1.0 / occ_other
+            for sp_id, idx in mapping.items():
+                if sp_id != free_site:
+                    y[idx] *= scale
+            occ_other = 1.0
+        y[mapping[free_site]] = max(1.0 - occ_other, 0.0) / max(occ_map.get(free_site, 1.0), 1.0e-12)
+
+    def _project_coverages_without_free_site(self, y: np.ndarray, surface_id: str, mapping: dict[str, int]) -> None:
+        occ_map = self.surface_site_occupancy.get(surface_id, {})
+        total = sum(occ_map.get(sp_id, 1.0) * y[idx] for sp_id, idx in mapping.items())
+        if total > 1.0:
+            scale = 1.0 / total
+            for idx in mapping.values():
+                y[idx] *= scale
+
+    def _project_wall_inventory(self, y: np.ndarray) -> None:
+        inv_slice = self.system.state_layout.slice('wall_inventory')
+        y[inv_slice] = np.clip(y[inv_slice], 0.0, None)
 
     def clip_negative_rhs(self, y: np.ndarray, dydt: np.ndarray) -> None:
         sys = self.system
@@ -238,123 +299,133 @@ class SurfaceCore:
             return wall_flux
         return max(self._bohm_proxy_ion_flux_m2_s(zone_id, coupled), 0.0)
 
-    def surface_rate(self, rxn: CompiledSurfaceReaction, gas_row: np.ndarray, Tg: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation) -> SurfaceRateEvaluation:
-        sys = self.system
-        model = rxn.rate_model
-        backend = str(model.get('backend', '')).lower()
-        Ts = self.surface_temperature(rxn.surface_id, step)
+    def surface_rate_context(
+        self,
+        rxn: CompiledSurfaceReaction,
+        y: np.ndarray,
+        step: Any,
+        coupled: CoupledPlasmaEvaluation,
+    ) -> SurfaceRateContext:
+        z = self.system.zone_index[rxn.zone_id]
+        gas_row = coupled.gas[z]
         area_surface_ied = coupled.power.surface_ied.get(rxn.surface_id)
         ion_energy_eV = (
             float(area_surface_ied.mean_ion_energy_eV)
             if area_surface_ied is not None
             else max(coupled.power.plasma_potential_V - coupled.power.self_bias_V, 0.0)
         )
-        pos_zone = coupled.pos_by_zone[rxn.zone_id]
-        ion_flux_total = self.surface_ion_flux_m2_s(rxn.surface_id, rxn.zone_id, gas_row, coupled)
-        rate = 1.0
-        dlog_gas: dict[int, float] = {}
-        dlog_surface: dict[int, float] = {}
-        dlog_Tg = 0.0
-        used_surface_species: set[str] = set()
-
-        def add_gas_power(idx: int, power_exp: float) -> None:
-            nonlocal rate
-            n = max(float(gas_row[idx]), sys.floor_density)
-            rate *= n ** power_exp
-            dlog_gas[idx] = dlog_gas.get(idx, 0.0) + power_exp / n
-
-        def add_surface_power(state_idx: int, power_exp: float) -> None:
-            nonlocal rate
-            theta = max(float(np.clip(y[state_idx], 0.0, 1.0)), 1.0e-12)
-            rate *= theta ** power_exp
-            dlog_surface[state_idx] = dlog_surface.get(state_idx, 0.0) + power_exp / theta
-
-        thermal_factor, _ = self.surface_thermal_prefactor(model, Ts)
-        cov_factor, cov_derivs, cov_used = self.surface_coverage_factor(model.get('coverage_factor'), rxn.surface_id, y)
-        rate *= thermal_factor * cov_factor
-        used_surface_species |= cov_used
-        for idx, deriv in cov_derivs.items():
-            dlog_surface[idx] = dlog_surface.get(idx, 0.0) + deriv / max(cov_factor, 1.0e-30)
-
-        gas_reactants = rxn.gas_reactants
-        ion_reactants = [g for g in gas_reactants if sys.gas_species[g[0]].charge > 0]
-
-        if backend in {'sticking', 'eley_rideal'}:
-            primary = gas_reactants[0] if gas_reactants else None
-            if primary is None:
-                return SurfaceRateEvaluation(0.0)
-            idx, _nu, _sp_id = primary
-            if sys.gas_species[idx].charge > 0:
-                n_i = max(float(gas_row[idx]), sys.floor_density)
-                frac_i = min(max(n_i / max(pos_zone, sys.floor_density), 0.0), 1.0)
-                incident_flux = ion_flux_total * frac_i
-                add_gas_power(idx, 1.0)
-                rate *= incident_flux / n_i
-                energy_factor = self.surface_energy_factor(model, ion_energy_eV)
-                rate *= energy_factor
-            else:
-                m = sys.gas_masses[idx]
-                vth = np.sqrt(8.0 * K_B * max(Tg, 1.0) / (np.pi * max(m, 1.0e-30)))
-                rate *= 0.25 * vth * float(model.get('sticking_value', model.get('yield_value', 0.0)))
-                add_gas_power(idx, 1.0)
-                dlog_Tg += 0.5 / max(Tg, 1.0)
-            if sys.gas_species[idx].charge > 0:
-                rate *= float(model.get('sticking_value', model.get('yield_value', 1.0)))
-            for idx2, nu, _sp in gas_reactants[1:]:
-                add_gas_power(idx2, nu)
-            for sidx, nu, sp_id in rxn.surface_reactants:
-                if sp_id in used_surface_species:
-                    continue
-                add_surface_power(sidx, nu)
-        elif backend == 'ion_assisted':
-            primary = ion_reactants[0] if ion_reactants else (gas_reactants[0] if gas_reactants else None)
-            if primary is None:
-                return SurfaceRateEvaluation(0.0)
-            idx, _nu, _sp_id = primary
-            n_i = max(float(gas_row[idx]), sys.floor_density)
-            frac_i = min(max(n_i / max(pos_zone, sys.floor_density), 0.0), 1.0)
-            energy_factor = self.surface_energy_factor(model, ion_energy_eV)
-            if energy_factor <= 0.0:
-                return SurfaceRateEvaluation(0.0)
-            yield_base = float(model.get('yield_value', model.get('yield_at_ref', model.get('sticking_value', 1.0))))
-            rate *= ion_flux_total * frac_i * yield_base * energy_factor
-            add_gas_power(idx, 1.0)
-            rate /= n_i
-            for sidx, nu, sp_id in rxn.surface_reactants:
-                if sp_id in used_surface_species:
-                    continue
-                add_surface_power(sidx, nu)
-            for idx2, nu, _sp in gas_reactants[1:]:
-                add_gas_power(idx2, nu)
-        elif backend == 'desorption':
-            pref = float(model.get('nu0_s_inv', model.get('prefactor_s_inv', model.get('A', 0.0))))
-            rate *= pref * rxn.site_density_m2
-            for sidx, nu, _sp in rxn.surface_reactants:
-                add_surface_power(sidx, nu)
-        elif backend == 'langmuir_hinshelwood':
-            pref = float(model.get('A_m2_s_inv', model.get('A', 0.0)))
-            rate *= pref * rxn.site_density_m2
-            for sidx, nu, _sp in rxn.surface_reactants:
-                add_surface_power(sidx, nu)
-            for idx2, nu, _sp in gas_reactants:
-                add_gas_power(idx2, nu)
-        else:
-            raise NotImplementedError(f'Unsupported surface rate backend: {backend}')
-
-        d_gas = {idx: rate * val for idx, val in dlog_gas.items()}
-        d_surface = {idx: rate * val for idx, val in dlog_surface.items()}
-        dTg = rate * dlog_Tg
-        return SurfaceRateEvaluation(
-            rate_m2_s=float(rate),
-            d_gas=d_gas,
-            d_surface=d_surface,
-            dTg=float(dTg),
+        return SurfaceRateContext(
+            reaction=rxn,
+            gas_row=gas_row,
+            gas_temperature_K=float(coupled.gas_temperature[z]),
+            state=y,
+            step=step,
+            coupled=coupled,
+            surface_temperature_K=self.surface_temperature(rxn.surface_id, step),
+            ion_energy_eV=ion_energy_eV,
+            positive_ion_density_m3=coupled.pos_by_zone[rxn.zone_id],
+            ion_flux_m2_s=self.surface_ion_flux_m2_s(rxn.surface_id, rxn.zone_id, gas_row, coupled),
         )
 
-    def apply_rhs(self, time_s: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation, dydt: np.ndarray) -> None:
+    def evaluate_surface_rate(self, context: SurfaceRateContext) -> SurfaceRateEvaluation:
+        acc = _SurfaceRateAccumulator(self, context)
+        self._apply_surface_common_factors(acc)
+        backend = str(context.reaction.rate_model.get('backend', '')).lower()
+        if backend in {'sticking', 'eley_rideal'}:
+            return self._sticking_surface_rate(acc)
+        if backend == 'ion_assisted':
+            return self._ion_assisted_surface_rate(acc)
+        if backend == 'desorption':
+            return self._desorption_surface_rate(acc)
+        if backend == 'langmuir_hinshelwood':
+            return self._langmuir_hinshelwood_surface_rate(acc)
+        raise NotImplementedError(f'Unsupported surface rate backend: {backend}')
+
+    def _apply_surface_common_factors(self, acc: _SurfaceRateAccumulator) -> None:
+        rxn = acc.context.reaction
+        model = rxn.rate_model
+        thermal_factor, _ = self.surface_thermal_prefactor(model, acc.context.surface_temperature_K)
+        cov_factor, cov_derivs, cov_used = self.surface_coverage_factor(model.get('coverage_factor'), rxn.surface_id, acc.context.state)
+        acc.rate *= thermal_factor * cov_factor
+        acc.used_surface_species |= cov_used
+        for idx, deriv in cov_derivs.items():
+            acc.dlog_surface[idx] = acc.dlog_surface.get(idx, 0.0) + deriv / max(cov_factor, 1.0e-30)
+
+    def _sticking_surface_rate(self, acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+        rxn = acc.context.reaction
+        primary = rxn.gas_reactants[0] if rxn.gas_reactants else None
+        if primary is None:
+            return SurfaceRateEvaluation(0.0)
+        idx, _nu, _sp_id = primary
+        if self.system.gas_species[idx].charge > 0:
+            self._apply_ion_sticking_primary(acc, idx)
+        else:
+            self._apply_neutral_sticking_primary(acc, idx)
+        for idx2, nu, _sp in rxn.gas_reactants[1:]:
+            acc.add_gas_power(idx2, nu)
+        acc.add_surface_reactants(rxn.surface_reactants)
+        return acc.result()
+
+    def _apply_ion_sticking_primary(self, acc: _SurfaceRateAccumulator, idx: int) -> None:
+        model = acc.context.reaction.rate_model
+        n_i = max(float(acc.context.gas_row[idx]), self.system.floor_density)
+        frac_i = min(max(n_i / max(acc.context.positive_ion_density_m3, self.system.floor_density), 0.0), 1.0)
+        acc.add_gas_power(idx, 1.0)
+        acc.rate *= acc.context.ion_flux_m2_s * frac_i / n_i
+        acc.rate *= self.surface_energy_factor(model, acc.context.ion_energy_eV)
+        acc.rate *= float(model.get('sticking_value', model.get('yield_value', 1.0)))
+
+    def _apply_neutral_sticking_primary(self, acc: _SurfaceRateAccumulator, idx: int) -> None:
+        model = acc.context.reaction.rate_model
+        Tg = acc.context.gas_temperature_K
+        mass = self.system.gas_masses[idx]
+        thermal_speed = np.sqrt(8.0 * K_B * max(Tg, 1.0) / (np.pi * max(mass, 1.0e-30)))
+        acc.rate *= 0.25 * thermal_speed * float(model.get('sticking_value', model.get('yield_value', 0.0)))
+        acc.add_gas_power(idx, 1.0)
+        acc.dlog_Tg += 0.5 / max(Tg, 1.0)
+
+    def _ion_assisted_surface_rate(self, acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+        rxn = acc.context.reaction
+        primary = self._primary_ion_reactant(rxn) or (rxn.gas_reactants[0] if rxn.gas_reactants else None)
+        if primary is None:
+            return SurfaceRateEvaluation(0.0)
+        idx, _nu, _sp_id = primary
+        energy_factor = self.surface_energy_factor(rxn.rate_model, acc.context.ion_energy_eV)
+        if energy_factor <= 0.0:
+            return SurfaceRateEvaluation(0.0)
+        n_i = max(float(acc.context.gas_row[idx]), self.system.floor_density)
+        frac_i = min(max(n_i / max(acc.context.positive_ion_density_m3, self.system.floor_density), 0.0), 1.0)
+        yield_base = float(rxn.rate_model.get('yield_value', rxn.rate_model.get('yield_at_ref', rxn.rate_model.get('sticking_value', 1.0))))
+        acc.rate *= acc.context.ion_flux_m2_s * frac_i * yield_base * energy_factor
+        acc.add_gas_power(idx, 1.0)
+        acc.rate /= n_i
+        acc.add_surface_reactants(rxn.surface_reactants)
+        for idx2, nu, _sp in rxn.gas_reactants[1:]:
+            acc.add_gas_power(idx2, nu)
+        return acc.result()
+
+    def _primary_ion_reactant(self, rxn: CompiledSurfaceReaction) -> tuple[int, float, str] | None:
+        for item in rxn.gas_reactants:
+            if self.system.gas_species[item[0]].charge > 0:
+                return item
+        return None
+
+    def _desorption_surface_rate(self, acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+        rxn = acc.context.reaction
+        acc.rate *= float(rxn.rate_model.get('nu0_s_inv', rxn.rate_model.get('prefactor_s_inv', rxn.rate_model.get('A', 0.0)))) * rxn.site_density_m2
+        acc.add_surface_reactants(rxn.surface_reactants)
+        return acc.result()
+
+    def _langmuir_hinshelwood_surface_rate(self, acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+        rxn = acc.context.reaction
+        acc.rate *= float(rxn.rate_model.get('A_m2_s_inv', rxn.rate_model.get('A', 0.0))) * rxn.site_density_m2
+        acc.add_surface_reactants(rxn.surface_reactants)
+        for idx, nu, _sp in rxn.gas_reactants:
+            acc.add_gas_power(idx, nu)
+        return acc.result()
+
+    def apply_rhs(self, _time_s: float, y: np.ndarray, step: Any, coupled: CoupledPlasmaEvaluation, dydt: np.ndarray) -> None:
         sys = self.system
-        gas = coupled.gas
-        Tg = coupled.gas_temperature
         gas_rhs = dydt[sys.state_layout.slice('gas_densities')].reshape(sys.n_zones, sys.n_gas_species)
         surf_rhs = dydt[sys.state_layout.slice('surface_coverages')] if 'surface_coverages' in sys.state_layout.slices else None
         inv_rhs = dydt[sys.state_layout.slice('wall_inventory')] if 'wall_inventory' in sys.state_layout.slices else None
@@ -365,7 +436,7 @@ class SurfaceCore:
 
         for rxn in self.surface_reactions:
             z = sys.zone_index[rxn.zone_id]
-            eval_ = self.surface_rate(rxn, gas[z], float(Tg[z]), y, step, coupled)
+            eval_ = self.evaluate_surface_rate(self.surface_rate_context(rxn, y, step, coupled))
             rate = eval_.rate_m2_s
             if rate == 0.0:
                 continue

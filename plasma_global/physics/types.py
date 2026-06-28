@@ -21,6 +21,24 @@ class CompiledGasReaction:
 
 
 @dataclass
+class GasReactionTerm:
+    zone_id: str
+    reaction_id: str
+    rate_m3_s: float
+    species_changes: list[tuple[int, float, str]]
+    electron_energy_loss_J_m3_s: float = 0.0
+
+
+@dataclass
+class IonWallLossTerm:
+    zone_id: str
+    species_index: int
+    species_id: str
+    loss_m3_s: float
+    electron_energy_loss_J_m3_s: float
+
+
+@dataclass
 class CompiledSurfaceReaction:
     reaction_id: str
     zone_id: str
@@ -43,6 +61,20 @@ class SurfaceRateEvaluation:
     d_gas: dict[int, float] = field(default_factory=dict)
     d_surface: dict[int, float] = field(default_factory=dict)
     dTg: float = 0.0
+
+
+@dataclass
+class SurfaceRateContext:
+    reaction: CompiledSurfaceReaction
+    gas_row: np.ndarray
+    gas_temperature_K: float
+    state: np.ndarray
+    step: Any
+    coupled: CoupledPlasmaEvaluation
+    surface_temperature_K: float
+    ion_energy_eV: float
+    positive_ion_density_m3: float
+    ion_flux_m2_s: float
 
 
 @dataclass

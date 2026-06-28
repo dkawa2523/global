@@ -4,6 +4,9 @@ from plasma_global.physics.types import (
     CompiledGasReaction,
     CompiledSurfaceReaction,
     CoupledPlasmaEvaluation,
+    GasReactionTerm,
+    IonWallLossTerm,
+    SurfaceRateContext,
     SurfaceRateEvaluation,
 )
 
@@ -13,5 +16,8 @@ __all__ = [
     'CompiledGasReaction',
     'CompiledSurfaceReaction',
     'CoupledPlasmaEvaluation',
+    'GasReactionTerm',
+    'IonWallLossTerm',
+    'SurfaceRateContext',
     'SurfaceRateEvaluation',
 ]

@@ -205,6 +205,7 @@ def test_observables_keep_compact_zone_and_surface_columns() -> None:
         assert np.isfinite(rec[f'EoverN_{zone_id}_Td'])
     assert rec['ion_flux_wafer_m2_s'] >= 0.0
     assert not any(key.startswith(('ion_loss_', 'ion_wall_', 'ambipolar_loss_')) for key in rec)
+    assert not any(key.startswith(('reaction_rate_', 'species_source_', 'species_loss_')) for key in rec)
 
 
 def test_prescribed_ion_loss_frequency_validates_and_reports_observable(tmp_path: Path) -> None:
@@ -291,6 +292,68 @@ def test_observables_do_not_flatten_power_port_diagnostics() -> None:
 
     assert rec['total_absorbed_power_W'] > 0.0
     assert not any(key.startswith('port_') for key in rec)
+
+
+def test_observables_include_model_budget_and_electrical_waveform_columns() -> None:
+    built = build_case(load_case_from_yaml(ROOT / 'examples' / 'configs' / 'case_zdplaskin_example2.yaml'))
+    system = built.system
+    y0 = system.initial_state()
+    rec = system.compute_observables(np.array([0.0]), y0.reshape(-1, 1))[0]
+
+    assert rec['electrical_dc_series_drive_source_voltage_V'] == pytest.approx(1000.0)
+    assert rec['electrical_dc_series_drive_current_A'] != 0.0
+    assert rec['rate_table_lookup_clipped_plasma'] in {0, 1}
+    assert system.run_config.outputs.diagnostics.budgets is True
+    assert any(key.startswith('reaction_rate_plasma_') for key in rec)
+    assert any(key.startswith('species_source_plasma_') for key in rec)
+    assert any(key.startswith('species_loss_plasma_') for key in rec)
+
+
+def test_gas_terms_and_budget_share_reaction_values() -> None:
+    built = build_case(load_case_from_yaml(ROOT / 'examples' / 'configs' / 'case_zdplaskin_example2.yaml'))
+    system = built.system
+    y0 = system.initial_state()
+    coupled = system.electrical_adapter.evaluate(0.0, y0, system.current_step(0.0))
+
+    terms = system.gas_core.gas_reaction_terms(coupled)
+    budget = system.gas_core.reaction_source_loss_budget(coupled)
+    expected_source: dict[tuple[str, str], float] = {}
+    expected_loss: dict[tuple[str, str], float] = {}
+
+    assert terms
+    for term in terms:
+        assert budget.reaction_rates[(term.zone_id, term.reaction_id)] == pytest.approx(term.rate_m3_s)
+        for _idx, change, species_id in term.species_changes:
+            target = expected_source if change >= 0.0 else expected_loss
+            key = (term.zone_id, species_id)
+            target[key] = target.get(key, 0.0) + abs(change)
+    for term in system.gas_core.ion_wall_loss_terms(coupled):
+        key = (term.zone_id, term.species_id)
+        expected_loss[key] = expected_loss.get(key, 0.0) + term.loss_m3_s
+
+    for key, value in expected_source.items():
+        assert budget.species_source[key] == pytest.approx(value)
+    for key, value in expected_loss.items():
+        assert budget.species_loss[key] == pytest.approx(value)
+
+
+def test_ion_wall_loss_terms_and_budget_share_loss_values() -> None:
+    built = build_case(load_case_from_yaml(ROOT / 'examples' / 'configs' / 'case_zdplaskin_example2.yaml'))
+    system = built.system
+    y0 = system.initial_state()
+    coupled = system.electrical_adapter.evaluate(0.0, y0, system.current_step(0.0))
+
+    terms = system.gas_core.ion_wall_loss_terms(coupled)
+    budget = system.gas_core.reaction_source_loss_budget(coupled)
+    expected_wall: dict[tuple[str, str], float] = {}
+
+    assert terms
+    for term in terms:
+        key = (term.zone_id, term.species_id)
+        expected_wall[key] = expected_wall.get(key, 0.0) + term.loss_m3_s
+
+    for key, value in expected_wall.items():
+        assert budget.wall_loss[key] == pytest.approx(value)
 
 
 def test_case_validation_rejects_mixed_ion_loss_families(tmp_path: Path) -> None:

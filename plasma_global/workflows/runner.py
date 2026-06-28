@@ -73,8 +73,12 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
     solution = _concatenate(results)
     solution.y = system.project_trajectory(solution.y)
     chemistry_provenance = chemistry_provenance_summary(loaded.mechanism)
+    eedf_provenance_fn = getattr(built.eedf_backend, 'provenance', None)
+    eedf_provenance = eedf_provenance_fn() if callable(eedf_provenance_fn) else {}
     observables = system.compute_observables(solution.t, solution.y)
     summary = summarize_solution(solution, observables, chemistry_provenance)
+    if eedf_provenance:
+        summary['eedf_provenance'] = eedf_provenance
 
     output_dir = Path(loaded.resolved_paths.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -100,6 +104,7 @@ def run_from_yaml(run_yaml_path: str | Path) -> dict[str, Any]:
         'mechanism': loaded.mechanism,
         'validation_messages': loaded.validation_messages,
         'chemistry_provenance': chemistry_provenance,
+        'eedf_provenance': eedf_provenance,
         'observables': observables,
         'summary': summary,
         'output_dir': str(output_dir),

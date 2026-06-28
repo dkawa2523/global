@@ -1,7 +1,0 @@
-figure,purpose
-examples\outputs\external_benchmarks\diagnostic_suite\figures\pygmol\pygmol_sanity_density_ratio_by_powered_step.png,Shows powered-step electron-density scale for the production case sanity comparison.
-examples\outputs\external_benchmarks\diagnostic_suite\figures\pygmol\pygmol_sanity_powered_final_values.png,Separates PyGMol external values from this-code production-case values.
-examples\outputs\external_benchmarks\diagnostic_suite\figures\pygmol\pygmol_precision_species_timeseries_overlay.png,Shows same-footing species time-series overlay for PyGMol and local harness.
-examples\outputs\external_benchmarks\diagnostic_suite\figures\pygmol\pygmol_precision_energy_power_overlay.png,Shows same-footing electron-temperature and absorbed-power overlay.
-examples\outputs\external_benchmarks\diagnostic_suite\figures\pygmol\pygmol_precision_error_metrics.png,Shows final relative errors and waveform NRMSE against the precision gate.
-examples\outputs\external_benchmarks\diagnostic_suite\figures\pygmol\pygmol_benchmark_scope_matrix.png,Explains which axes are aligned for sanity and precision PyGMol benchmarks.

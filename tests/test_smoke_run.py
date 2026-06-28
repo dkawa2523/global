@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from plasma_global.io.hdf5_writer import write_solution_h5
+from plasma_global.config.loader import load_run_config
 from plasma_global.numerics.solver_base import SolverResult
 from plasma_global.observables.defaults import summarize_solution
 from plasma_global.workflows.runner import run_from_yaml
@@ -61,6 +62,12 @@ def test_summary_only_promotes_allowlisted_final_observables() -> None:
     assert summary['final_ne_source_m3'] == 1.0e16
     assert 'final_port_hidden_detail' not in summary
     assert 'final_experimental_numeric_probe' not in summary
+
+
+def test_outputs_diagnostics_budget_flag_defaults_off() -> None:
+    run_config = load_run_config(ROOT / 'examples' / 'configs' / 'case_smoke.yaml')
+
+    assert run_config.outputs.diagnostics.budgets is False
 
 
 def test_solution_h5_keeps_fixed_core_datasets(tmp_path: Path) -> None:

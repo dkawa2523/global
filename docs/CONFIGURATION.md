@@ -159,6 +159,17 @@ counters, chemistry provenance, and final major physical quantities. Detailed
 internal clipping, RHS-norm, port, and wall-loss internals are not part of the
 normal output contract.
 
+Detailed reaction/source/loss budget columns are opt-in:
+
+```yaml
+outputs:
+  diagnostics:
+    budgets: true
+```
+
+Keep this disabled for normal runs unless a validation or benchmark workflow
+needs term-by-term budget columns in `observables.csv`.
+
 Initial states include small charged-species seeds for numerical robustness.
 For quantitative ignition or early-transient studies, set species-specific
 `initial_densities_m3` in the chamber zone.

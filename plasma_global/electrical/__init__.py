@@ -1,4 +1,4 @@
-from plasma_global.electrical.base import ElectricalBackend, PowerRequest, PowerResult, SurfaceIED, ZoneElectricalState
+from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult, SurfaceIED, ZoneElectricalState
 from plasma_global.electrical.coupling_adapter import ElectricalCouplingAdapter
 from plasma_global.electrical.ccp import CCPBackend
 from plasma_global.electrical.dc_series import DCSeriesCircuitBackend
@@ -9,6 +9,7 @@ from plasma_global.electrical.rf_envelope import RFEnvelopeBackend
 
 __all__ = [
     'ElectricalBackend',
+    'ElectricalPortSnapshot',
     'PowerRequest',
     'PowerResult',
     'SurfaceIED',

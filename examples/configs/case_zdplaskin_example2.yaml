@@ -40,5 +40,7 @@ numerics:
   max_step: 1.0e-6
 
 outputs:
+  diagnostics:
+    budgets: true
   plots:
     enabled: false
