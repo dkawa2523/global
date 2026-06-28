@@ -13,7 +13,6 @@ nav:
   - Swarm Rate Tables: SWARM_RATE_TABLES.md
   - Physics and Numerics: PHYSICS_NUMERICS.md
   - CLI and API: CLI_API.md
-  - Review Results: REVIEW_RESULTS.md
   - Developer: DEVELOPER.md
 markdown_extensions:
   - admonition

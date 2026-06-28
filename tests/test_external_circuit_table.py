@@ -9,7 +9,8 @@ import yaml
 from plasma_global.electrical.base import PowerRequest, ZoneElectricalState
 from plasma_global.electrical.external_table import ExternalCircuitTableBackend, read_circuit_table, validate_circuit_table_columns
 from plasma_global.workflows.runner import run_from_yaml
-from plasma_global.workflows.context import ELECTRICAL_REGISTRY, load_case_from_yaml
+from plasma_global.workflows.context import load_case_from_yaml
+from plasma_global.workflows.registries import ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]

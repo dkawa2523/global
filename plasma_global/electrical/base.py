@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from plasma_global.diagnostics.names import observable_id
-
 
 @dataclass
 class ZoneElectricalState:
@@ -35,17 +33,12 @@ class PowerRequest:
 
 @dataclass
 class ElectricalPortSnapshot:
+    """Dict-like backend snapshot for postprocessed electrical observables."""
+
     values: dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, float]:
         return dict(self.values)
-
-    def to_observable_fields(self, port_id: str) -> dict[str, float]:
-        port_key = observable_id(port_id)
-        return {
-            f'electrical_{port_key}_{observable_id(name)}': float(value)
-            for name, value in self.values.items()
-        }
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.values.get(key, default)
@@ -62,6 +55,13 @@ class ElectricalPortSnapshot:
 
 @dataclass
 class PowerResult:
+    """Electrical backend result for one state/time evaluation.
+
+    The solver-facing payload is `absorbed_power_W_by_zone`. Other fields are
+    optional backend outputs for EEDF field lookup, surface/wall coupling, and
+    postprocessed observables.
+    """
+
     absorbed_power_W_by_zone: dict[str, float]
     port_power_W: dict[str, float] = field(default_factory=dict)
     port_observables: dict[str, ElectricalPortSnapshot] = field(default_factory=dict)

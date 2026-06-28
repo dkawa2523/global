@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from plasma_global.workflows.context import build_case, load_case_from_yaml
-from tools.external_benchmarks.crane_two_reaction_argon import build_report
+from plasma_global.workflows.runner import run_from_yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,12 +28,20 @@ def test_crane_two_reaction_argon_loads_explicit_initial_densities() -> None:
     assert state['n[plasma,Ar]'] == pytest.approx(2.5e25)
     assert state['n[plasma,Ar_plus]'] == pytest.approx(1.0e6)
     assert state['We[plasma]'] == pytest.approx(3.0 * 1.0e6 * 1.602176634e-19)
+    assert 'film_thickness' not in built.state_layout.slices
+    assert not any(label.startswith('film[') for label in labels)
+    assert system.surface_core.enabled is False
+    assert system.surface_core.surface_reactions == []
 
 
 def test_crane_two_reaction_argon_matches_committed_crane_output() -> None:
-    report = build_report(CRANE_CASE, CRANE_REFERENCE)
-    comparison = report['comparison']
+    result = run_from_yaml(CRANE_CASE)
+    labels = result['system'].state_labels()
+    final_state = {
+        label: result['solution'].y[idx, -1]
+        for idx, label in enumerate(labels)
+    }
+    reference = yaml.safe_load(CRANE_REFERENCE.read_text(encoding='utf-8'))['converted_output_final']
 
-    assert comparison['final_electron_density_m3_relative_error'] < 5.0e-4
-    assert comparison['final_Ar_plus_density_m3_relative_error'] < 5.0e-4
-    assert comparison['final_Ar_density_m3_relative_error'] < 1.0e-8
+    assert final_state['n[plasma,Ar_plus]'] == pytest.approx(float(reference['Ar_plus_density_m3']), rel=5.0e-4)
+    assert final_state['n[plasma,Ar]'] == pytest.approx(float(reference['Ar_density_m3']), rel=1.0e-8)

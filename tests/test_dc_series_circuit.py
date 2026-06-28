@@ -9,7 +9,8 @@ import yaml
 from plasma_global.electrical.base import ElectricalPortSnapshot, PowerRequest, ZoneElectricalState
 from plasma_global.electrical.circuit_models import DCSeriesCircuitConfig, DCSeriesCircuitModel, PlasmaLoadState
 from plasma_global.electrical.dc_series import DCSeriesCircuitBackend
-from plasma_global.workflows.context import ELECTRICAL_REGISTRY, load_case_from_yaml
+from plasma_global.workflows.context import load_case_from_yaml
+from plasma_global.workflows.registries import ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]

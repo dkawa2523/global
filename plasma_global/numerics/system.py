@@ -10,18 +10,11 @@ from plasma_global.eedf.base import EEDFBackend
 from plasma_global.electrical.base import ElectricalBackend
 from plasma_global.electrical.coupling_adapter import ElectricalCouplingAdapter
 from plasma_global.numerics.state_layout import StateLayout
-from plasma_global.observables.adapter import ObservablesAdapter
 from plasma_global.physics.gas_phase_core import GasPhaseCore
 from plasma_global.physics.prescribed_electrons import build_prescribed_electron_profile
 from plasma_global.physics.surface_core import SurfaceCore
+from plasma_global.physics.wall_loss import zone_ion_loss_properties
 from plasma_global.reactor.models import ChamberConfig, RecipeConfig
-from plasma_global.reactor.surface_models import (
-    bohm_h_factor,
-    effective_ion_loss_frequency_s,
-    ion_loss_enabled,
-    ion_loss_family,
-    ion_loss_uses_effective_frequency,
-)
 
 
 @dataclass
@@ -29,13 +22,13 @@ class GlobalPlasmaSystem:
     """Top-level transient multiphysics coordinator.
 
     This class intentionally keeps the public solver-facing interface small
-    (`initial_state`, `rhs`, `compute_observables`, `state_labels`),
+    (`initial_state`, `rhs`, `project_state`, `project_trajectory`,
+    `state_labels`, `scipy_events`),
     while delegating most domain logic to dedicated components:
 
     - `GasPhaseCore`
     - `SurfaceCore`
     - `ElectricalCouplingAdapter`
-    - `ObservablesAdapter`
 
     The goal is to preserve compatibility with the existing workflow while
     making the central coupling point smaller and easier to reason about.
@@ -51,6 +44,14 @@ class GlobalPlasmaSystem:
     state_layout: StateLayout
 
     def __post_init__(self) -> None:
+        self._init_layout_metadata()
+        self._init_positivity_config()
+        self._init_species_metadata()
+        self._init_wall_loss_metadata()
+        self._init_electron_density_closure()
+        self._init_components()
+
+    def _init_layout_metadata(self) -> None:
         self.zone_ids = list(self.state_layout.zone_ids)
         self.zone_index = {z: i for i, z in enumerate(self.zone_ids)}
         self.n_zones = len(self.zone_ids)
@@ -59,33 +60,27 @@ class GlobalPlasmaSystem:
         self.n_gas_species = len(self.gas_species_ids)
         self.surface_ids = list(self.state_layout.surface_index.keys())
 
+    def _init_positivity_config(self) -> None:
         self.positivity_cfg = self.run_config.numerics.positivity or {}
         self.floor_density = float(self.positivity_cfg.get('floor_density_m3', 1.0))
         self.floor_energy = float(self.positivity_cfg.get('floor_energy_J_m3', 1.0e-12))
         self.clip_negative = bool(self.positivity_cfg.get('clip_negative', True))
 
+    def _init_species_metadata(self) -> None:
         self.gas_species = [self.mechanism.species_by_id[s] for s in self.gas_species_ids]
         self.gas_charges = np.array([sp.charge for sp in self.gas_species], dtype=float)
         self.gas_masses = np.array([max(sp.mass_kg, 1.0e-30) for sp in self.gas_species], dtype=float)
-        self.gas_species_tags = {sp.canonical_id: set(sp.state_tags) for sp in self.gas_species}
         self.surface_species_tags = {sp.canonical_id: set(sp.state_tags) for sp in self.mechanism.surface_species}
         self.positive_ion_local_indices = [i for i, sp in enumerate(self.gas_species) if sp.charge > 0]
-        self.zone_wall_area = {
-            z.zone_id: sum(s.area_m2 for s in self.chamber.surfaces_by_zone.get(z.zone_id, []))
-            for z in self.chamber.zones
-        }
-        self.zone_ion_loss_family = self._zone_ion_loss_family()
-        self.zone_ion_loss_area = {
-            z.zone_id: sum(
-                s.area_m2
-                for s in self.chamber.surfaces_by_zone.get(z.zone_id, [])
-                if ion_loss_enabled(s.models)
-            )
-            for z in self.chamber.zones
-        }
-        self.zone_ion_loss_characteristic_length_m = self._zone_bohm_characteristic_length_m()
-        self.zone_ion_loss_h_factor = self._zone_bohm_h_factor()
-        self.zone_effective_ion_loss_frequency_s = self._zone_effective_ion_loss_frequency_s()
+
+    def _init_wall_loss_metadata(self) -> None:
+        ion_loss = zone_ion_loss_properties(self.chamber)
+        self.zone_ion_loss_family = ion_loss.family
+        self.zone_ion_loss_area = ion_loss.area_m2
+        self.zone_ion_loss_h_factor = ion_loss.h_factor
+        self.zone_effective_ion_loss_frequency_s = ion_loss.effective_frequency_s
+
+    def _init_electron_density_closure(self) -> None:
         self.electron_density_closure = str(getattr(self.run_config.physics, 'electron_density_closure', 'quasi_neutral') or 'quasi_neutral').lower()
         self.prescribed_electron_profile = build_prescribed_electron_profile(
             self.run_config,
@@ -93,94 +88,14 @@ class GlobalPlasmaSystem:
             self.zone_ids,
         )
 
+    def _init_components(self) -> None:
         self.gas_core = GasPhaseCore(self)
         self.surface_core = SurfaceCore(self)
         self.electrical_adapter = ElectricalCouplingAdapter(self)
-        self.observables_adapter = ObservablesAdapter(self)
 
-        self.zone_residence_time_s = self.gas_core.zone_residence_time_s
-        self.zone_wall_temperature = self.gas_core.zone_wall_temperature
-
-    def _zone_ion_loss_family(self) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for zone in self.chamber.zones:
-            families = {
-                ion_loss_family(surface.models)
-                for surface in self.chamber.surfaces_by_zone.get(zone.zone_id, [])
-                if ion_loss_enabled(surface.models)
-            }
-            families.discard('disabled')
-            if not families:
-                out[zone.zone_id] = 'disabled'
-            elif len(families) == 1:
-                out[zone.zone_id] = next(iter(families))
-            else:
-                raise ValueError(
-                    f'Zone {zone.zone_id} mixes ion-loss model families {sorted(families)}; '
-                    'choose either Bohm-like or one effective-frequency wall-loss family to avoid double counting.'
-                )
-        return out
-
-    def _zone_bohm_h_factor(self) -> dict[str, float]:
-        out: dict[str, float] = {}
-        for zone in self.chamber.zones:
-            surfaces = [
-                surface for surface in self.chamber.surfaces_by_zone.get(zone.zone_id, [])
-                if ion_loss_enabled(surface.models) and ion_loss_family(surface.models) == 'bohm'
-            ]
-            area = sum(surface.area_m2 for surface in surfaces)
-            if area <= 0.0:
-                out[zone.zone_id] = 0.0
-                continue
-            weighted = 0.0
-            for surface in surfaces:
-                char_length = float(surface.models.get('characteristic_length_m') or self.zone_ion_loss_characteristic_length_m[zone.zone_id])
-                h = bohm_h_factor(
-                    surface.models,
-                    pressure_Pa=zone.pressure_Pa,
-                    gas_temperature_K=zone.gas_temperature_K,
-                    characteristic_length_m=char_length,
-                )
-                weighted += surface.area_m2 * h
-            out[zone.zone_id] = weighted / area
-        return out
-
-    def _zone_bohm_characteristic_length_m(self) -> dict[str, float]:
-        out: dict[str, float] = {}
-        for zone in self.chamber.zones:
-            surfaces = [
-                surface for surface in self.chamber.surfaces_by_zone.get(zone.zone_id, [])
-                if ion_loss_enabled(surface.models) and ion_loss_family(surface.models) == 'bohm'
-            ]
-            area = sum(surface.area_m2 for surface in surfaces)
-            if area <= 0.0:
-                out[zone.zone_id] = 0.0
-                continue
-            default_length = zone.volume_m3 / max(area, 1.0e-30)
-            weighted = 0.0
-            for surface in surfaces:
-                char_length = float(surface.models.get('characteristic_length_m') or default_length)
-                weighted += surface.area_m2 * max(char_length, 1.0e-30)
-            out[zone.zone_id] = weighted / area
-        return out
-
-    def _zone_effective_ion_loss_frequency_s(self) -> dict[str, float]:
-        out: dict[str, float] = {}
-        for zone in self.chamber.zones:
-            surfaces = [
-                surface for surface in self.chamber.surfaces_by_zone.get(zone.zone_id, [])
-                if ion_loss_enabled(surface.models) and ion_loss_uses_effective_frequency(ion_loss_family(surface.models))
-            ]
-            area = sum(surface.area_m2 for surface in surfaces)
-            if area <= 0.0:
-                out[zone.zone_id] = 0.0
-                continue
-            weighted = 0.0
-            for surface in surfaces:
-                rate = effective_ion_loss_frequency_s(surface.models, volume_m3=zone.volume_m3, area_m2=surface.area_m2)
-                weighted += surface.area_m2 * rate
-            out[zone.zone_id] = weighted / area
-        return out
+    @property
+    def zone_wall_temperature(self) -> dict[str, float]:
+        return self.gas_core.zone_wall_temperature
 
     def initial_state(self) -> np.ndarray:
         y0 = self.state_layout.make_state()
@@ -214,11 +129,17 @@ class GlobalPlasmaSystem:
         step = self.current_step(time_s)
         coupled = self.electrical_adapter.evaluate(time_s, y, step)
         self.gas_core.apply_rhs(time_s, y, step, coupled, dydt)
-        self.surface_core.apply_rhs(time_s, y, step, coupled, dydt)
-        if self.clip_negative:
-            self.gas_core.clip_negative_rhs(y, dydt)
-            self.surface_core.clip_negative_rhs(y, dydt)
+        if self.surface_core.enabled:
+            self.surface_core.apply_rhs(time_s, y, step, coupled, dydt)
+        self._apply_positivity_guard(y, dydt)
         return dydt
+
+    def _apply_positivity_guard(self, y: np.ndarray, dydt: np.ndarray) -> None:
+        if not self.clip_negative:
+            return
+        self.gas_core.clip_negative_rhs(y, dydt)
+        if self.surface_core.enabled:
+            self.surface_core.clip_negative_rhs(y, dydt)
 
     def _state_scale(self, y: np.ndarray) -> np.ndarray:
         scale = np.maximum(np.abs(np.asarray(y, dtype=float)), 1.0)
@@ -242,9 +163,6 @@ class GlobalPlasmaSystem:
         if self.prescribed_electron_profile is None:
             return None
         return self.prescribed_electron_profile.density_by_zone(float(time_s), self.zone_ids)
-
-    def compute_observables(self, t: np.ndarray, y: np.ndarray) -> list[dict[str, float]]:
-        return self.observables_adapter.compute(t, y)
 
     def state_labels(self) -> list[str]:
         labels: list[str] = [''] * self.state_layout.size

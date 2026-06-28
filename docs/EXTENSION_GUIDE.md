@@ -1,161 +1,61 @@
 # Extension Guide
 
-This project is intended to remain a compact, inspectable 0D / multi-zone plasma global model foundation. New features should extend the model through clear data contracts and small backends, not by adding solver-specific logic directly into the core.
+Keep extensions small and outside the numerical core unless the RHS truly needs
+them. The stable public API remains:
 
-## Design Goals
+- `load_case_from_yaml`
+- `build_case`
+- `run_from_yaml`
 
-The extension policy is based on the following goals:
+## Boundary Rules
 
-1. Keep the public API small.
-2. Keep the plasma core independent of external tools.
-3. Prefer data contracts over runtime coupling.
-4. Make physical assumptions explicit.
-5. Make validation part of every new feature, and expose only diagnostics that belong in normal user output.
-6. Avoid adding features that belong to fluid, PIC, feature-scale, or full circuit simulators.
+- Keep `GlobalPlasmaSystem` focused on state, RHS composition, projection,
+  labels, and solver events.
+- Put EEDF behavior in `eedf` backends.
+- Put absorbed-power and reduced electrical models in `electrical` backends.
+- Treat observables, summaries, plots, benchmark reports, and provenance as
+  postprocessing.
+- Use prepared files for external solver results; do not call external
+  executables from the ODE RHS.
 
-## Core Boundary
+## Adding a Backend
 
-The core plasma system should not know about specific external programs such as BOLSIG+, LoKI-B, Magboltz, or ngspice.
+Use the existing registries in `workflows/registries.py`.
 
-The core should only consume stable internal objects such as:
+1. Implement the existing backend interface.
+2. Add a registry entry and a short description.
+3. Validate any new configuration before runtime.
+4. Add a focused test or smoke case for the externally visible behavior.
 
-- mechanism data
-- reactor and recipe configuration
-- EEDF or rate coefficient results
-- electrical coupling results
-- numerical options
-- observables definitions
+Avoid broad plugin frameworks, entry-point discovery, hidden metadata buses, and
+large protocol hierarchies.
 
-External tools must be connected through one of the following layers:
+## External Data
 
-| Layer | Use for |
-|---|---|
-| backend | Internal selectable models such as EEDF, electrical, wall-loss, or integrator models |
-| adapter | External data readers or optional tool interfaces |
-| tool | Offline converters, benchmark runners, sweep utilities |
-| docs/examples | User-facing workflows and reference cases |
-
-## Preferred Extension Pattern
-
-A new model should follow this pattern:
+External swarm or circuit tools should normally run offline:
 
 ```text
-configuration
-  -> typed config or validated dictionary
-  -> backend or adapter
-  -> stable result object
-  -> GlobalPlasmaSystem
-  -> observables
-```
-
-Avoid this pattern:
-
-```text
-GlobalPlasmaSystem
-  -> direct call to external executable
-  -> solver-specific parsing
-  -> hidden mutable state
-```
-
-## External Swarm Solvers
-
-BOLSIG+, LoKI-B, and Magboltz are specialized electron swarm / Boltzmann tools. This package should not try to reimplement all of their functionality in the core.
-
-The recommended production path is:
-
-```text
-external swarm solver
-  -> offline rate/transport table
-  -> rate_table backend
+external tool output
+  -> normalized table or YAML/CSV input
+  -> backend
   -> global model
 ```
 
-An online adapter may be added later, but it must preserve the same request/result contract and remain optional.
+The current runtime paths are `rate_table` for EEDF data and
+`external_circuit_table` for one-way electrical waveform data. Online coupling
+can be explored later as an optional adapter, not as a core dependency.
 
-## Circuit Coupling
+## Surface and Wall Scope
 
-Circuit coupling should start with one-way waveform or table coupling:
+Surface and wall models are optional RHS contributions. Suitable additions are
+small global closures such as sticking, ion-enhanced yields, prescribed wall-loss
+frequencies, or compact film/inventory state when the case needs them.
 
-```text
-measured or SPICE-generated waveform
-  -> external_circuit_table backend
-  -> plasma model
-```
+Detailed sheath resolution, feature-scale profile evolution, surface Monte
+Carlo, large material databases, 2D/3D fluid simulation, and PIC simulation are
+outside the core scope.
 
-Direct bidirectional ngspice co-simulation should be treated as an advanced optional adapter. It must not become a required dependency of the core package.
+## Documentation and Tests
 
-The current supported circuit-table path is one-way: measured or SPICE-generated
-CSV data are converted to stable waveform tables and consumed by the
-`external_circuit_table` backend. Do not add direct ngspice execution to the ODE
-RHS or Jacobian path.
-
-## Wall-Loss and Surface Models
-
-Wall-loss and surface models should be small and explicit.
-
-Recommended wall-loss model families:
-
-- prescribed loss frequency
-- Bohm-type global loss
-
-Electronegative cases should use calibrated Bohm factors or prescribed loss
-frequency until a carefully scoped optional closure is added outside the core
-RHS.
-
-Recommended surface model scope:
-
-- sticking coefficients
-- ion-enhanced yields
-- site balance when needed
-- film thickness or etch/deposition rate observables
-
-Do not add feature-scale profile evolution, detailed surface Monte Carlo, or large material databases to the core.
-
-## Configuration Rules
-
-New configuration sections should be:
-
-- documented in `docs/CONFIGURATION.md`
-- validated before runtime
-- represented by typed dataclasses when the structure is stable
-- migration-friendly when that does not keep obsolete contracts alive
-- explicit about defaults
-
-Avoid unstructured `Any`-style configuration for production-facing features.
-
-## Documentation Rules
-
-Every new feature should update:
-
-- relevant user documentation
-- configuration examples
-- CLI/API documentation if needed
-- physics/numerics documentation if assumptions change
-- tests or benchmark notes
-
-Remove or update obsolete statements. Do not leave contradictory descriptions in older pages.
-
-## Testing Rules
-
-A new extension should include at least one of:
-
-- unit tests for parsing or validation
-- contract tests for backend input/output
-- finite-difference or conservation checks for numerical terms
-- smoke examples
-- benchmark comparisons
-
-For numerical features, prefer small reproducible cases over large expensive tests.
-
-## Non-Goals
-
-The following are intentionally outside the core scope:
-
-- full n-term Boltzmann solver implementation
-- 2D or 3D fluid plasma simulation
-- PIC simulation
-- feature-scale etch/deposition modeling
-- detailed RF sheath time resolution
-- mandatory ngspice dependency
-- GUI-first workflow
-- large bundled reaction or material databases
+Update the smallest relevant docs page when behavior changes. Prefer compact
+unit or smoke tests over large benchmark gates for core changes.

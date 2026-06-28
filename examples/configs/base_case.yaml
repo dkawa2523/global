@@ -1,10 +1,10 @@
 case:
   name: icp_bias_cf4_demo
   description: >
-    Base case definition for the semiconductor global-model demo.
+    Base case definition for the low-pressure plasma global-model demo.
     This file holds the common physics/numerics/output defaults and is intended
     to be included by more specific case files.
-  tags: [demo, semiconductor, global_model]
+  tags: [demo, global_model]
   schema_version: 2
   kind: plasma_global_case
 

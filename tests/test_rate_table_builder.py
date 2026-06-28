@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from types import SimpleNamespace
 
-from plasma_global.eedf.base import EEDFRequest, EEDFTransport, RateTableLookupDiagnostics
+from plasma_global.eedf.base import EEDFRequest, EEDFTransport
 from plasma_global.eedf.table import TabulatedSwarmModel
 from scripts.build_rate_table_h5 import build_rate_table_h5
 
@@ -91,13 +91,12 @@ def test_rate_table_backend_can_lookup_by_reduced_field(tmp_path) -> None:
     assert result.transport.mean_energy_eV == pytest.approx(1.5)
     assert result.transport.effective_field_Td == pytest.approx(15.0)
     assert result.transport.lookup_mode == 'field'
-    assert isinstance(result.diagnostics, RateTableLookupDiagnostics)
-    assert result.diagnostics['backend'] == 'rate_table'
-    assert result.diagnostics['lookup_mode'] == 'field'
-    assert result.diagnostics['lookup_value'] == pytest.approx(15.0)
-    assert result.diagnostics['axis_min'] == pytest.approx(10.0)
-    assert result.diagnostics['axis_max'] == pytest.approx(20.0)
-    assert result.diagnostics['lookup_clipped'] is False
+    lookup = result.metadata['rate_table_lookup']
+    assert lookup.lookup_mode == 'field'
+    assert lookup.lookup_value == pytest.approx(15.0)
+    assert lookup.axis_min == pytest.approx(10.0)
+    assert lookup.axis_max == pytest.approx(20.0)
+    assert lookup.lookup_clipped is False
 
     clipped = model.evaluate(
         EEDFRequest(
@@ -112,9 +111,10 @@ def test_rate_table_backend_can_lookup_by_reduced_field(tmp_path) -> None:
         )
     )
 
-    assert clipped.diagnostics['lookup_clipped'] is True
-    assert clipped.diagnostics['lookup_clipped_high'] is True
-    assert clipped.diagnostics['lookup_clipped_value'] == pytest.approx(20.0)
+    clipped_lookup = clipped.metadata['rate_table_lookup']
+    assert clipped_lookup.lookup_clipped is True
+    assert clipped_lookup.lookup_clipped_high is True
+    assert clipped_lookup.lookup_clipped_value == pytest.approx(20.0)
 
 
 def test_field_rate_table_builder_keeps_sorted_field_axis_consistent(tmp_path) -> None:

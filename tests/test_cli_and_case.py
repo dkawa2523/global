@@ -6,7 +6,8 @@ import pytest
 import yaml
 
 from plasma_global.cli import main
-from plasma_global.workflows.context import EEDF_REGISTRY, ELECTRICAL_REGISTRY, build_case, load_case_from_yaml
+from plasma_global.workflows.context import build_case, load_case_from_yaml
+from plasma_global.workflows.registries import EEDF_REGISTRY, ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +36,10 @@ def test_state_layout_labels_are_stable() -> None:
     assert len(set(labels)) == len(labels)
     assert any(label.startswith('n[') for label in labels)
     assert any(label.startswith('We[') for label in labels)
+    assert 'film_thickness' in built.state_layout.slices
+    assert any(label.startswith('film[') for label in labels)
+    assert built.system.surface_core.enabled is True
+    assert built.system.surface_core.surface_reactions
 
 
 def test_cli_validate_returns_success() -> None:

@@ -34,7 +34,7 @@ def test_run_from_yaml_fails_fast_on_solver_failure(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         runner,
         'build_case',
-        lambda _loaded: SimpleNamespace(system=FakeSystem(), integrator=FailingIntegrator()),
+        lambda _loaded: SimpleNamespace(loaded=loaded, system=FakeSystem(), integrator=FailingIntegrator()),
     )
 
     with pytest.raises(RuntimeError, match="bad_step.*forced failure"):
