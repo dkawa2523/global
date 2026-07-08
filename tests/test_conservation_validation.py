@@ -8,7 +8,7 @@ from plasma_global.chemistry.models import MechanismBundle, Reaction, Species
 from plasma_global.chemistry.io import load_mechanism_bundle
 from plasma_global.chemistry.provenance import chemistry_provenance_summary
 from plasma_global.chemistry.validators import validate_mechanism
-from plasma_global.workflows.context import load_case_from_yaml
+from plasma_global import load_case_from_yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +40,6 @@ def _argon_loss_mechanism(reactions: list[Reaction], rate_models: dict[str, dict
         surface_reactions=[],
         rate_models=rate_models,
         cross_sections={},
-        aliases={},
     )
 
 
@@ -186,6 +185,54 @@ reaction_models_file: reaction_models.yaml
         load_mechanism_bundle(manifest)
 
 
+def _write_empty_chemistry_inputs(tmp_path: Path) -> None:
+    (tmp_path / 'species.csv').write_text(
+        'canonical_id,display_name,phase,charge,mass_amu,elements,aliases,state_tags,zones,surfaces\n',
+        encoding='utf-8',
+    )
+    (tmp_path / 'gas_reactions.csv').write_text(
+        'reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_filter,enabled,notes\n',
+        encoding='utf-8',
+    )
+    (tmp_path / 'surface_reactions.csv').write_text(
+        'reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_filter,enabled,notes\n',
+        encoding='utf-8',
+    )
+
+
+def test_chemistry_manifest_rejects_missing_model_file(tmp_path: Path) -> None:
+    _write_empty_chemistry_inputs(tmp_path)
+    (tmp_path / 'chemistry_manifest.yaml').write_text(
+        """
+species_file: species.csv
+gas_reactions_file: gas_reactions.csv
+surface_reactions_file: surface_reactions.csv
+model_files:
+  gas_rate: missing_gas_rate_models.yaml
+""",
+        encoding='utf-8',
+    )
+
+    with pytest.raises(FileNotFoundError, match='model_files.gas_rate'):
+        load_mechanism_bundle(tmp_path / 'chemistry_manifest.yaml')
+
+
+def test_chemistry_manifest_rejects_missing_cross_sections_manifest(tmp_path: Path) -> None:
+    _write_empty_chemistry_inputs(tmp_path)
+    (tmp_path / 'chemistry_manifest.yaml').write_text(
+        """
+species_file: species.csv
+gas_reactions_file: gas_reactions.csv
+surface_reactions_file: surface_reactions.csv
+cross_sections_manifest: missing_cross_sections.yaml
+""",
+        encoding='utf-8',
+    )
+
+    with pytest.raises(FileNotFoundError, match='cross_sections_manifest'):
+        load_mechanism_bundle(tmp_path / 'chemistry_manifest.yaml')
+
+
 @pytest.mark.parametrize('backend', ['arrhenius', 'sputter_yield'])
 def test_surface_rate_model_file_rejects_unsupported_backends(tmp_path: Path, backend: str) -> None:
     (tmp_path / 'species.csv').write_text(
@@ -255,3 +302,40 @@ def test_invalid_rate_model_provenance_warns_without_failing() -> None:
 
     assert 'PROVENANCE_FORMAT_INVALID' in warnings
     assert errors == []
+
+
+def test_surface_coverage_factor_kind_is_validated() -> None:
+    mechanism = MechanismBundle(
+        species=[
+            Species('Ar', 'Ar', 'gas', 0, 39.948, {'Ar': 1}),
+            Species('wafer:*', '*', 'surface', 0, 0.0, {'site': 1}, surfaces=['wafer']),
+            Species('wafer:F*', 'F*', 'surface', 0, 19.0, {'site': 1}, surfaces=['wafer']),
+        ],
+        gas_reactions=[],
+        surface_reactions=[
+            Reaction(
+                reaction_id='S_BAD_COVERAGE',
+                phase='surface',
+                equation='Ar + wafer:* -> Ar + wafer:F*',
+                reactants={'Ar': 1.0, 'wafer:*': 1.0},
+                products={'Ar': 1.0, 'wafer:F*': 1.0},
+                rate_model_key='RM_BAD_COVERAGE',
+                energy_model_key=None,
+                zone_filter=['plasma'],
+                surface_filter=['wafer'],
+                enabled=True,
+            )
+        ],
+        rate_models={
+            'RM_BAD_COVERAGE': {
+                'backend': 'sticking',
+                'sticking_value': 0.01,
+                'coverage_factor': {'kind': 'formula', 'species': 'wafer:*'},
+            }
+        },
+        cross_sections={},
+    )
+
+    errors = [msg.code for msg in validate_mechanism(mechanism).messages if msg.level == 'ERROR']
+
+    assert 'COVERAGE_FACTOR_KIND_UNSUPPORTED' in errors

@@ -37,7 +37,7 @@ class RuntimeConfig:
 class PhysicsConfig:
     mode: str = 'transient'
     gas_model: str = 'multi_zone_global'
-    eedf_backend: str = 'swarm'
+    eedf_backend: str = 'maxwell'
     electrical_backend: str = 'icp'
     integrator: str = 'scipy_bdf'
     enable_gas_temperature: bool = True
@@ -74,15 +74,15 @@ class OutputPlotsConfig:
 
 
 @dataclass
-class OutputDiagnosticsConfig:
-    budgets: bool = False
+class OutputBudgetsConfig:
+    enabled: bool = False
 
 
 @dataclass
 class OutputsConfig:
     formats: OutputFormatsConfig = field(default_factory=OutputFormatsConfig)
     plots: OutputPlotsConfig = field(default_factory=OutputPlotsConfig)
-    diagnostics: OutputDiagnosticsConfig = field(default_factory=OutputDiagnosticsConfig)
+    budgets: OutputBudgetsConfig = field(default_factory=OutputBudgetsConfig)
 
 
 @dataclass
@@ -110,13 +110,13 @@ class Boltzmann2TermConfig:
     energy_grid: SwarmEnergyGridConfig = field(default_factory=SwarmEnergyGridConfig)
     reduced_field_grid_Td: SwarmReducedFieldGridConfig = field(default_factory=SwarmReducedFieldGridConfig)
     max_shape_iterations: int = 48
-    max_field_iterations: int = 42
 
 
 @dataclass
 class SwarmTableConfig:
     file: str | None = None
     lookup: str | None = None
+    bounds_policy: str = 'clip'
     electron_energy_mode: str | None = None
     energy_relaxation_time_s: float = 1.0e-6
 
@@ -132,7 +132,7 @@ class PrescribedElectronProfileConfig:
 
 @dataclass
 class SwarmConfig:
-    model_name: str = 'boltzmann_2term'
+    model_name: str = 'table'
     closure: str = 'auto'
     mixture_key_species: list[str] = field(default_factory=list)
     cache: SwarmCacheConfig = field(default_factory=SwarmCacheConfig)

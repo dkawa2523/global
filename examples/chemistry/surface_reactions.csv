@@ -2,7 +2,7 @@ reaction_id,phase,equation,rate_model_key,energy_model_key,zone_filter,surface_f
 S1001,surface,"F + wafer:* -> wafer:F*",RM_S_F_WAFER_STICK,,process,wafer,true,adsorption on wafer
 S1002,surface,"CF3 + wafer:* -> wafer:poly* + F",RM_S_CF3_POLYMERIZE,,process,wafer,true,polymer precursor sticking
 S1003,surface,"F + wall:* -> wall:F*",RM_S_F_WALL_STICK,,process,grounded_wall,true,wall adsorption
-S1004,surface,"F + source:* -> source:F*",RM_S_F_SOURCE_RECOMB,,source,source_wall,true,source wall recombination placeholder
+S1004,surface,"F + source:* -> source:F*",RM_S_F_SOURCE_RECOMB,,source,source_wall,true,representative source-wall fluorine sticking channel
 S1005,surface,"Ar_plus + wafer:F* -> Ar_plus + wafer:* + F",RM_S_AR_ION_DESORB,,process,wafer,true,ion-assisted desorption of adsorbed fluorine
 S1006,surface,"wafer:F* -> wafer:* + F",RM_S_F_DESORB,,process,wafer,true,thermal desorption example
 S1007,surface,"wafer:F* + wafer:F* -> wafer:* + wafer:* + F2",RM_S_F_LH_RECOMB,,process,wafer,true,Langmuir-Hinshelwood recombination example

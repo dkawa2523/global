@@ -9,8 +9,10 @@ from typing import Any
 import yaml
 
 from plasma_global.config import load_run_config, resolve_run_paths, write_effective_config, write_resolved_paths
-from plasma_global.workflows.context import load_case_from_yaml
-from plasma_global.workflows.registries import EEDF_REGISTRY, ELECTRICAL_REGISTRY, INTEGRATOR_REGISTRY
+from plasma_global.eedf.registry import EEDF_REGISTRY
+from plasma_global.electrical.registry import ELECTRICAL_REGISTRY
+from plasma_global.numerics.registry import INTEGRATOR_REGISTRY
+from plasma_global.workflows.case_loader import load_case_from_yaml
 from plasma_global.workflows.runner import run_from_yaml
 
 
@@ -32,7 +34,14 @@ def _print_registry(payload: dict[str, dict[str, dict[str, Any]]]) -> None:
         print(f'{title}:')
         for name, detail in payload[category].items():
             description = detail.get('description') or ''
-            print(f'  - {name}: {description}')
+            maturity = detail.get('maturity') or 'unspecified'
+            intended_use = detail.get('intended_use') or ''
+            caveat = detail.get('caveat') or ''
+            print(f'  - {name} [{maturity}]: {description}')
+            if intended_use:
+                print(f'      use: {intended_use}')
+            if caveat:
+                print(f'      caveat: {caveat}')
 
 
 def main(argv: list[str] | None = None) -> int:

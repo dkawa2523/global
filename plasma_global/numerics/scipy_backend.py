@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from plasma_global.numerics.solver_base import SolverResult, TimeIntegrator
+from plasma_global.numerics.solver_base import SolverResult, SolverSystem, TimeIntegrator
 
 
 @dataclass
@@ -15,7 +15,16 @@ class SciPyBDFIntegrator(TimeIntegrator):
     first_step: float | None = None
     max_step: float | None = None
 
-    def solve(self, system, y0: np.ndarray, t_span: tuple[float, float], t_eval: np.ndarray | None = None) -> SolverResult:
+    def _solver_atol(self, system: SolverSystem, y0: np.ndarray) -> float | np.ndarray:
+        solver_atol_vector = getattr(system, 'solver_atol_vector', None)
+        if not callable(solver_atol_vector):
+            return self.atol
+        atol = np.asarray(solver_atol_vector(), dtype=float)
+        if atol.shape != np.asarray(y0).shape:
+            raise ValueError(f'solver_atol_vector shape {atol.shape} does not match initial state shape {np.asarray(y0).shape}')
+        return atol
+
+    def solve(self, system: SolverSystem, y0: np.ndarray, t_span: tuple[float, float], t_eval: np.ndarray | None = None) -> SolverResult:
         events = system.scipy_events() or None
         event_names = []
         if events is not None:
@@ -28,7 +37,7 @@ class SciPyBDFIntegrator(TimeIntegrator):
             't_eval': t_eval,
             'events': events,
             'rtol': self.rtol,
-            'atol': self.atol,
+            'atol': self._solver_atol(system, y0),
         }
         if self.first_step is not None:
             options['first_step'] = self.first_step

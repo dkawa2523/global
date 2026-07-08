@@ -9,8 +9,8 @@ import yaml
 from plasma_global.electrical.base import PowerRequest, ZoneElectricalState
 from plasma_global.electrical.external_table import ExternalCircuitTableBackend, read_circuit_table, validate_circuit_table_columns
 from plasma_global.workflows.runner import run_from_yaml
-from plasma_global.workflows.context import load_case_from_yaml
-from plasma_global.workflows.registries import ELECTRICAL_REGISTRY
+from plasma_global import load_case_from_yaml
+from plasma_global.electrical.registry import ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -239,6 +239,8 @@ def test_external_circuit_table_zero_order_hold_uses_previous_sample(tmp_path: P
 def test_external_circuit_table_backend_is_registered() -> None:
     details = ELECTRICAL_REGISTRY.details()
     assert 'CSV' in details['external_circuit_table']['description']
+    assert details['external_circuit_table']['maturity'] == 'data_driven'
+    assert 'One-way' in details['external_circuit_table']['caveat']
 
 
 def test_external_circuit_table_validation_reports_missing_columns(tmp_path: Path) -> None:

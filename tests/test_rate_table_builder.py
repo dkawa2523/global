@@ -91,7 +91,7 @@ def test_rate_table_backend_can_lookup_by_reduced_field(tmp_path) -> None:
     assert result.transport.mean_energy_eV == pytest.approx(1.5)
     assert result.transport.effective_field_Td == pytest.approx(15.0)
     assert result.transport.lookup_mode == 'field'
-    lookup = result.metadata['rate_table_lookup']
+    lookup = result.metadata['table_lookup']
     assert lookup.lookup_mode == 'field'
     assert lookup.lookup_value == pytest.approx(15.0)
     assert lookup.axis_min == pytest.approx(10.0)
@@ -111,10 +111,63 @@ def test_rate_table_backend_can_lookup_by_reduced_field(tmp_path) -> None:
         )
     )
 
-    clipped_lookup = clipped.metadata['rate_table_lookup']
+    clipped_lookup = clipped.metadata['table_lookup']
     assert clipped_lookup.lookup_clipped is True
     assert clipped_lookup.lookup_clipped_high is True
     assert clipped_lookup.lookup_clipped_value == pytest.approx(20.0)
+
+
+def test_rate_table_bounds_policy_error_rejects_out_of_range_lookup(tmp_path) -> None:
+    table_dir = tmp_path / 'field_table'
+    table_dir.mkdir()
+    (table_dir / 'rates.csv').write_text(
+        'EoverN_Td,xs_ion\n'
+        '10.0,1.0e-16\n'
+        '20.0,3.0e-16\n',
+        encoding='utf-8',
+    )
+    (table_dir / 'transport.csv').write_text(
+        'EoverN_Td,mean_energy_eV,mobility_m2_V_s,diffusion_m2_s\n'
+        '10.0,1.0,0.1,0.2\n'
+        '20.0,2.0,0.2,0.4\n',
+        encoding='utf-8',
+    )
+    out = build_rate_table_h5(table_dir, tmp_path / 'field_rates.h5')
+
+    model = TabulatedSwarmModel()
+    swarm = SimpleNamespace(
+        closure='local_field',
+        table=SimpleNamespace(file=str(out), bounds_policy='error'),
+    )
+    model.prepare(
+        mechanism=SimpleNamespace(cross_sections={}),
+        chamber=SimpleNamespace(),
+        run_config=SimpleNamespace(),
+        resolved_paths=SimpleNamespace(chemistry_dir=str(tmp_path)),
+        swarm_config=swarm,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        model.evaluate(
+            EEDFRequest(
+                time_s=0.0,
+                zone_id='plasma',
+                composition={},
+                electron_density_m3=1.0e16,
+                mean_energy_eV=99.0,
+                reduced_field_Td=200.0,
+                gas_temperature_K=300.0,
+                pressure_Pa=100.0,
+            )
+        )
+
+    message = str(excinfo.value)
+    assert 'zone_id=plasma' in message
+    assert 'lookup_mode=field' in message
+    assert 'value=200.0' in message
+    assert 'axis_min=10.0' in message
+    assert 'axis_max=20.0' in message
+    assert f'table_path={out}' in message
 
 
 def test_field_rate_table_builder_keeps_sorted_field_axis_consistent(tmp_path) -> None:

@@ -1,14 +1,12 @@
 # Configuration
 
-Supported run files use schema version 2. Legacy `run.yaml` files are intentionally unsupported.
+Run files use schema version 2 only.
 
-## Case Shape
-
-Minimum top-level sections:
+## Minimal Case
 
 ```yaml
 case:
-  name: smoke_swarm
+  name: smoke_maxwell
   schema_version: 2
 
 files:
@@ -16,60 +14,106 @@ files:
   recipe: recipe_smoke.yaml
   chemistry:
     manifest: ../chemistry/chemistry_manifest.yaml
-  output_dir: ../outputs/smoke_swarm
+  output_dir: ../outputs/smoke_maxwell
 ```
 
-Common optional sections:
+Relative paths are resolved from the case file location. `include` or
+`includes` may be used to deep-merge shared defaults; the including file wins.
 
+## Top-Level Sections
+
+- `case`: `name`, optional `description`, `tags`, `schema_version`.
+- `files`: `chamber`, `recipe`, `chemistry.manifest`, `output_dir`, optional
+  `external_inputs`.
+- `runtime`: `export_effective_config`, `export_resolved_paths`.
 - `physics`: backend and model switches.
-- `numerics`: tolerances, step limits, positivity floors.
-- `outputs`: output formats and plots.
-- `swarm`: EEDF/swarm backend configuration.
+- `numerics`: tolerances, step limits, positivity, optional events.
+- `outputs`: formats, plots, optional detailed reaction budgets.
+- `swarm`: EEDF/swarm backend settings.
 
-Schema-v2 cases are intentionally strict. Unknown keys under `outputs`,
-`swarm`, `files.chemistry`, or chamber top-level configuration are rejected at
-load time.
+Unknown keys are rejected for the strict sections handled by the loader and
+validators.
 
-## EEDF and Rate Tables
+## Backends
 
-Select the EEDF backend through `physics.eedf_backend`. The compact analytic
-and internal backends are useful for smoke tests and development; externally
-generated tables are recommended when electron kinetics accuracy matters.
-
-Current `rate_table` configuration:
+Common selections:
 
 ```yaml
 physics:
-  eedf_backend: rate_table
+  eedf_backend: maxwell        # maxwell or swarm
+  electrical_backend: icp      # direct_power, icp, ccp, rf_envelope,
+                               # dc_series_circuit, external_circuit_table
+  integrator: scipy_bdf
+```
+
+Use `python -m plasma_global.cli list-backends` for the current registry.
+Use the `swarm` backend when a prepared table is available or when explicitly
+running the experimental `boltzmann_2term` closure.
+
+## Numerics
+
+```yaml
+numerics:
+  rtol: 1.0e-6
+  atol: 1.0e-14
+  first_step: 1.0e-10
+  max_step: 1.0e-6
+  events:
+    steady_state:
+      enabled: false
+```
+
+`atol` is configured as a scalar. The BDF backend receives a state-sized
+tolerance vector generated from that scalar and small per-state floors.
+
+Recipe steps must be contiguous in time. Use an explicit zero-power or idle step
+when a hold period is intended.
+
+## Outputs
+
+```yaml
+runtime:
+  export_effective_config: true
+  export_resolved_paths: true
+
+outputs:
+  formats:
+    solution_h5: true
+    observables_csv: true
+    summary_yaml: true
+  budgets:
+    enabled: false
+```
+
+Normal output files are `summary.yaml`, `observables.csv`, `solution.h5`,
+`effective_case.yaml`, and `resolved_paths.yaml`, depending on the switches
+above.
+
+## EEDF Swarm HDF5 Tables
+
+```yaml
+physics:
+  eedf_backend: swarm
 
 swarm:
+  model_name: table
   closure: local_field
   table:
     file: tables/example_rates.h5
     lookup: field
+    bounds_policy: clip
     electron_energy_mode: table_relaxation
     energy_relaxation_time_s: 1.0e-6
 ```
 
-`swarm.table.file` is required for `rate_table`. Relative paths are resolved
-under the resolved chemistry directory. `swarm.table.lookup` is optional and
-may be `mean_energy` or `field`; when omitted, field-gridded tables use field
-lookup when a reduced field is available. The shared `swarm.closure` setting
-supports `auto`, `mean_energy`, and `local_field`.
-
-For field lookup, `electron_energy_mode: table_relaxation` is optional. It
-relaxes the electron-energy state toward the table mean energy using
-`energy_relaxation_time_s`. Use it as a prescribed table closure, not as a
-detailed power-balance model.
-
-The currently supported HDF5 layout is documented in [External Swarm and Rate
-Tables](SWARM_RATE_TABLES.md).
+`swarm.table.file` is required when `swarm.model_name: table`. `lookup` may be
+`mean_energy` or `field`. `bounds_policy` may be `clip` or `error`; default is
+`clip`. The HDF5 layout is described in [Swarm Rate Tables](SWARM_RATE_TABLES.md).
 
 ## External Circuit Tables
 
-Use `external_circuit_table` for one-way coupling from measured or
-SPICE-generated CSV waveform data. The backend reads the table during the run;
-it does not invoke ngspice or perform bidirectional co-simulation.
+`external_circuit_table` reads a prepared CSV during the run; it does not run a
+circuit executable.
 
 ```yaml
 physics:
@@ -79,41 +123,30 @@ files:
   external_inputs:
     circuit_result_csv: ../external/circuit_waveform.csv
 
-# In the recipe step:
+# In a recipe step:
 power_ports:
   powered_port:
     file_key: circuit_result_csv
     interpolation: linear
     hold: edge
-    power_scale: 1.0
-    voltage_scale: 1.0
-    current_scale: 1.0
 ```
 
-The CSV file must include `time_s` and either `absorbed_power_W` or both
-`voltage_V` and `current_A`. `reduced_field_Td` is optional.
+The CSV must include `time_s` and either `absorbed_power_W` or both `voltage_V`
+and `current_A`. `reduced_field_Td` is optional.
 
-| Purpose | Supported columns |
-|---|---|
-| absorbed power | `absorbed_power_W` |
-| voltage | `voltage_V` |
-| current | `current_A` |
-| reduced field, optional | `reduced_field_Td` |
+## Chamber Flow
 
-Use `file_key` to read from `files.external_inputs`, or `file` for a direct
-case-relative path. `interpolation` defaults to linear, while `previous`,
-`zoh`, and `zero_order_hold` select zero-order hold. Outside the table range,
-the default policy holds the edge value; use `hold: error` to reject
-out-of-range times. If no reduced-field column is present, `gap_m` plus voltage
-can derive E/N. Configured `total_density_m3` is used first; otherwise the
-current zone total density from the plasma state is used when available.
+`edges` are directed constant-conductance links. Gas and electron energy are
+transported from `from_zone` to `to_zone`; the model does not solve pressure
+differences or bidirectional flow through an aperture.
 
-## Wall-Loss Models
+`pumps` use fixed `speed_m3_s` removal. Pressure targets are not accepted as
+chamber inputs; prescribe the pump speed and inlet flows that define the desired
+reduced global-model operating point.
 
-Ion wall loss is configured on chamber surfaces through `surface.models`.
-Omitting `ion_loss` keeps the default Bohm-like global loss behavior.
+## Wall Loss
 
-Preferred fixed-frequency configuration:
+Ion wall loss is configured on chamber surfaces:
 
 ```yaml
 models:
@@ -121,88 +154,11 @@ models:
   frequency_s: 3230.0
 ```
 
-Implemented ion-loss families:
+Supported `ion_loss` values:
 
-| `ion_loss` value | Meaning |
-|---|---|
-| omitted, `bohm` | Bohm global ion loss using active wall area, zone volume, ion sound speed, and `h_factor` |
-| `prescribed_loss_frequency` | Fixed global ion-loss frequency from `frequency_s` |
-| `ambipolar_diffusion` | Effective frequency from `diffusion_coefficient_m2_s / diffusion_length_m^2` |
-| `off` | No ion wall loss on that surface |
+- omitted or `bohm`
+- `prescribed_loss_frequency`
+- `ambipolar_diffusion`
+- `off`
 
-Do not mix Bohm-like and effective-frequency ion-loss families within the same
-zone. The validator rejects mixed families to avoid double counting.
-Surface ion-flux observables and ion-enhanced rates use explicit IED flux when
-available; otherwise they use the same zone wall-loss flux used by the global
-RHS.
-
-Bohm-like surfaces may also provide:
-
-```yaml
-models:
-  ion_loss: bohm
-  h_factor: auto
-  ion_neutral_cross_section_m2: 1.0e-18
-  characteristic_length_m: 0.05
-```
-
-For calibrated electronegative or strongly nonlocal cases, use a calibrated
-`h_factor` or `prescribed_loss_frequency` for now. Detailed RF sheath,
-spatial diffusion, PIC/fluid coupling, and feature-scale wall models are
-outside the core scope; see the [Extension Guide](EXTENSION_GUIDE.md).
-
-## Events and Optional Budget Columns
-
-`summary.yaml` is intentionally compact: success state, time range, solver
-counters, compact chemistry provenance counts, and final major physical quantities. Internal
-clipping, RHS-norm, port, and wall-loss details are not normal run outputs.
-
-Detailed reaction/source/loss budget columns are opt-in:
-
-```yaml
-outputs:
-  diagnostics:
-    budgets: true
-```
-
-Keep this disabled for normal runs unless a validation or benchmark workflow
-needs term-by-term budget columns in `observables.csv`.
-
-Initial states include small charged-species seeds for numerical robustness.
-For quantitative ignition or early-transient studies, set species-specific
-`initial_densities_m3` in the chamber zone.
-
-The steady-state solver event is optional and disabled unless explicitly
-enabled:
-
-```yaml
-numerics:
-  events:
-    steady_state:
-      enabled: true
-      relative_rhs_norm_s_inv: 1.0e-3
-      min_step_time_s: 0.0
-```
-
-`relative_rhs_norm_s_inv` is the threshold for
-`max(abs(dy_i/dt) / scale_i)`. `min_step_time_s` prevents immediate event
-termination at the start of each recipe step.
-
-## Includes
-
-Cases may use `include` to share defaults:
-
-```yaml
-include: base_case.yaml
-```
-
-Included files are deep-merged, and the including file wins on conflicts.
-
-## Generated Config Snapshots
-
-Runs normally write:
-
-- `effective_case.yaml`
-- `resolved_paths.yaml`
-
-These are generated run artifacts. Regenerate them instead of committing generated outputs.
+Do not mix Bohm-like and effective-frequency ion-loss families in one zone.

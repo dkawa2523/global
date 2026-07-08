@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -16,8 +16,16 @@ class SolverResult:
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
+class SolverSystem(Protocol):
+    def rhs(self, time_s: float, y: np.ndarray) -> np.ndarray:
+        ...
+
+    def scipy_events(self) -> list[Any]:
+        ...
+
+
 class TimeIntegrator:
-    def solve(self, system: Any, y0: np.ndarray, t_span: tuple[float, float], t_eval: np.ndarray | None = None) -> SolverResult:  # pragma: no cover
+    def solve(self, system: SolverSystem, y0: np.ndarray, t_span: tuple[float, float], t_eval: np.ndarray | None = None) -> SolverResult:  # pragma: no cover
         raise NotImplementedError
 
 

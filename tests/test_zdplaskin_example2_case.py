@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from plasma_global.config.models import PrescribedElectronProfileConfig
-from plasma_global.workflows.context import build_case, load_case_from_yaml
+from plasma_global import build_case, load_case_from_yaml
 from plasma_global.workflows.runner import run_from_yaml
+from tests.case_helpers import write_case_with_output_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,8 +17,9 @@ def test_zdplaskin_example2_surrogate_loads_extended_argon_mechanism() -> None:
 
     assert not any(msg['level'] == 'ERROR' for msg in loaded.validation_messages)
     assert loaded.run_config.case.name == 'zdplaskin_example2_dc_series'
-    assert loaded.run_config.physics.eedf_backend == 'rate_table'
+    assert loaded.run_config.physics.eedf_backend == 'swarm'
     assert loaded.run_config.physics.electrical_backend == 'dc_series_circuit'
+    assert loaded.run_config.swarm.model_name == 'table'
     assert loaded.run_config.swarm.closure == 'local_field'
     assert loaded.run_config.swarm.table.file == 'tables/zdplaskin_example2_eovern_rates.h5'
     assert loaded.run_config.physics.enable_gas_temperature is False
@@ -58,8 +60,8 @@ def test_zdplaskin_example2_surrogate_loads_extended_argon_mechanism() -> None:
     assert built.system.surface_core.surface_reactions == []
 
 
-def test_zdplaskin_example2_run_writes_core_outputs() -> None:
-    result = run_from_yaml(ZDP_CASE)
+def test_zdplaskin_example2_run_writes_core_outputs(tmp_path: Path) -> None:
+    result = run_from_yaml(write_case_with_output_dir(tmp_path, ZDP_CASE))
     out = Path(result['output_dir'])
 
     assert (out / 'summary.yaml').exists()

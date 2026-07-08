@@ -6,7 +6,15 @@ from typing import Any
 
 import numpy as np
 
-from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult
+from plasma_global.electrical.base import (
+    ElectricalBackend,
+    PowerRequest,
+    PowerResult,
+    add_port_power,
+    iter_power_port_configs,
+    set_zone_max,
+    zone_value_map,
+)
 from plasma_global.io.time_series import TimeSeriesTable, read_time_series_csv
 
 
@@ -87,6 +95,11 @@ def validate_circuit_table_columns(table: CircuitTable, cfg: dict[str, Any]) -> 
     resolve_circuit_table_columns(table, cfg)
 
 
+def validate_external_circuit_table_port_config(_step: Any, _port_id: str, cfg: dict[str, Any], resolved_paths: Any) -> None:
+    table = read_circuit_table(resolve_circuit_table_path(resolved_paths, cfg))
+    validate_circuit_table_columns(table, cfg)
+
+
 class ExternalCircuitTableBackend(ElectricalBackend):
     """One-way loose coupling from measured or SPICE-generated circuit CSV data."""
 
@@ -111,16 +124,13 @@ class ExternalCircuitTableBackend(ElectricalBackend):
             raise
 
     def evaluate(self, request: PowerRequest) -> PowerResult:
-        p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        p_zone = zone_value_map(self.chamber)
         p_port: dict[str, float] = {}
-        port_observables: dict[str, ElectricalPortSnapshot] = {}
-        zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        port_observables: dict[str, dict[str, float]] = {}
+        zone_reduced_field = zone_value_map(self.chamber)
         plasma_potential = 0.0
 
-        for port_id, step_cfg in request.recipe_step.power_ports.items():
-            port = self.chamber.power_port_by_id[port_id]
-            cfg = dict(port.parameters or {})
-            cfg.update(step_cfg or {})
+        for port_id, port, cfg in iter_power_port_configs(request):
             zone_id = str(cfg.get('zone_id') or port.zone_id)
             table = self._table_for(cfg)
             columns = resolve_circuit_table_columns(table, cfg)
@@ -152,24 +162,22 @@ class ExternalCircuitTableBackend(ElectricalBackend):
                     electric_field = abs(voltage) / max(float(cfg['gap_m']), 1.0e-30)
                     reduced_field = electric_field / max(total_density, 1.0e-30) / 1.0e-21
 
-            p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
-            p_port[port_id] = absorbed
-            port_observables[port_id] = ElectricalPortSnapshot({
+            add_port_power(p_zone, p_port, port_id=port_id, zone_id=zone_id, absorbed_power_W=absorbed)
+            port_observables[port_id] = {
                 'source_voltage_V': float(voltage),
                 'gap_voltage_V': float(voltage),
                 'current_A': float(current),
                 'absorbed_power_W': float(absorbed),
                 'delivered_power_W': float(absorbed),
                 'reduced_field_Td': float(reduced_field),
-            })
-            zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 0.0), reduced_field)
+            }
+            set_zone_max(zone_reduced_field, zone_id, reduced_field)
             plasma_potential = max(plasma_potential, float(cfg.get('plasma_potential_V', 0.0)))
 
         return PowerResult(
             absorbed_power_W_by_zone=p_zone,
             port_power_W=p_port,
             port_observables=port_observables,
-            self_bias_V=0.0,
             plasma_potential_V=plasma_potential,
             zone_reduced_field_Td=zone_reduced_field,
         )

@@ -13,6 +13,8 @@ them. The stable public API remains:
   labels, and solver events.
 - Put EEDF behavior in `eedf` backends.
 - Put absorbed-power and reduced electrical models in `electrical` backends.
+- Put compact non-stoichiometric RHS terms in process extensions, not in
+  reaction equations.
 - Treat observables, summaries, plots, benchmark reports, and provenance as
   postprocessing.
 - Use prepared files for external solver results; do not call external
@@ -20,15 +22,36 @@ them. The stable public API remains:
 
 ## Adding a Backend
 
-Use the existing registries in `workflows/registries.py`.
+Use the domain registries in `eedf/registry.py`, `electrical/registry.py`,
+and `numerics/registry.py`.
 
 1. Implement the existing backend interface.
-2. Add a registry entry and a short description.
+2. Add a registry entry with `description`, `maturity`, `intended_use`, and any
+   important `caveat`.
 3. Validate any new configuration before runtime.
 4. Add a focused test or smoke case for the externally visible behavior.
 
+Use `maturity` to keep reduced-order assumptions visible in API and CLI output.
+Good values are short labels such as `development`, `reduced`,
+`data_driven`, `experimental`, or `stable`.
+
 Avoid broad plugin frameworks, entry-point discovery, hidden metadata buses, and
 large protocol hierarchies.
+
+## Extending Chemistry State
+
+Prefer the smallest extension that matches the model:
+
+- Add species, reactions, and rate models for stoichiometric chemistry.
+- Add `state_variables` for extra zone or surface states that belong in the ODE
+  vector.
+- Add `processes` for simple source, relaxation, or ion-flux source terms.
+- Add a new Python backend only when the process cannot be represented by the
+  three built-in process kinds.
+
+Do not put arbitrary expressions or large DSLs into YAML. Keep external
+databases outside the runtime path and normalize them into the standard
+mechanism files first.
 
 ## External Data
 
@@ -41,7 +64,7 @@ external tool output
   -> global model
 ```
 
-The current runtime paths are `rate_table` for EEDF data and
+The current runtime paths are `swarm.model_name: table` for EEDF data and
 `external_circuit_table` for one-way electrical waveform data. Online coupling
 can be explored later as an optional adapter, not as a core dependency.
 

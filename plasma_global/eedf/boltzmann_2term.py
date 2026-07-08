@@ -8,8 +8,8 @@ from typing import Any
 import numpy as np
 
 from plasma_global.chemistry.models import E_CHARGE, K_B
-from plasma_global.eedf.base import EEDFRequest, EEDFResult, EEDFTransport
-from plasma_global.eedf.swarm_backend import SwarmEEDFBackend
+from plasma_global.eedf.base import EEDFRequest, EEDFResult
+from plasma_global.eedf.boltzmann_tables import BoltzmannSwarmTable, interp_by_field, interp_by_mean_energy
 from plasma_global.eedf.swarm_base import SwarmModel
 
 M_E = 9.1093837015e-31
@@ -26,25 +26,8 @@ class _MixtureProfile:
     energy_loss_sigma_mix_eV: np.ndarray
 
 
-@dataclass
-class _MixtureSwarmTable:
-    key: tuple[Any, ...]
-    field_grid_Td: np.ndarray
-    mean_energy_by_field_eV: np.ndarray
-    k_by_field: dict[str, np.ndarray]
-    mobility_by_field: np.ndarray
-    diffusion_by_field: np.ndarray
-    drift_velocity_by_field: np.ndarray
-    mean_energy_grid_eV: np.ndarray
-    field_by_mean_Td: np.ndarray
-    k_by_mean: dict[str, np.ndarray]
-    mobility_by_mean: np.ndarray
-    diffusion_by_mean: np.ndarray
-    drift_velocity_by_mean: np.ndarray
-
-
 class Boltzmann2TermSwarmModel(SwarmModel):
-    """Cross-section-driven two-term-like swarm closure.
+    """Experimental cross-section-driven two-term-like swarm closure.
 
     The implementation is intentionally modular:
     - actual tabulated cross sections are loaded from chemistry manifest files,
@@ -78,7 +61,6 @@ class Boltzmann2TermSwarmModel(SwarmModel):
         self.field_max_Td = float(field_cfg.max if field_cfg else 2500.0)
         self.n_field = int(field_cfg.n if field_cfg else 48)
         self.max_shape_iter = int(cfg.max_shape_iterations if cfg else 48)
-        self.max_field_iter = int(cfg.max_field_iterations if cfg else 42)
         self.cache_max_entries = int(swarm_config.cache.max_entries if swarm_config else 12)
         self.mixture_fraction_decimals = int(swarm_config.cache.fraction_decimals if swarm_config else 3)
         self.evaluation_mode = str(swarm_config.closure or 'auto').lower() if swarm_config else 'auto'
@@ -103,7 +85,7 @@ class Boltzmann2TermSwarmModel(SwarmModel):
             else:
                 self._inelastic_by_target.setdefault(target, []).append(cs_id)
         self._target_species = sorted(set(self._momentum_by_target) | set(self._inelastic_by_target))
-        self._cache: OrderedDict[tuple[Any, ...], _MixtureSwarmTable] = OrderedDict()
+        self._cache: OrderedDict[tuple[Any, ...], BoltzmannSwarmTable] = OrderedDict()
 
     def _target_densities(self, composition: dict[str, float]) -> dict[str, float]:
         densities: dict[str, float] = {}
@@ -186,16 +168,13 @@ class Boltzmann2TermSwarmModel(SwarmModel):
         self,
         f: np.ndarray,
         profile: _MixtureProfile,
-        reduced_field_Td: float,
         total_density_m3: float,
-    ) -> tuple[float, float, float, float]:
+    ) -> tuple[float, float, float]:
         nu_m = total_density_m3 * self._rate_coefficient(profile.momentum_sigma_mix, f)
         mobility = E_CHARGE / max(M_E * nu_m, 1.0e-30)
         mean_energy_eV = self._distribution_mean_energy(f)
         diffusion = mobility * max(mean_energy_eV, 0.03)
-        electric_field_V_m = max(reduced_field_Td, 0.0) * TD_TO_VM2 * total_density_m3
-        drift_velocity = mobility * electric_field_V_m
-        return mobility, diffusion, drift_velocity, mean_energy_eV
+        return mobility, diffusion, mean_energy_eV
 
     def _collisional_power_loss_W_per_electron(self, f: np.ndarray, request: EEDFRequest, profile: _MixtureProfile) -> float:
         total = 0.0
@@ -216,7 +195,7 @@ class Boltzmann2TermSwarmModel(SwarmModel):
 
     def _heating_power_W_per_electron(self, f: np.ndarray, request: EEDFRequest, profile: _MixtureProfile, reduced_field_Td: float) -> float:
         total_density = max(profile.total_target_density_m3, float(request.pressure_Pa) / (K_B * max(float(request.gas_temperature_K), 1.0)), 1.0e18)
-        mobility, _, _, _ = self._transport_from_distribution(f, profile, reduced_field_Td, total_density)
+        mobility, _, _ = self._transport_from_distribution(f, profile, total_density)
         E = max(reduced_field_Td, 0.0) * TD_TO_VM2 * total_density
         return E_CHARGE * mobility * E * E
 
@@ -254,20 +233,18 @@ class Boltzmann2TermSwarmModel(SwarmModel):
                 m_lo = m_mid
         return best
 
-    def _solve_field_table(self, request: EEDFRequest, profile: _MixtureProfile) -> _MixtureSwarmTable:
+    def _solve_field_table(self, request: EEDFRequest, profile: _MixtureProfile) -> BoltzmannSwarmTable:
         total_density = max(profile.total_target_density_m3, float(request.pressure_Pa) / (K_B * max(float(request.gas_temperature_K), 1.0)), 1.0e18)
         k_by_field = {cs_id: np.zeros_like(self.field_grid_Td) for cs_id in self.mechanism.cross_sections}
         mobility = np.zeros_like(self.field_grid_Td)
         diffusion = np.zeros_like(self.field_grid_Td)
-        drift = np.zeros_like(self.field_grid_Td)
         mean_energy = np.zeros_like(self.field_grid_Td)
         for i, field in enumerate(self.field_grid_Td):
             f = self._solve_distribution_for_field(request, profile, float(field))
             mean_energy[i] = self._distribution_mean_energy(f)
-            mu, diff, drift_velocity, _ = self._transport_from_distribution(f, profile, float(field), total_density)
+            mu, diff, _ = self._transport_from_distribution(f, profile, total_density)
             mobility[i] = mu
             diffusion[i] = diff
-            drift[i] = drift_velocity
             for cs_id in self.mechanism.cross_sections:
                 k_by_field[cs_id][i] = self._rate_coefficient(self._sigma_on_grid[cs_id], f)
         order = np.argsort(mean_energy)
@@ -277,39 +254,23 @@ class Boltzmann2TermSwarmModel(SwarmModel):
         mean_sorted = np.maximum.accumulate(mean_sorted + np.linspace(0.0, 1.0e-6, mean_sorted.size))
         mobility_sorted = mobility[order]
         diffusion_sorted = diffusion[order]
-        drift_sorted = drift[order]
         k_by_mean = {cs_id: table[order] for cs_id, table in k_by_field.items()}
         key = self._mixture_key(request, profile)
-        return _MixtureSwarmTable(
+        return BoltzmannSwarmTable(
             key=key,
             field_grid_Td=np.asarray(self.field_grid_Td, dtype=float),
             mean_energy_by_field_eV=np.asarray(mean_energy, dtype=float),
             k_by_field=k_by_field,
             mobility_by_field=np.asarray(mobility, dtype=float),
             diffusion_by_field=np.asarray(diffusion, dtype=float),
-            drift_velocity_by_field=np.asarray(drift, dtype=float),
             mean_energy_grid_eV=mean_sorted,
             field_by_mean_Td=field_sorted,
             k_by_mean=k_by_mean,
             mobility_by_mean=mobility_sorted,
             diffusion_by_mean=diffusion_sorted,
-            drift_velocity_by_mean=drift_sorted,
         )
 
-    @staticmethod
-    def _interp_slope(x: np.ndarray, y: np.ndarray, x0: float) -> float:
-        if x.size < 2:
-            return 0.0
-        if x0 <= x[0]:
-            i = 0
-        elif x0 >= x[-1]:
-            i = x.size - 2
-        else:
-            i = max(int(np.searchsorted(x, x0)) - 1, 0)
-        dx = max(float(x[i + 1] - x[i]), 1.0e-30)
-        return float((y[i + 1] - y[i]) / dx)
-
-    def _lookup_table(self, request: EEDFRequest) -> _MixtureSwarmTable:
+    def _lookup_table(self, request: EEDFRequest) -> BoltzmannSwarmTable:
         profile = self._build_mixture_profile(request)
         key = self._mixture_key(request, profile)
         table = self._cache.get(key)
@@ -321,42 +282,6 @@ class Boltzmann2TermSwarmModel(SwarmModel):
         while len(self._cache) > self.cache_max_entries:
             self._cache.popitem(last=False)
         return table
-
-    def _interp_by_field(self, field: float, table: _MixtureSwarmTable) -> EEDFResult:
-        field_clip = float(np.clip(field, table.field_grid_Td[0], table.field_grid_Td[-1]))
-        k_map = {cs_id: float(np.interp(field_clip, table.field_grid_Td, arr)) for cs_id, arr in table.k_by_field.items()}
-        mean_e = float(np.interp(field_clip, table.field_grid_Td, table.mean_energy_by_field_eV))
-        dk_map = {
-            cs_id: self._interp_slope(table.mean_energy_grid_eV, table.k_by_mean[cs_id], mean_e)
-            for cs_id in table.k_by_field
-        }
-        return EEDFResult(
-            rate_coefficients=k_map,
-            d_rate_d_mean_energy_eV=dk_map,
-            transport=EEDFTransport(
-                mean_energy_eV=mean_e,
-                mobility_m2_V_s=float(np.interp(field_clip, table.field_grid_Td, table.mobility_by_field)),
-                diffusion_m2_s=float(np.interp(field_clip, table.field_grid_Td, table.diffusion_by_field)),
-                effective_field_Td=field_clip,
-                lookup_mode='field',
-            ),
-        )
-
-    def _interp_by_mean_energy(self, mean_energy_eV: float, table: _MixtureSwarmTable) -> EEDFResult:
-        eps_clip = float(np.clip(mean_energy_eV, table.mean_energy_grid_eV[0], table.mean_energy_grid_eV[-1]))
-        k_map = {cs_id: float(np.interp(eps_clip, table.mean_energy_grid_eV, arr)) for cs_id, arr in table.k_by_mean.items()}
-        dk_map = {cs_id: self._interp_slope(table.mean_energy_grid_eV, arr, eps_clip) for cs_id, arr in table.k_by_mean.items()}
-        return EEDFResult(
-            rate_coefficients=k_map,
-            d_rate_d_mean_energy_eV=dk_map,
-            transport=EEDFTransport(
-                mean_energy_eV=eps_clip,
-                mobility_m2_V_s=float(np.interp(eps_clip, table.mean_energy_grid_eV, table.mobility_by_mean)),
-                diffusion_m2_s=float(np.interp(eps_clip, table.mean_energy_grid_eV, table.diffusion_by_mean)),
-                effective_field_Td=float(np.interp(eps_clip, table.mean_energy_grid_eV, table.field_by_mean_Td)),
-                lookup_mode='mean_energy',
-            ),
-        )
 
     def evaluate(self, request: EEDFRequest) -> EEDFResult:
         table = self._lookup_table(request)
@@ -372,10 +297,5 @@ class Boltzmann2TermSwarmModel(SwarmModel):
             # studies.
             use_field = False
         if use_field:
-            return self._interp_by_field(float(request.reduced_field_Td or 0.0), table)
-        return self._interp_by_mean_energy(float(request.mean_energy_eV), table)
-
-
-class Boltzmann2TermBackend(SwarmEEDFBackend):
-    def __init__(self) -> None:
-        super().__init__(forced_model_name='boltzmann_2term')
+            return interp_by_field(float(request.reduced_field_Td or 0.0), table)
+        return interp_by_mean_energy(float(request.mean_energy_eV), table)

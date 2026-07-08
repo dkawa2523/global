@@ -8,8 +8,8 @@ import yaml
 
 from plasma_global.electrical.base import PowerRequest
 from plasma_global.electrical.rf_envelope import RFEnvelopeBackend, validate_rf_envelope_port
-from plasma_global.workflows.context import load_case_from_yaml
-from plasma_global.workflows.registries import ELECTRICAL_REGISTRY
+from plasma_global import load_case_from_yaml
+from plasma_global.electrical.registry import ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,6 +109,8 @@ def test_rf_envelope_pulsed_square_turns_power_off() -> None:
 def test_rf_envelope_backend_is_registered() -> None:
     details = ELECTRICAL_REGISTRY.details()
     assert 'HF/LF' in details['rf_envelope']['description']
+    assert details['rf_envelope']['maturity'] == 'reduced'
+    assert 'calibration' in details['rf_envelope']['caveat']
 
 
 def test_rf_envelope_calibration_example_validates_without_hints() -> None:

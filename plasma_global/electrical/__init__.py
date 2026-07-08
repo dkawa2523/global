@@ -1,24 +1,6 @@
-from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult, SurfaceIED, ZoneElectricalState
-from plasma_global.electrical.coupling_adapter import ElectricalCouplingAdapter
-from plasma_global.electrical.ccp import CCPBackend
-from plasma_global.electrical.dc_series import DCSeriesCircuitBackend
-from plasma_global.electrical.direct_power import DirectPowerBackend
-from plasma_global.electrical.external_table import ExternalCircuitTableBackend
-from plasma_global.electrical.icp import ICPBackend
-from plasma_global.electrical.rf_envelope import RFEnvelopeBackend
+"""Electrical backend implementations.
 
-__all__ = [
-    'ElectricalBackend',
-    'ElectricalPortSnapshot',
-    'PowerRequest',
-    'PowerResult',
-    'SurfaceIED',
-    'ZoneElectricalState',
-    'ElectricalCouplingAdapter',
-    'CCPBackend',
-    'DCSeriesCircuitBackend',
-    'DirectPowerBackend',
-    'ExternalCircuitTableBackend',
-    'ICPBackend',
-    'RFEnvelopeBackend',
-]
+Import concrete modules such as ``plasma_global.electrical.base`` directly.
+"""
+
+__all__: list[str] = []

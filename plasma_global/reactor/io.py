@@ -12,7 +12,14 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(fh) or {}
 
 
+def _reject_unknown(d: dict, allowed: set[str], section: str) -> None:
+    unknown = sorted(str(k) for k in d if str(k) not in allowed)
+    if unknown:
+        raise ValueError(f'Unsupported {section} keys: {", ".join(unknown)}')
+
+
 def _zone(d: dict) -> Zone:
+    _reject_unknown(d, {'zone_id', 'description', 'volume_m3', 'pressure_Pa', 'gas_temperature_K', 'role', 'initial_densities_m3'}, 'zone')
     return Zone(
         zone_id=d['zone_id'],
         description=d.get('description', ''),
@@ -25,6 +32,7 @@ def _zone(d: dict) -> Zone:
 
 
 def _edge(d: dict) -> Edge:
+    _reject_unknown(d, {'edge_id', 'from_zone', 'to_zone', 'conductance_m3_s', 'notes'}, 'edge')
     return Edge(
         edge_id=d['edge_id'],
         from_zone=d['from_zone'],
@@ -35,6 +43,22 @@ def _edge(d: dict) -> Edge:
 
 
 def _surface(d: dict) -> Surface:
+    _reject_unknown(
+        d,
+        {
+            'surface_id',
+            'zone_id',
+            'kind',
+            'area_m2',
+            'material',
+            'temperature_K',
+            'site_density_m2',
+            'initial_coverages',
+            'initial_inventory',
+            'models',
+        },
+        'surface',
+    )
     return Surface(
         surface_id=d['surface_id'],
         zone_id=d['zone_id'],
@@ -50,6 +74,7 @@ def _surface(d: dict) -> Surface:
 
 
 def _inlet(d: dict) -> Inlet:
+    _reject_unknown(d, {'inlet_id', 'zone_id', 'flow_sccm', 'temperature_K'}, 'gas inlet')
     return Inlet(
         inlet_id=d['inlet_id'],
         zone_id=d['zone_id'],
@@ -59,15 +84,16 @@ def _inlet(d: dict) -> Inlet:
 
 
 def _pump(d: dict) -> Pump:
+    _reject_unknown(d, {'pump_id', 'zone_id', 'speed_m3_s'}, 'pump')
     return Pump(
         pump_id=d['pump_id'],
         zone_id=d['zone_id'],
         speed_m3_s=float(d['speed_m3_s']),
-        target_pressure_Pa=float(d['target_pressure_Pa']) if d.get('target_pressure_Pa') is not None else None,
     )
 
 
 def _power_port(d: dict) -> PowerPort:
+    _reject_unknown(d, {'port_id', 'kind', 'zone_id', 'coupling_target', 'parameters'}, 'power port')
     return PowerPort(
         port_id=d['port_id'],
         kind=d['kind'],
@@ -96,6 +122,8 @@ def load_chamber_config(path: str | Path) -> ChamberConfig:
 
 
 def _recipe_step(d: dict) -> RecipeStep:
+    _reject_unknown(d, {'step_id', 't_start_s', 't_end_s', 'gas_inlets', 'power_ports', 'surface_overrides', 'imported_inputs'}, 'recipe step')
+
     def _power_ports(obj: dict) -> dict:
         out = {}
         for k, v in (obj or {}).items():
@@ -122,6 +150,7 @@ def _recipe_step(d: dict) -> RecipeStep:
 
 def load_recipe_config(path: str | Path) -> RecipeConfig:
     raw = _load_yaml(Path(path))
+    _reject_unknown(raw, {'recipe_id', 'description', 'steps'}, 'recipe')
     return RecipeConfig(
         recipe_id=raw['recipe_id'],
         description=raw.get('description', ''),

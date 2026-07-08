@@ -7,7 +7,6 @@ from typing import Any
 import numpy as np
 
 from plasma_global.eedf.base import EEDFRequest, EEDFResult, EEDFTransport
-from plasma_global.eedf.swarm_backend import SwarmEEDFBackend
 from plasma_global.eedf.swarm_base import SwarmModel
 
 
@@ -46,10 +45,14 @@ class TabulatedSwarmModel(SwarmModel):
         super().prepare(mechanism, chamber, run_config, resolved_paths, swarm_config)
         self.table_path = None
         self.lookup_mode = str(swarm_config.closure or 'auto').lower() if swarm_config else 'auto'
+        self.bounds_policy = 'clip'
         if swarm_config is not None:
             table_cfg = swarm_config.table
             path = getattr(table_cfg, 'file', None)
             table_lookup = getattr(table_cfg, 'lookup', None)
+            self.bounds_policy = str(getattr(table_cfg, 'bounds_policy', 'clip') or 'clip').strip().lower()
+            if self.bounds_policy not in {'clip', 'error'}:
+                raise ValueError("swarm.table.bounds_policy must be 'clip' or 'error'")
             if table_lookup:
                 self.lookup_mode = str(table_lookup).lower()
             if path:
@@ -57,7 +60,7 @@ class TabulatedSwarmModel(SwarmModel):
                 if not self.table_path.is_absolute():
                     self.table_path = Path(resolved_paths.chemistry_dir).joinpath(path).resolve()
         if self.table_path is None:
-            raise ValueError('rate_table EEDF backend requires swarm.table.file.')
+            raise ValueError('table swarm model requires swarm.table.file.')
         if not self.table_path.exists():
             raise FileNotFoundError(f'Rate table file not found: {self.table_path}')
         self._load_table(self.table_path)
@@ -67,7 +70,7 @@ class TabulatedSwarmModel(SwarmModel):
         try:
             import h5py
         except ImportError as exc:  # pragma: no cover - depends on optional install
-            raise RuntimeError('The rate_table EEDF backend requires the optional h5py dependency. Install plasma-global-model[io].') from exc
+            raise RuntimeError('The table swarm model requires the optional h5py dependency. Install plasma-global-model[io].') from exc
 
         with h5py.File(path, 'r') as h5:
             self.mean_energy = self._read_1d_dataset(h5, 'mean_energy_eV')
@@ -81,30 +84,30 @@ class TabulatedSwarmModel(SwarmModel):
                 'effective_field_Td': self.eff_field,
             }.items():
                 if arr.size != n_grid:
-                    raise ValueError(f'rate_table dataset {name!r} length {arr.size} does not match mean_energy_eV length {n_grid}.')
+                    raise ValueError(f'table HDF5 dataset {name!r} length {arr.size} does not match mean_energy_eV length {n_grid}.')
             if 'rate_coefficients' not in h5:
-                raise ValueError('rate_table HDF5 file requires a rate_coefficients group.')
+                raise ValueError('table HDF5 file requires a rate_coefficients group.')
             self.k_tables = {}
             for name, ds in h5['rate_coefficients'].items():
                 arr = np.asarray(ds[:], dtype=float)
                 if arr.ndim != 1 or arr.size != n_grid:
                     raise ValueError(
-                        f'rate_table rate_coefficients/{name} must be a 1D dataset with length {n_grid}.'
+                        f'table HDF5 rate_coefficients/{name} must be a 1D dataset with length {n_grid}.'
                     )
                 if not np.all(np.isfinite(arr)):
-                    raise ValueError(f'rate_table rate_coefficients/{name} contains non-finite values.')
+                    raise ValueError(f'table HDF5 rate_coefficients/{name} contains non-finite values.')
                 self.k_tables[name] = arr
             self.grid_column = str(h5.attrs.get('grid_column', 'mean_energy_eV'))
 
     @staticmethod
     def _read_1d_dataset(h5, name: str) -> np.ndarray:
         if name not in h5:
-            raise ValueError(f'rate_table HDF5 file requires dataset {name!r}.')
+            raise ValueError(f'table HDF5 file requires dataset {name!r}.')
         arr = np.asarray(h5[name][:], dtype=float)
         if arr.ndim != 1 or arr.size < 1:
-            raise ValueError(f'rate_table dataset {name!r} must be a non-empty 1D array.')
+            raise ValueError(f'table HDF5 dataset {name!r} must be a non-empty 1D array.')
         if not np.all(np.isfinite(arr)):
-            raise ValueError(f'rate_table dataset {name!r} contains non-finite values.')
+            raise ValueError(f'table HDF5 dataset {name!r} contains non-finite values.')
         return arr
 
     def _validate_required_rate_coefficients(self, mechanism) -> None:
@@ -124,25 +127,9 @@ class TabulatedSwarmModel(SwarmModel):
             have = ', '.join(sorted(self.k_tables)) or '<none>'
             need = ', '.join(missing)
             raise ValueError(
-                f'rate_table file {self.table_path} is missing rate_coefficients for required cross_section_id(s): {need}. '
+                f'table HDF5 file {self.table_path} is missing rate_coefficients for required cross_section_id(s): {need}. '
                 f'Available rate_coefficients: {have}'
             )
-
-    @staticmethod
-    def _interp_slope(x: np.ndarray, y: np.ndarray, x0: float) -> float:
-        order = np.argsort(x)
-        x = np.asarray(x[order], dtype=float)
-        y = np.asarray(y[order], dtype=float)
-        if x.size < 2:
-            return 0.0
-        if x0 <= x[0]:
-            i = 0
-        elif x0 >= x[-1]:
-            i = x.size - 2
-        else:
-            i = max(int(np.searchsorted(x, x0)) - 1, 0)
-        dx = max(float(x[i + 1] - x[i]), 1.0e-30)
-        return float((y[i + 1] - y[i]) / dx)
 
     @staticmethod
     def _interp(axis: np.ndarray, values: np.ndarray, x0: float) -> float:
@@ -170,6 +157,19 @@ class TabulatedSwarmModel(SwarmModel):
             lookup_clipped_high=clipped_high,
         )
 
+    def _check_bounds_policy(self, *, request: EEDFRequest, lookup_info: RateTableLookupInfo) -> None:
+        if self.bounds_policy != 'error' or not lookup_info.lookup_clipped:
+            return
+        raise ValueError(
+            'table lookup outside table bounds: '
+            f'zone_id={request.zone_id}, '
+            f'lookup_mode={lookup_info.lookup_mode}, '
+            f'value={lookup_info.lookup_value}, '
+            f'axis_min={lookup_info.axis_min}, '
+            f'axis_max={lookup_info.axis_max}, '
+            f'table_path={self.table_path}'
+        )
+
     def _use_field_lookup(self, request: EEDFRequest) -> bool:
         if self.lookup_mode in {'local_field', 'field', 'eovern', 'eovern_td'}:
             return request.reduced_field_Td is not None
@@ -183,18 +183,18 @@ class TabulatedSwarmModel(SwarmModel):
             axis = self.eff_field
             x0 = max(float(request.reduced_field_Td or 0.0), 0.0)
             lookup = 'field'
+            lookup_info = self._lookup_info(lookup=lookup, axis=axis, x0=x0)
+            self._check_bounds_policy(request=request, lookup_info=lookup_info)
             k_map = {cs_id: self._interp(axis, table, x0) for cs_id, table in self.k_tables.items()}
-            dk_map = {cs_id: 0.0 for cs_id in self.k_tables}
         else:
             axis = self.mean_energy
             x0 = eps
             lookup = 'mean_energy'
+            lookup_info = self._lookup_info(lookup=lookup, axis=axis, x0=x0)
+            self._check_bounds_policy(request=request, lookup_info=lookup_info)
             k_map = {cs_id: self._interp(axis, table, x0) for cs_id, table in self.k_tables.items()}
-            dk_map = {cs_id: self._interp_slope(axis, table, x0) for cs_id, table in self.k_tables.items()}
-        lookup_info = self._lookup_info(lookup=lookup, axis=axis, x0=x0)
         return EEDFResult(
             rate_coefficients=k_map,
-            d_rate_d_mean_energy_eV=dk_map,
             transport=EEDFTransport(
                 mean_energy_eV=self._interp(axis, self.mean_energy, x0),
                 mobility_m2_V_s=self._interp(axis, self.mobility, x0),
@@ -202,18 +202,13 @@ class TabulatedSwarmModel(SwarmModel):
                 effective_field_Td=self._interp(axis, self.eff_field, x0),
                 lookup_mode=lookup,
             ),
-            metadata={'rate_table_lookup': lookup_info},
+            metadata={'table_lookup': lookup_info},
         )
 
     def provenance(self) -> dict[str, Any]:
         return {
-            'backend': 'rate_table',
+            'backend': 'table',
             'table_path': str(self.table_path),
             'grid_column': str(self.grid_column),
             'rate_ids': sorted(self.k_tables),
         }
-
-
-class TableEEDFBackend(SwarmEEDFBackend):
-    def __init__(self) -> None:
-        super().__init__(forced_model_name='table')

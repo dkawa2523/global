@@ -107,6 +107,11 @@ def bohm_ion_loss_frequency_s(
 ) -> float:
     if area_m2 <= 0.0 or volume_m3 <= 0.0 or h_factor <= 0.0:
         return 0.0
+    flux_per_density = bohm_ion_flux_m2_s(1.0, mean_energy_eV, ion_mass_kg)
+    return max(float(area_m2), 0.0) / max(float(volume_m3), 1.0e-30) * max(float(h_factor), 0.0) * flux_per_density
+
+
+def bohm_ion_flux_m2_s(electron_density_m3: float, mean_energy_eV: float, ion_mass_kg: float) -> float:
     mass = max(float(ion_mass_kg), 1.0e-30)
     sound_speed = (max(float(mean_energy_eV), 0.05) * E_CHARGE / mass) ** 0.5
-    return max(float(area_m2), 0.0) / max(float(volume_m3), 1.0e-30) * max(float(h_factor), 0.0) * BOHM_FLUX_COEFF * sound_speed
+    return BOHM_FLUX_COEFF * max(float(electron_density_m3), 0.0) * sound_speed

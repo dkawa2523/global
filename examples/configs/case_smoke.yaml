@@ -1,14 +1,14 @@
 include: base_case.yaml
 
 case:
-  name: smoke_swarm
+  name: smoke_maxwell
   description: >
     Short smoke test case for validation of configuration, mechanism loading,
     and end-to-end integration.
 
 files:
   recipe: recipe_smoke.yaml
-  output_dir: ../outputs/smoke_swarm
+  output_dir: ../outputs/smoke_maxwell
 
 outputs:
   plots:

@@ -18,22 +18,13 @@ Input files are split by model type:
   electron-temperature rate expressions without cross-section data.
 - `energy_loss_models.yaml`: per-event electron energy losses.
 - `tables/zdplaskin_example2_eovern_rates.h5`: E/N-gridded electron-impact
-  rate table consumed by the `rate_table` EEDF backend. This is the active
+  rate table consumed by `swarm.model_name: table`. This is the active
   parity table.
 - `tables/zdplaskin_example2_eovern/`: CSV and metadata sidecar files used to
   inspect the generated table.
-- `tables/zdplaskin_example2_wide_eovern_rates.h5`: wider E/N table
-  generated from the imported
-  ZDPlaskin cross sections by the local two-term-like solver.
-- `tables/zdplaskin_example2_wide_eovern/`: CSV and metadata sidecars for the
-  wide table.
 
 The active table is regenerated with:
 
 ```powershell
 py tools\external_benchmarks\build_zdplaskin_output_rate_table.py
 ```
-
-`tools/external_benchmarks/build_zdplaskin_rate_table.py` remains available as
-a local two-term/cross-section table generator. Its default output is the wide
-table, not the strict ZDPlaskin parity table.

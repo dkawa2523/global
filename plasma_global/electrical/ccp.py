@@ -3,7 +3,15 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from plasma_global.electrical.base import PowerRequest, PowerResult, SurfaceIED, ZoneElectricalState
+from plasma_global.electrical.base import (
+    PowerRequest,
+    PowerResult,
+    SurfaceIED,
+    ZoneElectricalState,
+    add_port_power,
+    iter_power_port_configs,
+    zone_value_map,
+)
 from plasma_global.electrical.circuit_models import waveform_multiplier
 from plasma_global.electrical.direct_power import DirectPowerBackend
 from plasma_global.electrical.sheath import build_surface_ied, debye_length_m
@@ -68,9 +76,9 @@ class CCPBackend(DirectPowerBackend):
         te = state.mean_energy_eV
         surface_id, area_p, area_g = self._surface_area_for_port(port_id)
         area_ratio = max(area_g / max(area_p, 1.0e-8), 1.0)
-        frequency_Hz = float(cfg.get('frequency_Hz') or cfg.get('carrier_frequency_Hz') or port.parameters.get('frequency_Hz') or port.parameters.get('carrier_frequency_Hz') or 2.0e6)
+        frequency_Hz = float(cfg.get('frequency_Hz') or cfg.get('carrier_frequency_Hz') or 2.0e6)
         mult = waveform_multiplier(request.time_s, cfg)
-        mode = str(cfg.get('mode') or port.parameters.get('control_mode') or 'absorbed_power').lower()
+        mode = str(cfg.get('mode') or cfg.get('control_mode') or 'absorbed_power').lower()
         Rb = self._bulk_resistance_ohm(ne, frequency_Hz, zone.volume_m3, area_p)
         if 'voltage' in mode:
             vrms = float(cfg.get('value_V', cfg.get('value', 0.0))) * mult
@@ -129,21 +137,19 @@ class CCPBackend(DirectPowerBackend):
         }
 
     def evaluate(self, request: PowerRequest) -> PowerResult:
-        p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        p_zone = zone_value_map(self.chamber)
         p_port: dict[str, float] = {}
         surface_ied: dict[str, SurfaceIED] = {}
         bias_contrib: list[tuple[float, float]] = []
         plasma_potentials: list[tuple[float, float]] = []
 
-        for port_id, cfg in request.recipe_step.power_ports.items():
-            port = self.chamber.power_port_by_id[port_id]
+        for port_id, port, cfg in iter_power_port_configs(request):
             kind = (port.kind or '').lower()
             if 'bias' in kind or kind.startswith('ccp'):
                 detail = self._bias_port_result(request, port_id, cfg)
                 zone_id = detail['zone_id']
                 absorbed = detail['absorbed_power_W']
-                p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
-                p_port[port_id] = absorbed
+                add_port_power(p_zone, p_port, port_id=port_id, zone_id=zone_id, absorbed_power_W=absorbed)
                 if detail.get('surface_id') is not None:
                     ied = detail['ied']
                     surface_ied[detail['surface_id']] = ied
@@ -154,8 +160,7 @@ class CCPBackend(DirectPowerBackend):
                 zone_id = cfg.get('zone_id') or port.zone_id
                 base = float(cfg.get('value_W', cfg.get('value', 0.0)))
                 value = base * waveform_multiplier(request.time_s, cfg)
-                p_zone[zone_id] = p_zone.get(zone_id, 0.0) + value
-                p_port[port_id] = value
+                add_port_power(p_zone, p_port, port_id=port_id, zone_id=zone_id, absorbed_power_W=value)
         total_w = sum(w for w, _ in bias_contrib)
         self_bias = sum(w * v for w, v in bias_contrib) / max(total_w, 1.0) if bias_contrib else 0.0
         total_pp = sum(w for w, _ in plasma_potentials)

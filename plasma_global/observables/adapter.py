@@ -6,11 +6,16 @@ from typing import Any
 import numpy as np
 
 from plasma_global.chemistry.models import E_CHARGE
-from plasma_global.observables.fields import electrical_port_observable_fields, rate_table_lookup_observable_fields
+from plasma_global.observables.budgets import reaction_budget_observable_fields
+from plasma_global.observables.fields import electrical_port_observable_fields, extra_state_observable_fields, table_lookup_observable_fields
 
 
 def compute_observables(system: Any, t: np.ndarray, y: np.ndarray) -> list[dict[str, Any]]:
     return _ObservableComputer(system).compute(t, y)
+
+
+def compute_observable_record(system: Any, time_s: float, state: np.ndarray) -> dict[str, Any]:
+    return _ObservableComputer(system).record(time_s, state)
 
 
 @dataclass
@@ -20,10 +25,10 @@ class _ObservableComputer:
     def compute(self, t: np.ndarray, y: np.ndarray) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for i, time_s in enumerate(t):
-            records.append(self._record(float(time_s), y[:, i]))
+            records.append(self.record(float(time_s), y[:, i]))
         return records
 
-    def _record(self, time_s: float, raw_state: np.ndarray) -> dict[str, Any]:
+    def record(self, time_s: float, raw_state: np.ndarray) -> dict[str, Any]:
         system = self.system
         state = system.project_state(raw_state)
         step = system.current_step(time_s)
@@ -34,8 +39,15 @@ class _ObservableComputer:
         for port_id, snapshot in coupled.power.port_observables.items():
             rec.update(electrical_port_observable_fields(snapshot, port_id))
         rec.update(self._surface_fields(state, coupled))
+        rec.update(extra_state_observable_fields(system, state))
         rec.update(self._budget_fields(coupled))
         return rec
+
+    def _budget_fields(self, coupled: Any) -> dict[str, float]:
+        budgets = getattr(self.system.run_config.outputs, 'budgets', None)
+        if not bool(getattr(budgets, 'enabled', False)):
+            return {}
+        return reaction_budget_observable_fields(self.system.gas_core, coupled)
 
     def _global_fields(self, time_s: float, step: Any, coupled: Any) -> dict[str, Any]:
         system = self.system
@@ -72,9 +84,9 @@ class _ObservableComputer:
                 )
             ),
         }
-        lookup_info = eedf.metadata.get('rate_table_lookup')
+        lookup_info = eedf.metadata.get('table_lookup')
         if lookup_info is not None:
-            fields.update(rate_table_lookup_observable_fields(lookup_info, zone_id))
+            fields.update(table_lookup_observable_fields(lookup_info, zone_id))
         return fields
 
     def _surface_fields(self, state: np.ndarray, coupled: Any) -> dict[str, Any]:
@@ -89,11 +101,3 @@ class _ObservableComputer:
         for surface_id, idx in system.state_layout.film_index.items():
             fields[f'film_{surface_id}_m'] = float(state[idx])
         return fields
-
-    def _budget_fields(self, coupled: Any) -> dict[str, float]:
-        system = self.system
-        if not bool(getattr(system.run_config.outputs.diagnostics, 'budgets', False)):
-            return {}
-        from plasma_global.diagnostics.budgets import reaction_budget_observable_fields
-
-        return reaction_budget_observable_fields(system.gas_core, coupled)

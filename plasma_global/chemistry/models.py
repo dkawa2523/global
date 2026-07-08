@@ -46,6 +46,29 @@ class Reaction:
 
 
 @dataclass
+class StateVariableSpec:
+    state_id: str
+    scope: str
+    unit: str = ''
+    initial: float = 0.0
+    lower_bound: float | None = 0.0
+    scale: float = 1.0
+    output: bool = True
+    zones: list[str] = field(default_factory=list)
+    surfaces: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ProcessSpec:
+    process_id: str
+    kind: str
+    target: str
+    parameters: dict[str, Any] = field(default_factory=dict)
+    zones: list[str] = field(default_factory=list)
+    surfaces: list[str] = field(default_factory=list)
+
+
+@dataclass
 class CrossSectionSpec:
     cross_section_id: str
     kind: str = 'inelastic'
@@ -88,7 +111,8 @@ class MechanismBundle:
     surface_reactions: list[Reaction]
     rate_models: dict[str, dict[str, Any]]
     cross_sections: dict[str, CrossSectionSpec]
-    aliases: dict[str, str]
+    state_variables: list[StateVariableSpec] = field(default_factory=list)
+    processes: list[ProcessSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.species_by_id = {s.canonical_id: s for s in self.species}
@@ -109,6 +133,7 @@ class MechanismBundle:
             cs_id: cs for cs_id, cs in self.cross_sections.items()
             if str(cs.kind).lower() in {'elastic', 'elastic_momentum', 'momentum_transfer', 'mt'}
         }
+        self.state_variable_by_id = {spec.state_id: spec for spec in self.state_variables}
 
     def model(self, key: str) -> dict[str, Any]:
         if key not in self.rate_models:

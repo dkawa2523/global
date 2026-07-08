@@ -3,4 +3,3 @@ gas_reactions_file: gas_reactions.csv
 surface_reactions_file: surface_reactions.csv
 model_files:
   gas_rate: gas_rate_models.yaml
-aliases_file: aliases.yaml

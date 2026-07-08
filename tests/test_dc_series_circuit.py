@@ -6,11 +6,11 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from plasma_global.electrical.base import ElectricalPortSnapshot, PowerRequest, ZoneElectricalState
+from plasma_global.electrical.base import PowerRequest, ZoneElectricalState
 from plasma_global.electrical.circuit_models import DCSeriesCircuitConfig, DCSeriesCircuitModel, PlasmaLoadState
 from plasma_global.electrical.dc_series import DCSeriesCircuitBackend
-from plasma_global.workflows.context import load_case_from_yaml
-from plasma_global.workflows.registries import ELECTRICAL_REGISTRY
+from plasma_global import load_case_from_yaml
+from plasma_global.electrical.registry import ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -194,7 +194,6 @@ def test_dc_series_backend_reports_power_and_reduced_field() -> None:
     assert on_result.port_power_W['dc_drive'] > 0.0
     assert on_result.absorbed_power_W_by_zone['plasma'] == pytest.approx(on_result.port_power_W['dc_drive'])
     assert on_result.zone_reduced_field_Td['plasma'] > 0.0
-    assert isinstance(on_result.port_observables['dc_drive'], ElectricalPortSnapshot)
     assert on_result.port_observables['dc_drive']['source_voltage_V'] == pytest.approx(500.0)
     assert on_result.port_observables['dc_drive']['gap_voltage_V'] > 0.0
     assert on_result.port_observables['dc_drive']['current_A'] > 0.0
@@ -205,6 +204,8 @@ def test_dc_series_backend_reports_power_and_reduced_field() -> None:
 def test_dc_series_backend_is_registered() -> None:
     details = ELECTRICAL_REGISTRY.details()
     assert 'ballast-resistor' in details['dc_series_circuit']['description']
+    assert details['dc_series_circuit']['maturity'] == 'reduced'
+    assert 'conductivity feedback' in details['dc_series_circuit']['intended_use']
 
 
 def test_dc_series_case_validation_reports_missing_required_parameters(tmp_path: Path) -> None:

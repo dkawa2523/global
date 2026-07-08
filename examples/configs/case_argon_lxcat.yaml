@@ -17,6 +17,7 @@ files:
   output_dir: ../outputs/argon_lxcat_icp_baseline
 
 physics:
+  eedf_backend: swarm
   enable_gas_temperature: false
 
 swarm:

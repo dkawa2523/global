@@ -51,6 +51,37 @@ def provenance_from_mapping(mapping: dict[str, Any] | None) -> dict[str, Any]:
     return {str(k): v for k, v in out.items() if not _is_empty(v)}
 
 
+def validate_provenance(report: Any, raw: Any, entity_kind: str, entity_id: str) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        report.add(
+            'WARNING',
+            'PROVENANCE_FORMAT_INVALID',
+            f'{entity_kind} {entity_id} provenance should be a mapping',
+            entity_id,
+        )
+        return {}
+    provenance = provenance_from_mapping(raw)
+    if '_invalid_provenance' in provenance:
+        report.add(
+            'WARNING',
+            'PROVENANCE_FORMAT_INVALID',
+            f'{entity_kind} {entity_id} provenance should be a mapping',
+            entity_id,
+        )
+    for field_name in RANGE_PROVENANCE_FIELDS:
+        value = provenance.get(field_name)
+        if isinstance(value, (list, tuple)) and len(value) != 2:
+            report.add(
+                'WARNING',
+                'PROVENANCE_RANGE_INVALID',
+                f'{entity_kind} {entity_id} {field_name} should have two entries when given as a list',
+                entity_id,
+            )
+    return provenance
+
+
 def reaction_provenance(reaction: Any, rate_model: dict[str, Any] | None = None) -> dict[str, Any]:
     out = provenance_from_mapping(getattr(reaction, 'provenance', {}) or {})
     if getattr(reaction, 'notes', '') and out:

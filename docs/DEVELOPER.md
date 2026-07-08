@@ -16,6 +16,7 @@
 ## Adding a Backend
 
 1. Implement the backend interface.
-2. Register it in `workflows/registries.py`.
+2. Register it in the matching domain registry, such as `eedf/registry.py`,
+   `electrical/registry.py`, or `numerics/registry.py`.
 3. Add a focused unit test and one configuration example if the backend is user-facing.
 4. Document model limits in `PHYSICS_NUMERICS.md` if the backend changes interpretation.

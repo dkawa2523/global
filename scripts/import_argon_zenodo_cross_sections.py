@@ -260,16 +260,14 @@ def write_bundle(output: Path, momentum: Block, ionization: Block, excitations: 
     (output / 'electron_impact_models.yaml').write_text('\n'.join(electron_model_lines) + '\n', encoding='utf-8')
     (output / 'energy_loss_models.yaml').write_text('\n'.join(energy_model_lines) + '\n', encoding='utf-8')
 
-    (output / 'aliases.yaml').write_text('aliases:\n  Ar+: Ar_plus\n', encoding='utf-8')
     (output / 'chemistry_manifest.yaml').write_text(textwrap.dedent("""\
         species_file: species.csv
         gas_reactions_file: gas_reactions.csv
         surface_reactions_file: surface_reactions.csv
+        cross_sections_manifest: cross_sections_manifest.yaml
         model_files:
           electron_impact: electron_impact_models.yaml
           energy_loss: energy_loss_models.yaml
-        cross_sections_manifest: cross_sections_manifest.yaml
-        aliases_file: aliases.yaml
     """), encoding='utf-8')
     (output / 'README.md').write_text(textwrap.dedent(f"""\
         # Argon chemistry from public BOLSIG+/LXCat-style data

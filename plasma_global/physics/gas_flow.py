@@ -34,13 +34,16 @@ def apply_pump_terms(
     electron_energy: np.ndarray,
     gas_rhs: np.ndarray,
     electron_energy_rhs: np.ndarray,
+    electron_energy_relaxed_zones: set[str] | None = None,
 ) -> None:
+    relaxed_zones = electron_energy_relaxed_zones or set()
     for pump in system.chamber.pumps:
         z = system.zone_index[pump.zone_id]
         volume = system.chamber.zone_by_id[pump.zone_id].volume_m3
         loss_frequency = pump.speed_m3_s / max(volume, 1.0e-30)
         gas_rhs[z, :] -= loss_frequency * gas[z, :]
-        electron_energy_rhs[z] -= loss_frequency * electron_energy[z]
+        if pump.zone_id not in relaxed_zones:
+            electron_energy_rhs[z] -= loss_frequency * electron_energy[z]
 
 
 def apply_interzone_terms(
@@ -51,7 +54,9 @@ def apply_interzone_terms(
     gas_rhs: np.ndarray,
     electron_energy_rhs: np.ndarray,
     gas_temperature_rhs: np.ndarray | None,
+    electron_energy_relaxed_zones: set[str] | None = None,
 ) -> None:
+    relaxed_zones = electron_energy_relaxed_zones or set()
     for edge in system.chamber.edges:
         zi = system.zone_index[edge.from_zone]
         zj = system.zone_index[edge.to_zone]
@@ -60,8 +65,10 @@ def apply_interzone_terms(
         Ci = edge.conductance_m3_s
         gas_rhs[zi, :] -= Ci / max(Vi, 1.0e-30) * gas[zi, :]
         gas_rhs[zj, :] += Ci / max(Vj, 1.0e-30) * gas[zi, :]
-        electron_energy_rhs[zi] -= Ci / max(Vi, 1.0e-30) * electron_energy[zi]
-        electron_energy_rhs[zj] += Ci / max(Vj, 1.0e-30) * electron_energy[zi]
+        if edge.from_zone not in relaxed_zones:
+            electron_energy_rhs[zi] -= Ci / max(Vi, 1.0e-30) * electron_energy[zi]
+        if edge.to_zone not in relaxed_zones:
+            electron_energy_rhs[zj] += Ci / max(Vj, 1.0e-30) * electron_energy[zi]
         if gas_temperature_rhs is not None:
             n_i = max(float(np.sum(gas[zi])), system.floor_density)
             n_j = max(float(np.sum(gas[zj])), system.floor_density)

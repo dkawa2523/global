@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import fields
 import os
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from plasma_global.config.models import (
     ChemistryFilesConfig,
     FilesConfig,
     NumericsConfig,
-    OutputDiagnosticsConfig,
+    OutputBudgetsConfig,
     OutputFormatsConfig,
     OutputPlotsConfig,
     OutputsConfig,
@@ -105,24 +106,28 @@ def _reject_unknown(raw: dict[str, Any], allowed: set[str], section: str) -> Non
         raise ValueError(f'Unsupported {section} keys: {", ".join(unknown)}')
 
 
+def _reject_unknown_fields(raw: dict[str, Any], config_type: type, section: str) -> None:
+    _reject_unknown(raw, {field.name for field in fields(config_type)}, section)
+
+
 def _output_formats(raw: dict[str, Any] | None) -> OutputFormatsConfig:
     data = dict(raw or {})
-    _reject_unknown(data, {'solution_h5', 'observables_csv', 'summary_yaml'}, 'outputs.formats')
+    _reject_unknown_fields(data, OutputFormatsConfig, 'outputs.formats')
     return OutputFormatsConfig(**data)
 
 
 def _output_plots(raw: dict[str, Any] | None) -> OutputPlotsConfig:
     data = dict(raw or {})
-    _reject_unknown(data, {'enabled', 'format', 'dpi', 'items'}, 'outputs.plots')
+    _reject_unknown_fields(data, OutputPlotsConfig, 'outputs.plots')
     if isinstance(data.get('format'), str):
         data['format'] = [data['format']]
     return OutputPlotsConfig(**data)
 
 
-def _output_diagnostics(raw: dict[str, Any] | None) -> OutputDiagnosticsConfig:
+def _output_budgets(raw: dict[str, Any] | None) -> OutputBudgetsConfig:
     data = dict(raw or {})
-    _reject_unknown(data, {'budgets'}, 'outputs.diagnostics')
-    return OutputDiagnosticsConfig(**data)
+    _reject_unknown_fields(data, OutputBudgetsConfig, 'outputs.budgets')
+    return OutputBudgetsConfig(**data)
 
 
 def _swarm_config(raw: dict[str, Any] | None) -> SwarmConfig:
@@ -133,24 +138,27 @@ def _swarm_config(raw: dict[str, Any] | None) -> SwarmConfig:
         'swarm',
     )
     cache = dict(data.pop('cache', {}) or {})
-    _reject_unknown(cache, {'max_entries', 'fraction_decimals'}, 'swarm.cache')
+    _reject_unknown_fields(cache, SwarmCacheConfig, 'swarm.cache')
 
     boltzmann = dict(data.pop('boltzmann_2term', {}) or {})
     _reject_unknown(
         boltzmann,
-        {'energy_grid', 'reduced_field_grid_Td', 'max_shape_iterations', 'max_field_iterations'},
+        {'energy_grid', 'reduced_field_grid_Td', 'max_shape_iterations'},
         'swarm.boltzmann_2term',
     )
     energy_grid = dict(boltzmann.pop('energy_grid', {}) or {})
-    _reject_unknown(energy_grid, {'min_eV', 'max_eV', 'n'}, 'swarm.boltzmann_2term.energy_grid')
+    _reject_unknown_fields(energy_grid, SwarmEnergyGridConfig, 'swarm.boltzmann_2term.energy_grid')
     field_grid = dict(boltzmann.pop('reduced_field_grid_Td', {}) or {})
-    _reject_unknown(field_grid, {'min', 'max', 'n'}, 'swarm.boltzmann_2term.reduced_field_grid_Td')
+    _reject_unknown_fields(field_grid, SwarmReducedFieldGridConfig, 'swarm.boltzmann_2term.reduced_field_grid_Td')
 
     table = dict(data.pop('table', {}) or {})
-    _reject_unknown(table, {'file', 'lookup', 'electron_energy_mode', 'energy_relaxation_time_s'}, 'swarm.table')
+    _reject_unknown_fields(table, SwarmTableConfig, 'swarm.table')
+    table['bounds_policy'] = str(table.get('bounds_policy') or 'clip').strip().lower()
+    if table['bounds_policy'] not in {'clip', 'error'}:
+        raise ValueError("swarm.table.bounds_policy must be 'clip' or 'error'")
 
     profile = dict(data.pop('prescribed_electron_profile', {}) or {})
-    _reject_unknown(profile, {'file', 'file_key', 'zone_columns', 'interpolation', 'hold'}, 'swarm.prescribed_electron_profile')
+    _reject_unknown_fields(profile, PrescribedElectronProfileConfig, 'swarm.prescribed_electron_profile')
     if profile.get('zone_columns') is None:
         profile['zone_columns'] = {}
 
@@ -172,10 +180,10 @@ def load_run_config(path: str | Path) -> RunConfig:
     raw = _load_yaml_with_includes(path)
     norm = _normalize_raw(raw)
     outputs_raw = norm.get('outputs', {}) or {}
-    _reject_unknown(outputs_raw, {'formats', 'plots', 'diagnostics'}, 'outputs')
+    _reject_unknown_fields(outputs_raw, OutputsConfig, 'outputs')
     formats_raw = outputs_raw.get('formats', {}) or {}
     chemistry_raw = norm['files'].get('chemistry', {}) or {}
-    _reject_unknown(chemistry_raw, {'manifest'}, 'files.chemistry')
+    _reject_unknown_fields(chemistry_raw, ChemistryFilesConfig, 'files.chemistry')
     if not chemistry_raw.get('manifest'):
         raise ValueError('files.chemistry.manifest is required')
     return RunConfig(
@@ -193,7 +201,7 @@ def load_run_config(path: str | Path) -> RunConfig:
         outputs=OutputsConfig(
             formats=_output_formats(formats_raw),
             plots=_output_plots(outputs_raw.get('plots', {})),
-            diagnostics=_output_diagnostics(outputs_raw.get('diagnostics', {})),
+            budgets=_output_budgets(outputs_raw.get('budgets', {})),
         ),
         swarm=_swarm_config(norm.get('swarm', {})),
     )

@@ -7,9 +7,12 @@ from typing import Any
 import yaml
 
 from plasma_global.chemistry.cross_sections import load_cross_sections_manifest
+from plasma_global.chemistry.extensions import load_processes, load_state_variables
+from plasma_global.chemistry.manifest import load_chemistry_manifest
 from plasma_global.chemistry.models import MechanismBundle, Reaction, Species
 from plasma_global.chemistry.parser import parse_csv_bool, parse_equation, parse_pipe_list, parse_semicolon_map
 from plasma_global.chemistry.provenance import PROVENANCE_FIELDS, provenance_from_mapping
+from plasma_global.chemistry.rate_model_io import load_rate_models_from_file, merge_rate_models
 
 
 def _load_species(path: Path) -> list[Species]:
@@ -82,86 +85,12 @@ def _reaction_row_provenance(row: dict[str, Any]) -> dict[str, Any]:
     return provenance_from_mapping(raw)
 
 
-def _load_yaml(path: Path) -> dict:
-    with path.open('r', encoding='utf-8') as fh:
-        return yaml.safe_load(fh) or {}
-
-
-def _resolve(base_dir: Path, value: str | None) -> Path | None:
-    if not value:
+def _require_manifest_file(path: Path | None, label: str) -> Path | None:
+    if path is None:
         return None
-    p = Path(value)
-    if not p.is_absolute():
-        p = (base_dir / p).resolve()
-    return p
-
-
-def _load_chemistry_manifest(path: Path) -> dict[str, Any]:
-    raw = _load_yaml(path)
-    allowed = {
-        'species_file',
-        'gas_reactions_file',
-        'surface_reactions_file',
-        'aliases_file',
-        'cross_sections_manifest',
-        'model_files',
-    }
-    unsupported = sorted(str(k) for k in raw if str(k) not in allowed)
-    if unsupported:
-        raise ValueError(f'Unsupported chemistry manifest keys: {", ".join(unsupported)}. Use model_files instead.')
-    required = ['species_file', 'gas_reactions_file', 'surface_reactions_file']
-    missing = [key for key in required if not raw.get(key)]
-    if missing:
-        raise ValueError(f'Chemistry manifest missing required keys: {", ".join(missing)}')
-    model_files = {
-        str(k): _resolve(path.parent, v)
-        for k, v in (raw.get('model_files', {}) or {}).items()
-    }
-    return {
-        'species': _resolve(path.parent, raw.get('species_file')),
-        'gas_reactions': _resolve(path.parent, raw.get('gas_reactions_file')),
-        'surface_reactions': _resolve(path.parent, raw.get('surface_reactions_file')),
-        'model_files': model_files,
-        'aliases': _resolve(path.parent, raw.get('aliases_file')),
-        'cross_sections_manifest': _resolve(path.parent, raw.get('cross_sections_manifest')),
-    }
-
-
-_MODEL_FILE_BACKENDS = {
-    'electron_impact': {'electron_impact_xsec'},
-    'gas_rate': {'arrhenius', 'constant', 'first_order_loss', 'te_power_law', 'electron_temperature_power_law'},
-    'energy_loss': {'constant_event_loss'},
-    'surface_rate': {'sticking', 'ion_assisted', 'desorption', 'langmuir_hinshelwood'},
-}
-
-
-def _load_rate_models_from_file(path: Path, category: str) -> dict[str, dict[str, Any]]:
-    raw = _load_yaml(path)
-    models = raw.get('rate_models', {}) or {}
-    allowed = _MODEL_FILE_BACKENDS.get(category)
-    if allowed is None:
-        known = ', '.join(sorted(_MODEL_FILE_BACKENDS))
-        raise ValueError(f'unsupported chemistry model_files category {category!r}; expected one of {known}')
-    bad = [
-        (key, str(model.get('backend', '')).lower())
-        for key, model in models.items()
-        if str(model.get('backend', '')).lower() not in allowed
-    ]
-    if bad:
-        formatted = ', '.join(f'{key}:{backend}' for key, backend in bad)
-        allowed_s = ', '.join(sorted(allowed))
-        raise ValueError(
-            f'Model file {path} is declared as {category!r}, but contains unsupported backends '
-            f'{formatted}. Allowed backends: {allowed_s}'
-        )
-    return models
-
-
-def _merge_rate_models(target: dict[str, dict[str, Any]], incoming: dict[str, dict[str, Any]], source: Path) -> None:
-    duplicates = sorted(set(target) & set(incoming))
-    if duplicates:
-        raise ValueError(f'Duplicate rate/energy model keys in {source}: {duplicates}')
-    target.update(incoming)
+    if not path.is_file():
+        raise FileNotFoundError(f'Chemistry manifest entry {label} does not exist: {path}')
+    return path
 
 
 def load_mechanism_bundle(chemistry_source: str | Path) -> MechanismBundle:
@@ -170,29 +99,32 @@ def load_mechanism_bundle(chemistry_source: str | Path) -> MechanismBundle:
     chemistry_source = Path(chemistry_source)
     if not chemistry_source.is_file():
         raise ValueError(f'Chemistry source must be a manifest file: {chemistry_source}')
-    files = _load_chemistry_manifest(chemistry_source)
+    files = load_chemistry_manifest(chemistry_source)
     species_file = files['species']
     gas_reactions_file = files['gas_reactions']
     surface_reactions_file = files['surface_reactions']
     model_files = files['model_files']
-    aliases_file = files['aliases']
     cross_sections_manifest = files['cross_sections_manifest']
+    state_variables_file = files['state_variables']
+    processes_file = files['processes']
 
     species = _load_species(Path(species_file))
     gas_reactions = _load_reactions(Path(gas_reactions_file))
     surface_reactions = _load_reactions(Path(surface_reactions_file))
     rate_models: dict[str, dict[str, Any]] = {}
     for category, model_file in model_files.items():
-        if model_file and Path(model_file).exists():
-            incoming = _load_rate_models_from_file(Path(model_file), category)
-            _merge_rate_models(rate_models, incoming, Path(model_file))
-
-    aliases_yaml = _load_yaml(Path(aliases_file)) if aliases_file and Path(aliases_file).exists() else {}
-    aliases = aliases_yaml.get('aliases', {})
+        model_path = _require_manifest_file(Path(model_file) if model_file else None, f'model_files.{category}')
+        if model_path is None:
+            raise ValueError(f'Chemistry manifest entry model_files.{category} must be a file path')
+        incoming = load_rate_models_from_file(model_path, category)
+        merge_rate_models(rate_models, incoming, model_path)
 
     cross_sections = {}
-    if cross_sections_manifest and Path(cross_sections_manifest).exists():
-        cross_sections = load_cross_sections_manifest(Path(cross_sections_manifest))
+    cross_sections_path = _require_manifest_file(Path(cross_sections_manifest) if cross_sections_manifest else None, 'cross_sections_manifest')
+    if cross_sections_path is not None:
+        cross_sections = load_cross_sections_manifest(cross_sections_path)
+    state_variables = load_state_variables(_require_manifest_file(Path(state_variables_file) if state_variables_file else None, 'extensions.state_variables'))
+    processes = load_processes(_require_manifest_file(Path(processes_file) if processes_file else None, 'extensions.processes'))
 
     return MechanismBundle(
         species=species,
@@ -200,5 +132,6 @@ def load_mechanism_bundle(chemistry_source: str | Path) -> MechanismBundle:
         surface_reactions=surface_reactions,
         rate_models=rate_models,
         cross_sections=cross_sections,
-        aliases=aliases,
+        state_variables=state_variables,
+        processes=processes,
     )

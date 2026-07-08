@@ -1,32 +1,30 @@
-# External Swarm and Rate Tables
+# Swarm Rate Tables
 
-The `rate_table` EEDF backend reads prepared electron-impact rate coefficients
-and transport data. Use external swarm or Boltzmann tools offline, then import
-their results through the HDF5 table format below.
+The `swarm` EEDF backend with `swarm.model_name: table` reads prepared electron-impact rates and
+transport data from HDF5. External swarm/Boltzmann tools should run offline; the
+global model only consumes the generated table.
 
-```text
-cross sections and gas mixture
-  -> external swarm solver
-  -> HDF5 rate/transport table
-  -> rate_table backend
-  -> global model
+## YAML
+
+```yaml
+physics:
+  eedf_backend: swarm
+
+swarm:
+  model_name: table
+  closure: local_field
+  table:
+    file: tables/example_rates.h5
+    lookup: field
+    bounds_policy: clip
 ```
 
-The global model does not call external swarm executables during RHS evaluation.
+`swarm.table.file` is required for `swarm.model_name: table`. Relative paths are resolved under the chemistry
+directory. `lookup` may be `mean_energy` or `field`; when omitted, field tables
+use field lookup when reduced field is available. `bounds_policy` defaults to
+`clip`; set it to `error` to fail on out-of-range lookup.
 
-## Backend Roles
-
-| Backend | Intended use |
-|---|---|
-| `maxwell` | Simple estimates and smoke cases |
-| `boltzmann_2term` | Internal approximate kinetic backend |
-| `swarm` | Replaceable internal wrapper |
-| `rate_table` | Prepared external rate and transport data |
-
-## Current HDF5 Layout
-
-The backend reads `swarm.table.file`. Relative paths are resolved under the
-resolved chemistry directory.
+## HDF5 Layout
 
 ```text
 /
@@ -42,53 +40,34 @@ resolved chemistry directory.
     <cross_section_id>
 ```
 
-The interpolation coordinate is either mean energy or reduced field. Field
-tables use `effective_field_Td` in HDF5. The backend clips lookup coordinates to
-the available table range; production studies should check that operating
-points remain inside the intended range.
+All one-dimensional datasets must have the same length. `grid_column` may be
+`mean_energy_eV` or `effective_field_Td`. Enabled gas-phase
+`electron_impact_xsec` reactions must have matching
+`rate_coefficients/<cross_section_id>` datasets.
 
-During case assembly, enabled gas-phase `electron_impact_xsec` reactions must
-have matching `rate_coefficients/<cross_section_id>` datasets. Missing required
-rates fail fast.
+## Bounds Policy
 
-## YAML Configuration
+- `clip`: clamp lookup coordinates to the table range. This is the current
+  default behavior.
+- `error`: raise `ValueError` when lookup is outside the table range.
+
+The error path reports the zone, lookup mode, value, axis bounds, and table
+path.
+
+## Electron Energy Relaxation
+
+For field lookup, `electron_energy_mode: table_relaxation` relaxes the
+electron-energy state toward the table mean energy:
 
 ```yaml
-physics:
-  eedf_backend: rate_table
-
 swarm:
-  closure: local_field
   table:
-    file: tables/example_rates.h5
-    lookup: field
+    electron_energy_mode: table_relaxation
+    energy_relaxation_time_s: 1.0e-6
 ```
 
-`swarm.table.file` is required for `rate_table`. `swarm.table.lookup` may be
-`mean_energy` or `field`. When omitted, the backend chooses field lookup for
-field-gridded tables when a reduced field is available. `swarm.closure`
-supports `auto`, `mean_energy`, and `local_field`.
-
-No current configuration option selects an extrapolation policy.
-
-## Minimum Data
-
-A useful table should include:
-
-- interpolation grid: mean energy or reduced field
-- electron-impact rate coefficients used by the mechanism
-- mobility
-- diffusion
-- enough nearby metadata to reproduce how the table was generated
-
-The backend keeps only compact table provenance in workflow return values.
-HDF5 attributes are not copied into normal summaries.
-
-## Non-Goals
-
-The `rate_table` backend should not:
-
-- call external executables from the RHS
-- silently replace missing rates with Maxwellian estimates
-- depend on a specific external solver package
-- become a full Boltzmann or Monte Carlo solver
+Treat this as a prescribed table closure, not a detailed electron power-balance
+model. In zones using field-table relaxation, reaction losses, wall-loss
+electron-energy losses, flow energy transport, and absorbed-power electron
+heating are not also applied to the electron-energy RHS. Species, surface, and
+gas-temperature equations still use their configured source terms.

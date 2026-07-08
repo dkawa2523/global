@@ -51,7 +51,6 @@ class Pump:
     pump_id: str
     zone_id: str
     speed_m3_s: float
-    target_pressure_Pa: float | None = None
 
 
 @dataclass

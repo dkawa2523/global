@@ -93,7 +93,7 @@ def build_rate_table_h5(table_dir: Path, output_path: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Build a rate_table HDF5 file from external BOLSIG/rate-table CSV files.')
+    parser = argparse.ArgumentParser(description='Build a table-model HDF5 file from external BOLSIG/rate-table CSV files.')
     parser.add_argument('table_dir', type=Path, help='Directory containing rates.csv, transport.csv, and optional metadata.yaml.')
     parser.add_argument('--output', type=Path, required=True, help='Output HDF5 path.')
     args = parser.parse_args()

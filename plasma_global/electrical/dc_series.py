@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult, ZoneElectricalState
+from plasma_global.electrical.base import (
+    ElectricalBackend,
+    PowerRequest,
+    PowerResult,
+    ZoneElectricalState,
+    add_port_power,
+    iter_power_port_configs,
+    set_zone_max,
+    zone_value_map,
+)
 from plasma_global.electrical.circuit_models import (
     DCSeriesCircuitConfig,
     DCSeriesCircuitModel,
@@ -10,6 +19,10 @@ from plasma_global.electrical.circuit_models import (
     dc_series_config_mapping_at_time,
     waveform_multiplier,
 )
+
+
+def validate_dc_series_port_config(step: Any, _port_id: str, cfg: dict[str, Any], _resolved_paths: Any) -> None:
+    DCSeriesCircuitConfig.from_mapping(dc_series_config_mapping_at_time(cfg, float(step.t_start_s)))
 
 
 class DCSeriesCircuitBackend(ElectricalBackend):
@@ -43,16 +56,13 @@ class DCSeriesCircuitBackend(ElectricalBackend):
         )
 
     def evaluate(self, request: PowerRequest) -> PowerResult:
-        p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        p_zone = zone_value_map(self.chamber)
         p_port: dict[str, float] = {}
-        port_observables: dict[str, ElectricalPortSnapshot] = {}
-        zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        port_observables: dict[str, dict[str, float]] = {}
+        zone_reduced_field = zone_value_map(self.chamber)
         plasma_potential = 0.0
 
-        for port_id, step_cfg in request.recipe_step.power_ports.items():
-            port = self.chamber.power_port_by_id[port_id]
-            cfg = dict(port.parameters or {})
-            cfg.update(step_cfg or {})
+        for port_id, port, cfg in iter_power_port_configs(request):
             zone_id = cfg.get('zone_id') or port.zone_id
             nested_voltage = isinstance(cfg.get('voltage'), dict)
             source_mult = 1.0 if nested_voltage else waveform_multiplier(request.time_s, cfg)
@@ -60,9 +70,14 @@ class DCSeriesCircuitBackend(ElectricalBackend):
             if not nested_voltage:
                 circuit_cfg.source_voltage_V *= source_mult
             solution = self.model.solve(circuit_cfg, self._zone_load(request, zone_id))
-            p_zone[zone_id] = p_zone.get(zone_id, 0.0) + solution.absorbed_power_W
-            p_port[port_id] = solution.absorbed_power_W
-            port_observables[port_id] = ElectricalPortSnapshot({
+            add_port_power(
+                p_zone,
+                p_port,
+                port_id=port_id,
+                zone_id=zone_id,
+                absorbed_power_W=solution.absorbed_power_W,
+            )
+            port_observables[port_id] = {
                 'source_voltage_V': float(solution.source_voltage_V),
                 'gap_voltage_V': float(solution.gap_voltage_V),
                 'current_A': float(solution.current_A),
@@ -73,15 +88,14 @@ class DCSeriesCircuitBackend(ElectricalBackend):
                 'electron_mobility_m2_V_s': float(solution.electron_mobility_m2_V_s),
                 'electric_field_V_m': float(solution.electric_field_V_m),
                 'reduced_field_Td': float(solution.reduced_field_Td),
-            })
-            zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 0.0), solution.reduced_field_Td)
+            }
+            set_zone_max(zone_reduced_field, zone_id, solution.reduced_field_Td)
             plasma_potential = max(plasma_potential, 0.05 * abs(solution.gap_voltage_V))
 
         return PowerResult(
             absorbed_power_W_by_zone=p_zone,
             port_power_W=p_port,
             port_observables=port_observables,
-            self_bias_V=0.0,
             plasma_potential_V=plasma_potential,
             zone_reduced_field_Td=zone_reduced_field,
         )

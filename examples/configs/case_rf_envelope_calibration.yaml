@@ -16,6 +16,7 @@ files:
   output_dir: ../outputs/argon_rf_envelope_calibration
 
 physics:
+  eedf_backend: swarm
   electrical_backend: rf_envelope
   enable_gas_temperature: false
 

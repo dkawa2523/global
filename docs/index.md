@@ -1,12 +1,10 @@
 # Plasma Global Model Docs
 
-This documentation covers the core workflow: configure, validate, run, and embed the global model.
+Short technical docs for configuring, running, and embedding the global model.
 
 - [Architecture](ARCHITECTURE.md)
-- [Extension Guide](EXTENSION_GUIDE.md)
 - [Configuration](CONFIGURATION.md)
-- [Chemistry](CHEMISTRY.md)
-- [Swarm Rate Tables](SWARM_RATE_TABLES.md)
 - [Physics and Numerics](PHYSICS_NUMERICS.md)
+- [Swarm Rate Tables](SWARM_RATE_TABLES.md)
 - [CLI and API](CLI_API.md)
-- [Developer Notes](DEVELOPER.md)
+- [Chemistry](CHEMISTRY.md)

@@ -21,7 +21,7 @@ runtime:
 physics:
   mode: transient
   gas_model: multi_zone_global
-  eedf_backend: swarm
+  eedf_backend: maxwell
   electrical_backend: icp
   integrator: scipy_bdf
   enable_gas_temperature: true
@@ -29,25 +29,6 @@ physics:
   enable_wall_inventory: true
   gas_heating_fraction: 0.15
   wall_relaxation_s_inv: 500.0
-
-swarm:
-  model_name: boltzmann_2term
-  closure: auto
-  mixture_key_species: [Ar, CF4, O2]
-  cache:
-    max_entries: 8
-    fraction_decimals: 3
-  boltzmann_2term:
-    energy_grid:
-      min_eV: 1.0e-3
-      max_eV: 160.0
-      n: 360
-    reduced_field_grid_Td:
-      min: 0.2
-      max: 2500.0
-      n: 48
-    max_shape_iterations: 48
-    max_field_iterations: 42
 
 numerics:
   rtol: 1.0e-6

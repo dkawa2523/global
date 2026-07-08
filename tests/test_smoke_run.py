@@ -10,13 +10,14 @@ from plasma_global.config.loader import load_run_config
 from plasma_global.numerics.solver_base import SolverResult
 from plasma_global.observables.defaults import summarize_solution
 from plasma_global.workflows.runner import run_from_yaml
+from tests.case_helpers import write_case_with_output_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_smoke_case_runs_end_to_end() -> None:
-    result = run_from_yaml(ROOT / 'examples' / 'configs' / 'case_smoke.yaml')
+def test_smoke_case_runs_end_to_end(tmp_path: Path) -> None:
+    result = run_from_yaml(write_case_with_output_dir(tmp_path, ROOT / 'examples' / 'configs' / 'case_smoke.yaml'))
     summary = result['summary']
     final_obs = result['observables'][-1]
     assert summary['success'] is True
@@ -32,6 +33,10 @@ def test_smoke_case_runs_end_to_end() -> None:
     assert summary['steady_state_event_count'] == 0
     assert summary['chemistry_provenance']['cross_sections_with_provenance'] >= 1
     assert result['chemistry_provenance']['cross_sections_with_provenance'] >= 1
+    assert result['backend_metadata']['eedf']['name'] == 'maxwell'
+    assert result['backend_metadata']['eedf']['maturity'] == 'development'
+    assert summary['backend_metadata']['electrical']['name'] == 'icp'
+    assert summary['backend_metadata']['electrical']['maturity'] == 'experimental'
     assert 'observables' not in result['solution'].diagnostics
     assert 'chemistry_provenance' not in result['solution'].diagnostics
     assert Path(result['output_dir'], 'effective_case.yaml').exists()
@@ -64,10 +69,10 @@ def test_summary_only_promotes_allowlisted_final_observables() -> None:
     assert 'final_experimental_numeric_probe' not in summary
 
 
-def test_outputs_diagnostics_budget_flag_defaults_off() -> None:
+def test_output_budgets_flag_defaults_off() -> None:
     run_config = load_run_config(ROOT / 'examples' / 'configs' / 'case_smoke.yaml')
 
-    assert run_config.outputs.diagnostics.budgets is False
+    assert run_config.outputs.budgets.enabled is False
 
 
 def test_solution_h5_keeps_fixed_core_datasets(tmp_path: Path) -> None:

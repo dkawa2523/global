@@ -32,7 +32,6 @@ class EEDFTransport:
 @dataclass
 class EEDFResult:
     rate_coefficients: dict[str, float]
-    d_rate_d_mean_energy_eV: dict[str, float]
     transport: EEDFTransport
     metadata: dict[str, Any] = field(default_factory=dict)
 

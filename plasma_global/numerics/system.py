@@ -6,11 +6,15 @@ from typing import Any
 import numpy as np
 
 from plasma_global.chemistry.models import MechanismBundle
+from plasma_global.coupling.evaluation import PlasmaCouplingEvaluator
 from plasma_global.eedf.base import EEDFBackend
 from plasma_global.electrical.base import ElectricalBackend
-from plasma_global.electrical.coupling_adapter import ElectricalCouplingAdapter
+from plasma_global.numerics.events import scipy_events
+from plasma_global.numerics.labels import state_labels
 from plasma_global.numerics.state_layout import StateLayout
+from plasma_global.numerics.tolerances import solver_atol_vector
 from plasma_global.physics.gas_phase_core import GasPhaseCore
+from plasma_global.physics.process_core import ProcessCore
 from plasma_global.physics.prescribed_electrons import build_prescribed_electron_profile
 from plasma_global.physics.surface_core import SurfaceCore
 from plasma_global.physics.wall_loss import zone_ion_loss_properties
@@ -22,16 +26,23 @@ class GlobalPlasmaSystem:
     """Top-level transient multiphysics coordinator.
 
     This class intentionally keeps the public solver-facing interface small
-    (`initial_state`, `rhs`, `project_state`, `project_trajectory`,
-    `state_labels`, `scipy_events`),
+    (`initial_state`, `rhs`, `project_state`, `project_trajectory`),
     while delegating most domain logic to dedicated components:
 
     - `GasPhaseCore`
     - `SurfaceCore`
-    - `ElectricalCouplingAdapter`
+    - `PlasmaCouplingEvaluator`
 
-    The goal is to preserve compatibility with the existing workflow while
-    making the central coupling point smaller and easier to reason about.
+    The goal is to keep the central coupling point small and easy to reason
+    about.
+
+    Per RHS call, the ordering is:
+
+    1. Select the active recipe step.
+    2. Evaluate algebraic electrical/EEDF coupling.
+    3. Add gas-phase RHS terms.
+    4. Add optional surface and process terms.
+    5. Apply positivity guards.
     """
 
     mechanism: MechanismBundle
@@ -91,7 +102,9 @@ class GlobalPlasmaSystem:
     def _init_components(self) -> None:
         self.gas_core = GasPhaseCore(self)
         self.surface_core = SurfaceCore(self)
-        self.electrical_adapter = ElectricalCouplingAdapter(self)
+        self.process_core = ProcessCore(self)
+        self.coupling_evaluator = PlasmaCouplingEvaluator(self)
+        self.electrical_adapter = self.coupling_evaluator
 
     @property
     def zone_wall_temperature(self) -> dict[str, float]:
@@ -101,6 +114,7 @@ class GlobalPlasmaSystem:
         y0 = self.state_layout.make_state()
         self.gas_core.initialize_state(y0)
         self.surface_core.initialize_state(y0)
+        self.process_core.initialize_state(y0)
         return self.project_state(y0)
 
     def current_step(self, time_s: float) -> Any:
@@ -116,7 +130,8 @@ class GlobalPlasmaSystem:
     def project_state(self, y: np.ndarray) -> np.ndarray:
         y = np.array(y, dtype=float, copy=True)
         y = self.gas_core.project_state(y)
-        return self.surface_core.project_state(y)
+        y = self.surface_core.project_state(y)
+        return self.process_core.project_state(y)
 
     def project_trajectory(self, Y: np.ndarray) -> np.ndarray:
         Y = np.array(Y, dtype=float, copy=True)
@@ -131,6 +146,8 @@ class GlobalPlasmaSystem:
         self.gas_core.apply_rhs(time_s, y, step, coupled, dydt)
         if self.surface_core.enabled:
             self.surface_core.apply_rhs(time_s, y, step, coupled, dydt)
+        if self.process_core.enabled:
+            self.process_core.apply_rhs(time_s, y, step, coupled, dydt)
         self._apply_positivity_guard(y, dydt)
         return dydt
 
@@ -140,24 +157,11 @@ class GlobalPlasmaSystem:
         self.gas_core.clip_negative_rhs(y, dydt)
         if self.surface_core.enabled:
             self.surface_core.clip_negative_rhs(y, dydt)
+        if self.process_core.enabled:
+            self.process_core.clip_negative_rhs(y, dydt)
 
-    def _state_scale(self, y: np.ndarray) -> np.ndarray:
-        scale = np.maximum(np.abs(np.asarray(y, dtype=float)), 1.0)
-        if 'gas_densities' in self.state_layout.slices:
-            gas_slice = self.state_layout.slice('gas_densities')
-            scale[gas_slice] = np.maximum(np.abs(y[gas_slice]), self.floor_density)
-        if 'electron_energy' in self.state_layout.slices:
-            e_slice = self.state_layout.slice('electron_energy')
-            scale[e_slice] = np.maximum(np.abs(y[e_slice]), self.floor_energy)
-        if 'gas_temperature' in self.state_layout.slices:
-            t_slice = self.state_layout.slice('gas_temperature')
-            scale[t_slice] = np.maximum(np.abs(y[t_slice]), 50.0)
-        return scale
-
-    def _relative_rhs_norm_s_inv(self, y: np.ndarray, dydt: np.ndarray) -> float:
-        if not np.all(np.isfinite(y)) or not np.all(np.isfinite(dydt)):
-            return float('inf')
-        return float(np.max(np.abs(dydt) / self._state_scale(y)))
+    def solver_atol_vector(self) -> np.ndarray:
+        return solver_atol_vector(self)
 
     def prescribed_electron_density_by_zone(self, time_s: float) -> dict[str, float] | None:
         if self.prescribed_electron_profile is None:
@@ -165,42 +169,7 @@ class GlobalPlasmaSystem:
         return self.prescribed_electron_profile.density_by_zone(float(time_s), self.zone_ids)
 
     def state_labels(self) -> list[str]:
-        labels: list[str] = [''] * self.state_layout.size
-        for zone_id, mapping in self.state_layout.gas_index.items():
-            for sp_id, idx in mapping.items():
-                labels[idx] = f'n[{zone_id},{sp_id}]'
-        for zone_id, idx in self.state_layout.electron_energy_index.items():
-            labels[idx] = f'We[{zone_id}]'
-        for zone_id, idx in self.state_layout.gas_temperature_index.items():
-            labels[idx] = f'Tg[{zone_id}]'
-        for surface_id, mapping in self.state_layout.surface_index.items():
-            for sp_id, idx in mapping.items():
-                labels[idx] = f'theta[{surface_id},{sp_id}]'
-        for surface_id, mapping in self.state_layout.inventory_index.items():
-            for key, idx in mapping.items():
-                labels[idx] = f'inventory[{surface_id},{key}]'
-        for surface_id, idx in self.state_layout.film_index.items():
-            labels[idx] = f'film[{surface_id}]'
-        return labels
+        return state_labels(self)
 
     def scipy_events(self) -> list[Any]:
-        events_cfg = self.run_config.numerics.events or {}
-        steady_cfg = events_cfg.get('steady_state') if isinstance(events_cfg, dict) else None
-        if not isinstance(steady_cfg, dict) or not bool(steady_cfg.get('enabled', False)):
-            return []
-
-        threshold = max(float(steady_cfg.get('relative_rhs_norm_s_inv', 1.0e-3)), 0.0)
-        min_step_time_s = max(float(steady_cfg.get('min_step_time_s', 0.0)), 0.0)
-
-        def steady_state_event(time_s: float, y: np.ndarray) -> float:
-            step = self.current_step(float(time_s))
-            step_start = float(getattr(step, 't_start_s', time_s))
-            if float(time_s) < step_start + min_step_time_s:
-                return 1.0
-            dydt = self.rhs(float(time_s), y)
-            return self._relative_rhs_norm_s_inv(y, dydt) - threshold
-
-        steady_state_event.terminal = True
-        steady_state_event.direction = -1.0
-        steady_state_event.event_name = 'steady_state'
-        return [steady_state_event]
+        return scipy_events(self)

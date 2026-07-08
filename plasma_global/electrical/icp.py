@@ -3,7 +3,14 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from plasma_global.electrical.base import PowerRequest, PowerResult
+from plasma_global.electrical.base import (
+    PowerRequest,
+    PowerResult,
+    add_zone_value,
+    iter_power_port_configs,
+    set_zone_max,
+    zone_value_map,
+)
 from plasma_global.electrical.circuit_models import waveform_multiplier
 from plasma_global.electrical.ccp import CCPBackend
 
@@ -28,7 +35,7 @@ class ICPBackend(CCPBackend):
         ne = state.electron_density_m3
         te = state.mean_energy_eV
         pressure = state.pressure_Pa
-        f_Hz = float(cfg.get('frequency_Hz') or port.parameters.get('frequency_Hz') or 13.56e6)
+        f_Hz = float(cfg.get('frequency_Hz') or 13.56e6)
         p_in = float(cfg.get('value_W', cfg.get('value', 0.0))) * waveform_multiplier(request.time_s, cfg)
         if p_in <= 0.0:
             return {
@@ -80,54 +87,43 @@ class ICPBackend(CCPBackend):
         }
 
     def evaluate(self, request: PowerRequest) -> PowerResult:
-        p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        p_zone = zone_value_map(self.chamber)
         p_port: dict[str, float] = {}
-        zone_reduced_field: dict[str, float] = {z.zone_id: 25.0 for z in self.chamber.zones}
+        zone_reduced_field = zone_value_map(self.chamber, 25.0)
         source_plasma_potential = 0.0
 
         # First handle ICP / source ports.
-        for port_id, cfg in request.recipe_step.power_ports.items():
-            port = self.chamber.power_port_by_id[port_id]
+        for port_id, port, cfg in iter_power_port_configs(request):
             kind = (port.kind or '').lower()
             if 'icp' not in kind and 'source' not in kind:
                 continue
             detail = self._source_port_result(request, port_id, cfg)
             zone_id = detail['zone_id']
             absorbed = detail['absorbed_power_W']
-            p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed * (1.0 - detail['downstream_fraction'])
+            add_zone_value(p_zone, zone_id, absorbed * (1.0 - detail['downstream_fraction']))
             # Simple downstream deposition of source power into the first outgoing edge.
             downstream_edges = [e for e in self.chamber.edges if e.from_zone == zone_id]
             if downstream_edges:
                 share = absorbed * detail['downstream_fraction'] / len(downstream_edges)
                 for edge in downstream_edges:
-                    p_zone[edge.to_zone] = p_zone.get(edge.to_zone, 0.0) + share
-                    zone_reduced_field[edge.to_zone] = max(zone_reduced_field.get(edge.to_zone, 25.0), 0.65 * detail['effective_field_Td'])
+                    add_zone_value(p_zone, edge.to_zone, share)
+                    set_zone_max(zone_reduced_field, edge.to_zone, 0.65 * detail['effective_field_Td'])
             p_port[port_id] = absorbed
-            zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 25.0), detail['effective_field_Td'])
+            set_zone_max(zone_reduced_field, zone_id, detail['effective_field_Td'])
             source_plasma_potential = max(source_plasma_potential, 5.0 + 0.015 * absorbed + 2.0 * detail['coupling_efficiency'])
 
         # Then reuse CCP handling for any bias ports or generic direct-power ports.
-        bias_only_cfg = type('StepProxy', (), {'power_ports': {}})()
-        bias_only_cfg.power_ports = {}
-        for port_id, cfg in request.recipe_step.power_ports.items():
-            port = self.chamber.power_port_by_id[port_id]
+        bias_power_ports: dict[str, Any] = {}
+        for port_id, port, cfg in iter_power_port_configs(request):
             kind = (port.kind or '').lower()
             if 'bias' in kind or kind.startswith('ccp') or ('icp' not in kind and 'source' not in kind):
-                bias_only_cfg.power_ports[port_id] = cfg
-        bias_result = super().evaluate(
-            PowerRequest(
-                time_s=request.time_s,
-                state_vector=request.state_vector,
-                recipe_step=bias_only_cfg,
-                chamber=request.chamber,
-                zone_state=request.zone_state,
-            )
-        )
+                bias_power_ports[port_id] = cfg
+        bias_result = super().evaluate(request.with_power_ports(bias_power_ports))
         for zone_id, val in bias_result.absorbed_power_W_by_zone.items():
-            p_zone[zone_id] = p_zone.get(zone_id, 0.0) + val
+            add_zone_value(p_zone, zone_id, val)
         p_port.update(bias_result.port_power_W)
         for zone_id, red in bias_result.zone_reduced_field_Td.items():
-            zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 0.0), float(red))
+            set_zone_max(zone_reduced_field, zone_id, red)
 
         self_bias = bias_result.self_bias_V
         plasma_potential = max(source_plasma_potential, bias_result.plasma_potential_V)

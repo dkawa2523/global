@@ -18,7 +18,7 @@ files:
   output_dir: ../outputs/zdplaskin_example2_surrogate
 
 physics:
-  eedf_backend: rate_table
+  eedf_backend: swarm
   electrical_backend: dc_series_circuit
   enable_gas_temperature: false
   enable_surface_coverages: false
@@ -40,7 +40,7 @@ numerics:
   max_step: 1.0e-6
 
 outputs:
-  diagnostics:
-    budgets: true
+  budgets:
+    enabled: true
   plots:
     enabled: false

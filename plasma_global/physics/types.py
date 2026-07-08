@@ -56,18 +56,11 @@ class CompiledSurfaceReaction:
 
 
 @dataclass
-class SurfaceRateEvaluation:
-    rate_m2_s: float
-
-
-@dataclass
 class SurfaceRateContext:
     reaction: CompiledSurfaceReaction
     gas_row: np.ndarray
     gas_temperature_K: float
     state: np.ndarray
-    step: Any
-    coupled: CoupledPlasmaEvaluation
     surface_temperature_K: float
     ion_energy_eV: float
     positive_ion_density_m3: float

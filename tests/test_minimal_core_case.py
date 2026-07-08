@@ -6,7 +6,7 @@ from textwrap import dedent
 import numpy as np
 import pytest
 
-from plasma_global.workflows.context import build_case, load_case_from_yaml
+from plasma_global import build_case, load_case_from_yaml
 from plasma_global.workflows import outputs as workflow_outputs
 from plasma_global.workflows.runner import run_from_yaml
 from plasma_global.workflows.solve import solve_built_case
@@ -174,3 +174,37 @@ def test_run_with_all_file_outputs_disabled_skips_observable_postprocessing(tmp_
     assert result['summary']['success'] is True
     assert result['observables'] == []
     assert not (tmp_path / 'outputs').exists()
+
+
+def test_summary_only_uses_final_observable_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    case_path = _write_minimal_case(tmp_path)
+    case_path.write_text(
+        case_path.read_text(encoding='utf-8').replace('summary_yaml: false', 'summary_yaml: true'),
+        encoding='utf-8',
+    )
+
+    def _unexpected_observables(*_args, **_kwargs):
+        raise AssertionError('summary-only output should not compute full observables')
+
+    records: list[float] = []
+
+    def _final_record(_system, time_s, _state):
+        records.append(float(time_s))
+        return {
+            'time_s': float(time_s),
+            'total_absorbed_power_W': 0.0,
+            'electron_density_m3': 1.0,
+            'mean_electron_energy_eV': 1.0,
+        }
+
+    monkeypatch.setattr(workflow_outputs, 'compute_observables', _unexpected_observables)
+    monkeypatch.setattr(workflow_outputs, 'compute_observable_record', _final_record)
+
+    result = run_from_yaml(case_path)
+
+    assert records == [pytest.approx(result['solution'].t[-1])]
+    assert result['observables'] == []
+    assert result['summary']['final_total_absorbed_power_W'] == pytest.approx(0.0)
+    assert result['summary']['final_electron_density_m3'] == pytest.approx(1.0)
+    assert result['summary']['final_mean_electron_energy_eV'] == pytest.approx(1.0)
+    assert (tmp_path / 'outputs' / 'summary.yaml').exists()

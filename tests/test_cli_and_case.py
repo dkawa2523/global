@@ -6,8 +6,9 @@ import pytest
 import yaml
 
 from plasma_global.cli import main
-from plasma_global.workflows.context import build_case, load_case_from_yaml
-from plasma_global.workflows.registries import EEDF_REGISTRY, ELECTRICAL_REGISTRY
+from plasma_global import build_case, load_case_from_yaml
+from plasma_global.eedf.registry import EEDF_REGISTRY
+from plasma_global.electrical.registry import ELECTRICAL_REGISTRY
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,17 +17,22 @@ SMOKE_CASE = ROOT / 'examples' / 'configs' / 'case_smoke.yaml'
 
 def test_smoke_case_validates() -> None:
     loaded = load_case_from_yaml(SMOKE_CASE)
-    assert loaded.run_config.case.name == 'smoke_swarm'
+    assert loaded.run_config.case.name == 'smoke_maxwell'
     assert not any(msg['level'] == 'ERROR' for msg in loaded.validation_messages)
 
 
-def test_backend_catalog_exposes_descriptions() -> None:
+def test_backend_registries_expose_descriptions() -> None:
     details = EEDF_REGISTRY.details()
-    assert 'description' in details['boltzmann_2term']
-    assert 'Boltzmann' in details['boltzmann_2term']['description']
+    assert set(details) == {'maxwell', 'swarm'}
+    assert 'description' in details['swarm']
+    assert 'swarm.model_name' in details['swarm']['description']
+    assert details['swarm']['maturity'] == 'configuration_dependent'
+    assert 'Prepared HDF5' in details['swarm']['intended_use']
+    assert 'approximate' in details['swarm']['caveat']
     electrical = ELECTRICAL_REGISTRY.details()
     assert 'description' in electrical['dc_series_circuit']
     assert 'ballast-resistor' in electrical['dc_series_circuit']['description']
+    assert electrical['external_circuit_table']['maturity'] == 'data_driven'
 
 
 def test_state_layout_labels_are_stable() -> None:
@@ -46,12 +52,12 @@ def test_cli_validate_returns_success() -> None:
     assert main(['validate', str(SMOKE_CASE)]) == 0
 
 
-def test_legacy_run_yaml_shape_is_rejected(tmp_path: Path) -> None:
-    legacy = tmp_path / 'run.yaml'
-    legacy.write_text(
+def test_schema_v1_run_yaml_shape_is_rejected(tmp_path: Path) -> None:
+    case_path = tmp_path / 'run.yaml'
+    case_path.write_text(
         yaml.safe_dump(
             {
-                'project': {'name': 'legacy_case'},
+                'project': {'name': 'schema_v1_case'},
                 'paths': {
                     'chamber_file': 'chamber.yaml',
                     'recipe_file': 'recipe.yaml',
@@ -64,7 +70,7 @@ def test_legacy_run_yaml_shape_is_rejected(tmp_path: Path) -> None:
         encoding='utf-8',
     )
     with pytest.raises(ValueError, match='Unsupported configuration schema'):
-        load_case_from_yaml(legacy)
+        load_case_from_yaml(case_path)
 
 
 def test_schema_version_one_is_validation_error(tmp_path: Path) -> None:

@@ -38,4 +38,4 @@ def test_run_from_yaml_fails_fast_on_solver_failure(monkeypatch: pytest.MonkeyPa
     )
 
     with pytest.raises(RuntimeError, match="bad_step.*forced failure"):
-        runner.run_from_yaml('unused.yaml')
+        runner.run_from_yaml('case.yaml')

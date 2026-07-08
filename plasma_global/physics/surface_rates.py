@@ -6,7 +6,10 @@ from typing import Any
 import numpy as np
 
 from plasma_global.chemistry.models import E_CHARGE, K_B
-from plasma_global.physics.types import CompiledSurfaceReaction, SurfaceRateContext, SurfaceRateEvaluation
+from plasma_global.chemistry.rate_tables import lookup_table_1d
+from plasma_global.chemistry.rate_model_schema import SURFACE_RATE_BACKEND_NAMES
+from plasma_global.physics.surface_coverage import surface_coverage_factor
+from plasma_global.physics.types import CompiledSurfaceReaction, SurfaceRateContext
 
 
 @dataclass
@@ -17,11 +20,17 @@ class _SurfaceRateAccumulator:
     used_surface_species: set[str] = field(default_factory=set)
 
     def add_gas_power(self, idx: int, power_exp: float) -> None:
-        n = max(float(self.context.gas_row[idx]), self.core.system.floor_density)
+        n = max(float(self.context.gas_row[idx]), 0.0)
+        if n <= 0.0 and power_exp > 0.0:
+            self.rate = 0.0
+            return
         self.rate *= n ** power_exp
 
     def add_surface_power(self, state_idx: int, power_exp: float) -> None:
-        theta = max(float(np.clip(self.context.state[state_idx], 0.0, 1.0)), 1.0e-12)
+        theta = float(np.clip(self.context.state[state_idx], 0.0, 1.0))
+        if theta <= 0.0 and power_exp > 0.0:
+            self.rate = 0.0
+            return
         self.rate *= theta ** power_exp
 
     def add_surface_reactants(self, reactants: list[tuple[int, float, str]]) -> None:
@@ -29,35 +38,8 @@ class _SurfaceRateAccumulator:
             if species_id not in self.used_surface_species:
                 self.add_surface_power(state_idx, nu)
 
-    def result(self) -> SurfaceRateEvaluation:
-        return SurfaceRateEvaluation(rate_m2_s=float(self.rate))
-
-
-def surface_coverage_factor(core: Any, cfg: dict[str, Any] | None, surface_id: str, y: np.ndarray) -> tuple[float, set[str]]:
-    sys = core.system
-    if not cfg:
-        return 1.0, set()
-    kind = str(cfg.get('kind', 'constant')).lower()
-    if kind == 'constant':
-        return 1.0, set()
-    if kind in {'site_blocking', 'species_power'}:
-        site_species = str(cfg.get('site_species') or cfg.get('species'))
-        exponent = float(cfg.get('exponent', 1.0))
-        idx = sys.state_layout.surface_index[surface_id][site_species]
-        theta = float(np.clip(y[idx], 0.0, 1.0))
-        return max(theta, 1.0e-12) ** exponent, {site_species}
-    if kind == 'logistic_switch':
-        species = str(cfg['species'])
-        midpoint = float(cfg.get('midpoint', 0.5))
-        sharpness = float(cfg.get('sharpness', 12.0))
-        low = float(cfg.get('low', 0.0))
-        high = float(cfg.get('high', 1.0))
-        idx = sys.state_layout.surface_index[surface_id][species]
-        theta = float(np.clip(y[idx], 0.0, 1.0))
-        logistic = 1.0 / (1.0 + np.exp(-sharpness * (theta - midpoint)))
-        factor = low + (high - low) * logistic
-        return float(factor), {species}
-    raise NotImplementedError(f'Unsupported coverage factor kind: {kind}')
+    def result(self) -> float:
+        return float(self.rate)
 
 
 def surface_thermal_prefactor(model: dict[str, Any], surface_temperature_K: float) -> float:
@@ -78,19 +60,14 @@ def surface_energy_factor(model: dict[str, Any], ion_energy_eV: float) -> float:
     return ((e - threshold) / max(ref - threshold, 1.0e-6)) ** exponent
 
 
-def evaluate_surface_rate(core: Any, context: SurfaceRateContext) -> SurfaceRateEvaluation:
+def evaluate_surface_rate(core: Any, context: SurfaceRateContext) -> float:
     acc = _SurfaceRateAccumulator(core, context)
     _apply_common_factors(acc)
     backend = str(context.reaction.rate_model.get('backend', '')).lower()
-    if backend in {'sticking', 'eley_rideal'}:
-        return _sticking_surface_rate(acc)
-    if backend == 'ion_assisted':
-        return _ion_assisted_surface_rate(acc)
-    if backend == 'desorption':
-        return _desorption_surface_rate(acc)
-    if backend == 'langmuir_hinshelwood':
-        return _langmuir_hinshelwood_surface_rate(acc)
-    raise NotImplementedError(f'Unsupported surface rate backend: {backend}')
+    evaluator = SURFACE_RATE_BACKENDS.get(backend)
+    if evaluator is None:
+        raise NotImplementedError(f'Unsupported surface rate backend: {backend}')
+    return evaluator(acc)
 
 
 def _apply_common_factors(acc: _SurfaceRateAccumulator) -> None:
@@ -102,11 +79,11 @@ def _apply_common_factors(acc: _SurfaceRateAccumulator) -> None:
     acc.used_surface_species |= cov_used
 
 
-def _sticking_surface_rate(acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+def _sticking_surface_rate(acc: _SurfaceRateAccumulator) -> float:
     rxn = acc.context.reaction
     primary = rxn.gas_reactants[0] if rxn.gas_reactants else None
     if primary is None:
-        return SurfaceRateEvaluation(0.0)
+        return 0.0
     idx, _nu, _sp_id = primary
     if acc.core.system.gas_species[idx].charge > 0:
         _apply_ion_sticking_primary(acc, idx)
@@ -120,10 +97,13 @@ def _sticking_surface_rate(acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluatio
 
 def _apply_ion_sticking_primary(acc: _SurfaceRateAccumulator, idx: int) -> None:
     model = acc.context.reaction.rate_model
-    n_i = max(float(acc.context.gas_row[idx]), acc.core.system.floor_density)
-    frac_i = min(max(n_i / max(acc.context.positive_ion_density_m3, acc.core.system.floor_density), 0.0), 1.0)
-    acc.add_gas_power(idx, 1.0)
-    acc.rate *= acc.context.ion_flux_m2_s * frac_i / n_i
+    n_i = max(float(acc.context.gas_row[idx]), 0.0)
+    n_pos = max(float(acc.context.positive_ion_density_m3), 0.0)
+    if n_i <= 0.0 or n_pos <= 0.0:
+        acc.rate = 0.0
+        return
+    frac_i = min(max(n_i / n_pos, 0.0), 1.0)
+    acc.rate *= acc.context.ion_flux_m2_s * frac_i
     acc.rate *= surface_energy_factor(model, acc.context.ion_energy_eV)
     acc.rate *= float(model.get('sticking_value', model.get('yield_value', 1.0)))
 
@@ -137,24 +117,43 @@ def _apply_neutral_sticking_primary(acc: _SurfaceRateAccumulator, idx: int) -> N
     acc.add_gas_power(idx, 1.0)
 
 
-def _ion_assisted_surface_rate(acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+def _ion_assisted_surface_rate(acc: _SurfaceRateAccumulator) -> float:
     rxn = acc.context.reaction
     primary = _primary_ion_reactant(acc.core, rxn) or (rxn.gas_reactants[0] if rxn.gas_reactants else None)
     if primary is None:
-        return SurfaceRateEvaluation(0.0)
+        return 0.0
     idx, _nu, _sp_id = primary
     energy_factor = surface_energy_factor(rxn.rate_model, acc.context.ion_energy_eV)
     if energy_factor <= 0.0:
-        return SurfaceRateEvaluation(0.0)
-    n_i = max(float(acc.context.gas_row[idx]), acc.core.system.floor_density)
-    frac_i = min(max(n_i / max(acc.context.positive_ion_density_m3, acc.core.system.floor_density), 0.0), 1.0)
+        return 0.0
     yield_base = float(rxn.rate_model.get('yield_value', rxn.rate_model.get('yield_at_ref', rxn.rate_model.get('sticking_value', 1.0))))
-    acc.rate *= acc.context.ion_flux_m2_s * frac_i * yield_base * energy_factor
-    acc.add_gas_power(idx, 1.0)
-    acc.rate /= n_i
+    return _apply_ion_flux_yield(acc, idx, yield_base * energy_factor)
+
+
+def _ion_yield_table_surface_rate(acc: _SurfaceRateAccumulator) -> float:
+    rxn = acc.context.reaction
+    primary = _primary_ion_reactant(acc.core, rxn) or (rxn.gas_reactants[0] if rxn.gas_reactants else None)
+    if primary is None:
+        return 0.0
+    idx, _nu, _sp_id = primary
+    yield_value = lookup_table_1d(rxn.rate_model, acc.context.ion_energy_eV)
+    if yield_value <= 0.0:
+        return 0.0
+    return _apply_ion_flux_yield(acc, idx, yield_value)
+
+
+def _apply_ion_flux_yield(acc: _SurfaceRateAccumulator, ion_idx: int, yield_value: float) -> float:
+    rxn = acc.context.reaction
+    n_i = max(float(acc.context.gas_row[ion_idx]), 0.0)
+    n_pos = max(float(acc.context.positive_ion_density_m3), 0.0)
+    if n_i <= 0.0 or n_pos <= 0.0:
+        return 0.0
+    frac_i = min(max(n_i / n_pos, 0.0), 1.0)
+    acc.rate *= acc.context.ion_flux_m2_s * frac_i * yield_value
     acc.add_surface_reactants(rxn.surface_reactants)
-    for idx2, nu, _sp in rxn.gas_reactants[1:]:
-        acc.add_gas_power(idx2, nu)
+    for idx2, nu, _sp in rxn.gas_reactants:
+        if idx2 != ion_idx:
+            acc.add_gas_power(idx2, nu)
     return acc.result()
 
 
@@ -165,17 +164,30 @@ def _primary_ion_reactant(core: Any, rxn: CompiledSurfaceReaction) -> tuple[int,
     return None
 
 
-def _desorption_surface_rate(acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+def _desorption_surface_rate(acc: _SurfaceRateAccumulator) -> float:
     rxn = acc.context.reaction
     acc.rate *= float(rxn.rate_model.get('nu0_s_inv', rxn.rate_model.get('prefactor_s_inv', rxn.rate_model.get('A', 0.0)))) * rxn.site_density_m2
     acc.add_surface_reactants(rxn.surface_reactants)
     return acc.result()
 
 
-def _langmuir_hinshelwood_surface_rate(acc: _SurfaceRateAccumulator) -> SurfaceRateEvaluation:
+def _langmuir_hinshelwood_surface_rate(acc: _SurfaceRateAccumulator) -> float:
     rxn = acc.context.reaction
     acc.rate *= float(rxn.rate_model.get('A_m2_s_inv', rxn.rate_model.get('A', 0.0))) * rxn.site_density_m2
     acc.add_surface_reactants(rxn.surface_reactants)
     for idx, nu, _sp in rxn.gas_reactants:
         acc.add_gas_power(idx, nu)
     return acc.result()
+
+
+SURFACE_RATE_BACKENDS = {
+    'sticking': _sticking_surface_rate,
+    'eley_rideal': _sticking_surface_rate,
+    'ion_assisted': _ion_assisted_surface_rate,
+    'ion_yield_table': _ion_yield_table_surface_rate,
+    'desorption': _desorption_surface_rate,
+    'langmuir_hinshelwood': _langmuir_hinshelwood_surface_rate,
+}
+
+if set(SURFACE_RATE_BACKENDS) != SURFACE_RATE_BACKEND_NAMES:
+    raise RuntimeError('surface rate backend registry is out of sync with chemistry rate model schema')

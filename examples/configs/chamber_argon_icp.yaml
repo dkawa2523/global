@@ -72,7 +72,6 @@ pumps:
   - pump_id: main_pump
     zone_id: process
     speed_m3_s: 0.030
-    target_pressure_Pa: 8.0
 
 power_ports:
   - port_id: source_rf

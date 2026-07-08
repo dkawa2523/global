@@ -3,7 +3,15 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult
+from plasma_global.electrical.base import (
+    ElectricalBackend,
+    PowerRequest,
+    PowerResult,
+    add_port_power,
+    iter_power_port_configs,
+    set_zone_max,
+    zone_value_map,
+)
 from plasma_global.electrical.circuit_models import first_present, waveform_multiplier
 
 
@@ -39,6 +47,10 @@ def validate_rf_envelope_port(cfg: dict[str, Any]) -> None:
     field_coeff = cfg.get('reduced_field_per_sqrt_W_Td', cfg.get('reduced_field_per_sqrt_W'))
     if field_coeff is not None and float(field_coeff) < 0.0:
         raise ValueError('rf_envelope reduced_field_per_sqrt_W_Td must be non-negative.')
+
+
+def validate_rf_envelope_port_config(_step: Any, _port_id: str, cfg: dict[str, Any], _resolved_paths: Any) -> None:
+    validate_rf_envelope_port(cfg)
 
 
 def _role(port: Any, cfg: dict[str, Any]) -> str:
@@ -77,17 +89,14 @@ class RFEnvelopeBackend(ElectricalBackend):
     """Cycle-averaged HF/LF power and bias envelope backend."""
 
     def evaluate(self, request: PowerRequest) -> PowerResult:
-        p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        p_zone = zone_value_map(self.chamber)
         p_port: dict[str, float] = {}
-        port_observables: dict[str, ElectricalPortSnapshot] = {}
-        zone_reduced_field: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        port_observables: dict[str, dict[str, float]] = {}
+        zone_reduced_field = zone_value_map(self.chamber)
         bias_terms: list[tuple[float, float]] = []
         plasma_terms: list[tuple[float, float]] = []
 
-        for port_id, step_cfg in request.recipe_step.power_ports.items():
-            port = self.chamber.power_port_by_id[port_id]
-            cfg = dict(port.parameters or {})
-            cfg.update(step_cfg or {})
+        for port_id, port, cfg in iter_power_port_configs(request):
             validate_rf_envelope_port(cfg)
             zone_id = str(cfg.get('zone_id') or port.zone_id)
             role = _role(port, cfg)
@@ -101,7 +110,7 @@ class RFEnvelopeBackend(ElectricalBackend):
             base_field = float(cfg.get('base_reduced_field_Td', cfg.get('reduced_field_Td', 0.0)))
             field_coeff = float(cfg.get('reduced_field_per_sqrt_W_Td', cfg.get('reduced_field_per_sqrt_W', 0.0)))
             reduced_field = max(base_field * mult + field_coeff * math.sqrt(absorbed), 0.0)
-            zone_reduced_field[zone_id] = max(zone_reduced_field.get(zone_id, 0.0), reduced_field)
+            set_zone_max(zone_reduced_field, zone_id, reduced_field)
 
             self_bias = 0.0
             if 'bias' in role or 'lf' in role:
@@ -115,14 +124,13 @@ class RFEnvelopeBackend(ElectricalBackend):
             if plasma_potential > 0.0:
                 plasma_terms.append((max(absorbed, 1.0e-30), plasma_potential))
 
-            p_zone[zone_id] = p_zone.get(zone_id, 0.0) + absorbed
-            p_port[port_id] = absorbed
-            port_observables[port_id] = ElectricalPortSnapshot({
+            add_port_power(p_zone, p_port, port_id=port_id, zone_id=zone_id, absorbed_power_W=absorbed)
+            port_observables[port_id] = {
                 'voltage_rms_V': float(voltage_rms),
                 'absorbed_power_W': float(absorbed),
                 'delivered_power_W': float(delivered),
                 'reduced_field_Td': float(reduced_field),
-            })
+            }
 
         total_bias_weight = sum(w for w, _ in bias_terms)
         self_bias_V = sum(w * v for w, v in bias_terms) / max(total_bias_weight, 1.0e-30) if bias_terms else 0.0

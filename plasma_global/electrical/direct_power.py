@@ -2,27 +2,33 @@ from __future__ import annotations
 
 import math
 
-from plasma_global.electrical.base import ElectricalBackend, ElectricalPortSnapshot, PowerRequest, PowerResult
+from plasma_global.electrical.base import (
+    ElectricalBackend,
+    PowerRequest,
+    PowerResult,
+    add_port_power,
+    iter_power_port_configs,
+    zone_value_map,
+)
 from plasma_global.electrical.circuit_models import waveform_multiplier
 
 
 class DirectPowerBackend(ElectricalBackend):
     def evaluate(self, request: PowerRequest) -> PowerResult:
-        p_zone: dict[str, float] = {z.zone_id: 0.0 for z in self.chamber.zones}
+        p_zone = zone_value_map(self.chamber)
         p_port: dict[str, float] = {}
-        port_observables: dict[str, ElectricalPortSnapshot] = {}
+        port_observables: dict[str, dict[str, float]] = {}
         bias_power = 0.0
-        for port_id, cfg in request.recipe_step.power_ports.items():
-            zone_id = cfg.get('zone_id') or self.chamber.power_port_by_id[port_id].zone_id
+        for port_id, port, cfg in iter_power_port_configs(request):
+            zone_id = cfg.get('zone_id') or port.zone_id
             base = float(cfg.get('value_W', 0.0))
             value = base * waveform_multiplier(request.time_s, cfg)
-            p_zone[zone_id] = p_zone.get(zone_id, 0.0) + value
-            p_port[port_id] = value
-            port_observables[port_id] = ElectricalPortSnapshot({
+            add_port_power(p_zone, p_port, port_id=port_id, zone_id=zone_id, absorbed_power_W=value)
+            port_observables[port_id] = {
                 'absorbed_power_W': float(value),
                 'delivered_power_W': float(value),
-            })
-            if 'bias' in port_id.lower() or 'ccp' in str(self.chamber.power_port_by_id[port_id].kind).lower():
+            }
+            if 'bias' in port_id.lower() or 'ccp' in str(port.kind).lower():
                 bias_power += value
         self_bias = -math.sqrt(max(bias_power, 0.0)) * 4.0
         plasma_potential = max(p_zone.values()) * 0.05 if p_zone else 0.0

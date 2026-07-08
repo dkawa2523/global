@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plasma_global.workflows.context import build_case, load_case_from_yaml
+from plasma_global import build_case, load_case_from_yaml
 from plasma_global.workflows.runner import run_from_yaml
+from tests.case_helpers import write_case_with_output_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,8 +35,8 @@ def test_crane_two_reaction_argon_loads_explicit_initial_densities() -> None:
     assert system.surface_core.surface_reactions == []
 
 
-def test_crane_two_reaction_argon_matches_committed_crane_output() -> None:
-    result = run_from_yaml(CRANE_CASE)
+def test_crane_two_reaction_argon_matches_committed_crane_output(tmp_path: Path) -> None:
+    result = run_from_yaml(write_case_with_output_dir(tmp_path, CRANE_CASE))
     labels = result['system'].state_labels()
     final_state = {
         label: result['solution'].y[idx, -1]
