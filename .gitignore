@@ -3,6 +3,7 @@ __pycache__/
 *$py.class
 
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 site/
@@ -13,12 +14,14 @@ examples/external/loki_o2_dc_glow_*report.yaml
 examples/external/zdplaskin_examples_inventory.yaml
 examples/external/external_tools.local.yaml
 examples/external/external_tools.yaml
-tools/external_benchmarks/*_report.yaml
-tools/external_benchmarks/last_report*.yaml
+tools/benchmarks/*_report.yaml
+tools/benchmarks/last_report*.yaml
 mkdocs-serve*.log
 mkdocs-ja-serve*.log
 
 .venv/
+.uv-cache/
+*.egg-info/
 venv/
 env/
 

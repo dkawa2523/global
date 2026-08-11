@@ -1,0 +1,48 @@
+schema_version: 2
+captured_at: 2026-08-09
+purpose: migration comparison only; physically corrected v3 results need not match
+environment:
+  python: "3.12"
+  platform: Windows
+capture_completeness:
+  legacy_test_outcome: recorded
+  final_case_values: recorded
+  single_run_elapsed_time: recorded_orientation_only
+  conservation_balances: not_recorded
+  external_table_read_counts: not_recorded
+  rhs_evaluation_timing: not_recorded
+legacy_suite:
+  passed: 126
+  deselected: 2
+  coverage_percent: 90
+cases:
+  crane_two_reaction_argon:
+    elapsed_s: 0.1838
+    nfev: 1610
+    saved_points: 200
+    final:
+      Ar_m3: 2.4999978264774107e+25
+      Ar_plus_m3: 2.1735225939053027e+19
+  smoke:
+    elapsed_s: 0.2172
+    nfev: 387
+    saved_points: 200
+    final:
+      electron_density_m3: 2.15639258571301e+14
+      mean_electron_energy_eV: 12.43401195200089
+      total_absorbed_power_W: 55.00547396264927
+  zdplaskin_example2:
+    elapsed_s: 0.9019
+    nfev: 3510
+    saved_points: 200
+    final:
+      Ar_star_m3: 2.0573522088593542e+17
+      Ar_plus_m3: 2.138665320614347e+15
+      Ar2_plus_m3: 3.1982488494458426e+17
+      EoverN_Td: 2.5743262642605647
+      absorbed_power_W: 0.3204667388402873
+notes:
+  - Legacy output used an implicit fixed 200-point sampling grid.
+  - Legacy smoke included temperature, coverage, wall inventory, and film states.
+  - Timings are single-run orientation values, not performance acceptance thresholds.
+  - Conservation balances, external-table read counts, and isolated RHS timing were not captured before removal of the v2 runtime.

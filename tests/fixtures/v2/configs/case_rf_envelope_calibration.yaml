@@ -1,0 +1,37 @@
+include: base_case.yaml
+
+case:
+  name: experimental_argon_rf_envelope_calibration
+  description: >
+    Experimental pure-Ar RF-envelope calibration case for tuning
+    coupling_efficiency, effective_impedance_ohm, and self_bias_fraction. Its
+    empirical HF/LF response is intended for calibration and qualitative
+    trends, not uncalibrated production accuracy.
+  tags: [argon, rf_envelope, calibration, hf_lf, experimental]
+
+files:
+  chamber: chamber_argon_icp.yaml
+  recipe: recipe_rf_envelope_calibration.yaml
+  chemistry:
+    manifest: ../chemistry_argon_lxcat/chemistry_manifest.yaml
+  output_dir: ../outputs/argon_rf_envelope_calibration
+
+physics:
+  eedf_backend: swarm
+  electrical_backend: rf_envelope
+  enable_gas_temperature: false
+
+swarm:
+  model_name: boltzmann_2term
+  closure: auto
+  mixture_key_species: [Ar]
+  cache:
+    max_entries: 4
+    fraction_decimals: 4
+
+numerics:
+  max_step: 2.0e-6
+
+outputs:
+  plots:
+    enabled: false

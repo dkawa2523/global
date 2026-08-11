@@ -9,22 +9,27 @@ description = "YAML-driven low-pressure plasma global model research platform"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "h5py>=3.10",
   "numpy>=1.26",
+  "pydantic>=2.8",
   "scipy>=1.11",
   "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
-io = ["h5py>=3.10"]
 plot = ["matplotlib>=3.7"]
 docs = ["mkdocs>=1.6"]
-dev = ["pytest>=8.0", "ruff>=0.5", "h5py>=3.10"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [project.scripts]
 plasma-global = "plasma_global.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["plasma_global*"]
+include = ["plasma_global*", "tools*"]
+exclude = ["*.assets", "*.assets.*", "*.__pycache__", "*.__pycache__.*"]
+
+[tool.setuptools]
+include-package-data = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -36,6 +41,19 @@ markers = [
 [tool.deptry]
 optional_dependencies_dev_groups = ["dev", "docs"]
 
+[tool.ruff]
+extend-exclude = [
+  ".pytest_cache",
+  ".ruff_cache",
+  ".uv-cache",
+  ".venv",
+  "**/__pycache__",
+  "*.egg-info",
+  "build",
+  "dist",
+  "htmlcov",
+  "site",
+]
+
 [tool.ruff.lint.per-file-ignores]
-"scripts/*.py" = ["E402"]
-"tools/external_benchmarks/*.py" = ["E402"]
+"tools/benchmarks/*.py" = ["E402"]

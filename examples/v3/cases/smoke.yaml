@@ -1,0 +1,196 @@
+schema_version: 3
+case:
+  name: experimental_smoke_maxwell
+  description: 'Tail-safe short integration stress case exercising experimental ICP/CCP
+    and extension state together with configuration and mechanism loading. It is a
+    smoke test, not a production-accuracy example.
+
+    '
+chemistry:
+  manifest: ../chemistry/demo/chemistry.yaml
+reactor:
+  chamber_id: demo_icp_bias_reactor
+  description: 'Example reactor with source/process zones, wafer surface, wall surfaces,
+    one inlet, one pump, and two power ports. All unit-bearing keys include units
+    in the key name.
+
+    '
+  zones:
+  - zone_id: source
+    description: remote or upstream source zone
+    volume_m3: 0.01
+    pressure_Pa: 8.0
+    gas_temperature_K: 350.0
+    initial_densities_m3:
+      Ar: 1.3569968179934276e+21
+      CF4: 2.7139936359868554e+20
+      O2: 2.713993635986855e+19
+      Ar_plus: 1.0e+13
+      CF3: 0.0
+      F: 0.0
+      F2: 0.0
+      O: 0.0
+      O_minus: 0.0
+    initial_mean_energy_eV: 3.0
+  - zone_id: process
+    description: main wafer process zone
+    volume_m3: 0.03
+    pressure_Pa: 8.0
+    gas_temperature_K: 340.0
+    initial_densities_m3:
+      Ar: 1.3969084891108813e+21
+      CF4: 2.7938169782217625e+20
+      O2: 2.7938169782217626e+19
+      Ar_plus: 1.0e+13
+      CF3: 0.0
+      F: 0.0
+      F2: 0.0
+      O: 0.0
+      O_minus: 0.0
+    initial_mean_energy_eV: 3.0
+  edges:
+  - edge_id: source_to_process
+    from_zone: source
+    to_zone: process
+    conductance_m3_s: 0.02
+  surfaces:
+  - surface_id: wafer
+    zone_id: process
+    area_m2: 0.0314
+    temperature_K: 320.0
+    site_density_m2: 5.0e+18
+    initial_coverages:
+      wafer:F*: 0.0
+    wall_transport:
+      kind: bohm
+      h_factor: 1.0
+      min_h_factor: 0.02
+      max_h_factor: 1.0
+      ion_neutral_cross_section_m2: 1.0e-18
+  - surface_id: grounded_wall
+    zone_id: process
+    area_m2: 0.45
+    temperature_K: 330.0
+    site_density_m2: 3.0e+18
+    initial_coverages:
+      wall:F*: 0.0
+    wall_transport:
+      kind: bohm
+      h_factor: 1.0
+      min_h_factor: 0.02
+      max_h_factor: 1.0
+      ion_neutral_cross_section_m2: 1.0e-18
+  - surface_id: source_wall
+    zone_id: source
+    area_m2: 0.18
+    temperature_K: 360.0
+    site_density_m2: 3.0e+18
+    initial_coverages: {}
+    wall_transport:
+      kind: bohm
+      h_factor: 1.0
+      min_h_factor: 0.02
+      max_h_factor: 1.0
+      ion_neutral_cross_section_m2: 1.0e-18
+  gas_inlets:
+  - inlet_id: showerhead
+    zone_id: process
+    flow_sccm:
+      Ar: 100.0
+      CF4: 30.0
+      O2: 5.0
+    temperature_K: 300.0
+  pumps:
+  - pump_id: main_pump
+    zone_id: process
+    speed_m3_s: 0.15
+  power_ports:
+  - port_id: source_rf
+    zone_id: source
+    coupling_target: source
+    model:
+      kind: experimental.icp
+      frequency_Hz: 13560000.0
+  - port_id: wafer_bias
+    zone_id: process
+    coupling_target: wafer
+    model:
+      kind: experimental.ccp
+      frequency_Hz: 2000000.0
+      control: absorbed_power
+recipe:
+  recipe_id: cf4_oxide_etch_demo
+  description: 'Short ignition segment exercising gas flow, experimental ICP/CCP,
+    dynamic gas energy, surface coverage, film, and wall inventory states.
+
+    '
+  start_time_s: 0.0
+  steps:
+  - step_id: ignition
+    duration_s: 1.0e-06
+    commands:
+      gas_inlets:
+        showerhead:
+          flow_sccm:
+            Ar: 100.0
+            CF4: 20.0
+            O2: 2.0
+      power_ports:
+        source_rf:
+          kind: experimental.icp
+          delivered_power_W: 100.0
+          waveform:
+            kind: continuous
+        wafer_bias:
+          kind: experimental.ccp
+          absorbed_power_W: 20.0
+          waveform:
+            kind: continuous
+      surfaces: {}
+models:
+  electrons:
+    kind: maxwellian
+  electron_closure:
+    kind: electron_energy
+  electron_density:
+    kind: quasineutral
+  gas_energy:
+    kind: evolved
+  surface_kinetics: {}
+solver:
+  method: BDF
+  rtol: 1.0e-06
+  atol: 1.0e-14
+  first_step_s: 1.0e-10
+  max_step_s: 1.0e-07
+  sample_interval_s: 5.025125628140703e-09
+output:
+  observables:
+  - electron_density_m3[source]
+  - mean_energy_eV[source]
+  - gas_temperature_K[source]
+  - absorbed_power_W[source]
+  - electron_density_m3[process]
+  - mean_energy_eV[process]
+  - gas_temperature_K[process]
+  - absorbed_power_W[process]
+  - charge_residual_m3[process]
+  summary_series:
+  - n[process,CF4]
+  - n[process,CF3]
+  - n[process,F]
+  - electron_density_m3[process]
+  - mean_energy_eV[process]
+  - gas_temperature_K[process]
+  - absorbed_power_W[process]
+experimental:
+  film: {}
+  wall_inventory:
+    initial_by_surface:
+      wafer:
+        F_reservoir: 0.0
+    events:
+    - reaction_id: S1001
+      surface_id: wafer
+      inventory_particles_per_event:
+        F_reservoir: 1.0

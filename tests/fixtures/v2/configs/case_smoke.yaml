@@ -1,0 +1,20 @@
+include: base_case.yaml
+
+case:
+  name: experimental_smoke_maxwell
+  description: >
+    Short integration stress case exercising experimental ICP/CCP and extension
+    state together with configuration and mechanism loading. It is a smoke
+    test, not a production-accuracy example.
+  tags: [demo, global_model, experimental, smoke_test]
+
+files:
+  recipe: recipe_smoke.yaml
+  output_dir: ../outputs/smoke_maxwell
+
+outputs:
+  plots:
+    enabled: false
+
+numerics:
+  max_step: 1.0e-7

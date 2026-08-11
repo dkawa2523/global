@@ -1,0 +1,36 @@
+include: base_case.yaml
+
+case:
+  name: experimental_argon_lxcat_trend
+  description: >
+    Experimental pure-Ar ICP trend case using public BOLSIG/LXCat-style cross
+    sections from the Zenodo CC-BY dataset 10.5281/zenodo.8192503. It exercises
+    the approximate two-term and ICP/CCP models for finite, conservative
+    qualitative trends; it is not a production-accuracy baseline.
+  tags: [argon, lxcat, benchmark, icp, experimental, qualitative_trend]
+
+files:
+  chamber: chamber_argon_icp.yaml
+  recipe: recipe_argon_lxcat.yaml
+  chemistry:
+    manifest: ../chemistry_argon_lxcat/chemistry_manifest.yaml
+  output_dir: ../outputs/argon_lxcat_icp_baseline
+
+physics:
+  eedf_backend: swarm
+  enable_gas_temperature: false
+
+swarm:
+  model_name: boltzmann_2term
+  closure: auto
+  mixture_key_species: [Ar]
+  cache:
+    max_entries: 4
+    fraction_decimals: 4
+
+numerics:
+  max_step: 2.0e-6
+
+outputs:
+  plots:
+    enabled: false

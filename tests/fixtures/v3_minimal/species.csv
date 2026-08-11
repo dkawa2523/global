@@ -1,0 +1,4 @@
+id,phase,charge,mass_amu,elements,state_tags
+e,gas,-1,0.00054858,,electron
+Ar,gas,0,39.948,Ar:1,
+Ar_plus,gas,1,39.948,Ar:1,ion

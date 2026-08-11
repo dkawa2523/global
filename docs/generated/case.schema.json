@@ -1,0 +1,2278 @@
+{
+  "$defs": {
+    "AmbipolarWallTransport": {
+      "additionalProperties": false,
+      "properties": {
+        "diffusion_coefficient_m2_s": {
+          "exclusiveMinimum": 0.0,
+          "title": "Diffusion Coefficient M2 S",
+          "type": "number"
+        },
+        "diffusion_length_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diffusion Length M"
+        },
+        "kind": {
+          "const": "ambipolar",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "diffusion_coefficient_m2_s"
+      ],
+      "title": "AmbipolarWallTransport",
+      "type": "object"
+    },
+    "ApproximateTwoTermElectronModel": {
+      "additionalProperties": false,
+      "properties": {
+        "cache": {
+          "$ref": "#/$defs/CacheConfig"
+        },
+        "energy_grid": {
+          "$ref": "#/$defs/EnergyGridConfig"
+        },
+        "kind": {
+          "const": "experimental.approximate_two_term",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_shape_iterations": {
+          "default": 48,
+          "exclusiveMinimum": 0,
+          "title": "Max Shape Iterations",
+          "type": "integer"
+        },
+        "mixture_key_species": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Mixture Key Species",
+          "type": "array"
+        },
+        "reduced_field_grid": {
+          "$ref": "#/$defs/ReducedFieldGridConfig"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ApproximateTwoTermElectronModel",
+      "type": "object"
+    },
+    "BohmWallTransport": {
+      "additionalProperties": false,
+      "properties": {
+        "characteristic_length_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Characteristic Length M"
+        },
+        "h_factor": {
+          "anyOf": [
+            {
+              "const": "auto",
+              "type": "string"
+            },
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1.0,
+              "type": "number"
+            }
+          ],
+          "default": 1.0,
+          "title": "H Factor"
+        },
+        "ion_neutral_cross_section_m2": {
+          "default": 1e-18,
+          "exclusiveMinimum": 0.0,
+          "title": "Ion Neutral Cross Section M2",
+          "type": "number"
+        },
+        "kind": {
+          "const": "bohm",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_h_factor": {
+          "default": 1.0,
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0,
+          "title": "Max H Factor",
+          "type": "number"
+        },
+        "min_h_factor": {
+          "default": 0.02,
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0,
+          "title": "Min H Factor",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "BohmWallTransport",
+      "type": "object"
+    },
+    "CacheConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "fraction_decimals": {
+          "default": 3,
+          "minimum": 0,
+          "title": "Fraction Decimals",
+          "type": "integer"
+        },
+        "max_entries": {
+          "default": 12,
+          "exclusiveMinimum": 0,
+          "title": "Max Entries",
+          "type": "integer"
+        }
+      },
+      "title": "CacheConfig",
+      "type": "object"
+    },
+    "CaseMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CaseMetadata",
+      "type": "object"
+    },
+    "ChemistryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "manifest": {
+          "format": "path",
+          "title": "Manifest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "manifest"
+      ],
+      "title": "ChemistryConfig",
+      "type": "object"
+    },
+    "ContinuousWaveform": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "continuous",
+          "default": "continuous",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "ContinuousWaveform",
+      "type": "object"
+    },
+    "DCSeriesCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "dc_series",
+          "title": "Kind",
+          "type": "string"
+        },
+        "off_voltage_V": {
+          "default": 0.0,
+          "title": "Off Voltage V",
+          "type": "number"
+        },
+        "source_voltage_V": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Voltage V"
+        },
+        "waveform": {
+          "discriminator": {
+            "mapping": {
+              "continuous": "#/$defs/ContinuousWaveform",
+              "square_pulse": "#/$defs/SquarePulseWaveform"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ContinuousWaveform"
+            },
+            {
+              "$ref": "#/$defs/SquarePulseWaveform"
+            }
+          ],
+          "title": "Waveform"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "DCSeriesCommand",
+      "type": "object"
+    },
+    "DCSeriesModel": {
+      "additionalProperties": false,
+      "properties": {
+        "ballast_resistance_ohm": {
+          "exclusiveMinimum": 0.0,
+          "title": "Ballast Resistance Ohm",
+          "type": "number"
+        },
+        "electrode_area_m2": {
+          "exclusiveMinimum": 0.0,
+          "title": "Electrode Area M2",
+          "type": "number"
+        },
+        "electron_mobility_m2_V_s": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Electron Mobility M2 V S"
+        },
+        "gap_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Gap M",
+          "type": "number"
+        },
+        "kind": {
+          "const": "dc_series",
+          "title": "Kind",
+          "type": "string"
+        },
+        "power_absorption_fraction": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Power Absorption Fraction",
+          "type": "number"
+        },
+        "source_voltage_V": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Voltage V"
+        }
+      },
+      "required": [
+        "kind",
+        "ballast_resistance_ohm",
+        "gap_m",
+        "electrode_area_m2"
+      ],
+      "title": "DCSeriesModel",
+      "type": "object"
+    },
+    "EdgeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "conductance_m3_s": {
+          "minimum": 0.0,
+          "title": "Conductance M3 S",
+          "type": "number"
+        },
+        "edge_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Edge Id",
+          "type": "string"
+        },
+        "from_zone": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "From Zone",
+          "type": "string"
+        },
+        "to_zone": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "To Zone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "edge_id",
+        "from_zone",
+        "to_zone",
+        "conductance_m3_s"
+      ],
+      "title": "EdgeConfig",
+      "type": "object"
+    },
+    "ElectronEnergyClosure": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "electron_energy",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ElectronEnergyClosure",
+      "type": "object"
+    },
+    "EnergyGridConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "max_eV": {
+          "default": 160.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Max Ev",
+          "type": "number"
+        },
+        "min_eV": {
+          "default": 0.001,
+          "exclusiveMinimum": 0.0,
+          "title": "Min Ev",
+          "type": "number"
+        },
+        "n": {
+          "default": 360,
+          "minimum": 32,
+          "title": "N",
+          "type": "integer"
+        }
+      },
+      "title": "EnergyGridConfig",
+      "type": "object"
+    },
+    "EvolvedGasEnergy": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "evolved",
+          "title": "Kind",
+          "type": "string"
+        },
+        "wall_energy_relaxation_s_inv_by_zone": {
+          "additionalProperties": {
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "title": "Wall Energy Relaxation S Inv By Zone",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "EvolvedGasEnergy",
+      "type": "object"
+    },
+    "ExperimentalCCPCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Absorbed Power W"
+        },
+        "kind": {
+          "const": "experimental.ccp",
+          "title": "Kind",
+          "type": "string"
+        },
+        "voltage_rms_V": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voltage Rms V"
+        },
+        "waveform": {
+          "discriminator": {
+            "mapping": {
+              "continuous": "#/$defs/ContinuousWaveform",
+              "square_pulse": "#/$defs/SquarePulseWaveform"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ContinuousWaveform"
+            },
+            {
+              "$ref": "#/$defs/SquarePulseWaveform"
+            }
+          ],
+          "title": "Waveform"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalCCPCommand",
+      "type": "object"
+    },
+    "ExperimentalCCPModel": {
+      "additionalProperties": false,
+      "properties": {
+        "control": {
+          "default": "absorbed_power",
+          "enum": [
+            "absorbed_power",
+            "voltage"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "default_absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Absorbed Power W"
+        },
+        "default_voltage_rms_V": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Voltage Rms V"
+        },
+        "frequency_Hz": {
+          "default": 2000000.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "kind": {
+          "const": "experimental.ccp",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalCCPModel",
+      "type": "object"
+    },
+    "ExperimentalConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "extensions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentalExtensionsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "film": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentalFilmConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop_when_quasi_steady": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentalStopWhenQuasiSteadyConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "wall_inventory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentalWallInventoryConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ExperimentalConfig",
+      "type": "object"
+    },
+    "ExperimentalExtensionsConfig": {
+      "additionalProperties": false,
+      "description": "Presence enables experimental chemistry extension state and terms.",
+      "properties": {},
+      "title": "ExperimentalExtensionsConfig",
+      "type": "object"
+    },
+    "ExperimentalFilmConfig": {
+      "additionalProperties": false,
+      "description": "Presence enables chemistry-declared film state.",
+      "properties": {
+        "monolayer_thickness_m": {
+          "default": 3e-10,
+          "exclusiveMinimum": 0.0,
+          "title": "Monolayer Thickness M",
+          "type": "number"
+        }
+      },
+      "title": "ExperimentalFilmConfig",
+      "type": "object"
+    },
+    "ExperimentalICPCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "delivered_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delivered Power W"
+        },
+        "kind": {
+          "const": "experimental.icp",
+          "title": "Kind",
+          "type": "string"
+        },
+        "waveform": {
+          "discriminator": {
+            "mapping": {
+              "continuous": "#/$defs/ContinuousWaveform",
+              "square_pulse": "#/$defs/SquarePulseWaveform"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ContinuousWaveform"
+            },
+            {
+              "$ref": "#/$defs/SquarePulseWaveform"
+            }
+          ],
+          "title": "Waveform"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalICPCommand",
+      "type": "object"
+    },
+    "ExperimentalICPModel": {
+      "additionalProperties": false,
+      "properties": {
+        "default_delivered_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Delivered Power W"
+        },
+        "frequency_Hz": {
+          "default": 13560000.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "kind": {
+          "const": "experimental.icp",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalICPModel",
+      "type": "object"
+    },
+    "ExperimentalInventoryEventConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "inventory_particles_per_event": {
+          "patternProperties": {
+            ".*\\S.*": {
+              "type": "number"
+            }
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Inventory Particles Per Event",
+          "type": "object"
+        },
+        "reaction_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Reaction Id",
+          "type": "string"
+        },
+        "surface_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Surface Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reaction_id",
+        "surface_id",
+        "inventory_particles_per_event"
+      ],
+      "title": "ExperimentalInventoryEventConfig",
+      "type": "object"
+    },
+    "ExperimentalRFEnvelopeCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Absorbed Power W"
+        },
+        "kind": {
+          "const": "experimental.rf_envelope",
+          "title": "Kind",
+          "type": "string"
+        },
+        "voltage_rms_V": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voltage Rms V"
+        },
+        "waveform": {
+          "discriminator": {
+            "mapping": {
+              "continuous": "#/$defs/ContinuousWaveform",
+              "square_pulse": "#/$defs/SquarePulseWaveform"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ContinuousWaveform"
+            },
+            {
+              "$ref": "#/$defs/SquarePulseWaveform"
+            }
+          ],
+          "title": "Waveform"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalRFEnvelopeCommand",
+      "type": "object"
+    },
+    "ExperimentalRFEnvelopeModel": {
+      "additionalProperties": false,
+      "properties": {
+        "base_reduced_field_Td": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Base Reduced Field Td",
+          "type": "number"
+        },
+        "control": {
+          "default": "absorbed_power",
+          "enum": [
+            "absorbed_power",
+            "voltage"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "coupling_efficiency": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Coupling Efficiency",
+          "type": "number"
+        },
+        "default_absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Absorbed Power W"
+        },
+        "default_voltage_rms_V": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Voltage Rms V"
+        },
+        "effective_impedance_ohm": {
+          "default": 50.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Effective Impedance Ohm",
+          "type": "number"
+        },
+        "frequency_Hz": {
+          "default": 13560000.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "kind": {
+          "const": "experimental.rf_envelope",
+          "title": "Kind",
+          "type": "string"
+        },
+        "plasma_potential_offset_V": {
+          "default": 0.0,
+          "title": "Plasma Potential Offset V",
+          "type": "number"
+        },
+        "plasma_potential_per_sqrt_W": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Plasma Potential Per Sqrt W",
+          "type": "number"
+        },
+        "reduced_field_per_sqrt_W_Td": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Reduced Field Per Sqrt W Td",
+          "type": "number"
+        },
+        "role": {
+          "default": "source",
+          "enum": [
+            "source",
+            "bias"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "self_bias_fraction": {
+          "default": 0.35,
+          "minimum": 0.0,
+          "title": "Self Bias Fraction",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalRFEnvelopeModel",
+      "type": "object"
+    },
+    "ExperimentalStopWhenQuasiSteadyConfig": {
+      "additionalProperties": false,
+      "description": "Experimental event-based stopping; this is not a steady root solve.",
+      "properties": {
+        "min_time_s": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Min Time S",
+          "type": "number"
+        },
+        "relative_rhs_norm_s_inv": {
+          "default": 0.001,
+          "minimum": 0.0,
+          "title": "Relative Rhs Norm S Inv",
+          "type": "number"
+        }
+      },
+      "title": "ExperimentalStopWhenQuasiSteadyConfig",
+      "type": "object"
+    },
+    "ExperimentalWallInventoryConfig": {
+      "additionalProperties": false,
+      "description": "Presence enables chemistry-declared wall inventories.",
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/ExperimentalInventoryEventConfig"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "initial_by_surface": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "title": "Initial By Surface",
+          "type": "object"
+        }
+      },
+      "title": "ExperimentalWallInventoryConfig",
+      "type": "object"
+    },
+    "ExternalTableCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "bounds_policy": {
+          "anyOf": [
+            {
+              "enum": [
+                "error",
+                "hold"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bounds Policy"
+        },
+        "current_scale": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Scale"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        },
+        "gap_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gap M"
+        },
+        "interpolation": {
+          "anyOf": [
+            {
+              "enum": [
+                "linear",
+                "previous"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interpolation"
+        },
+        "kind": {
+          "const": "external_table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "plasma_potential_V": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plasma Potential V"
+        },
+        "power_scale": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Scale"
+        },
+        "time_offset_s": {
+          "default": 0.0,
+          "title": "Time Offset S",
+          "type": "number"
+        },
+        "total_density_m3": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Density M3"
+        },
+        "voltage_scale": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voltage Scale"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExternalTableCommand",
+      "type": "object"
+    },
+    "ExternalTableModel": {
+      "additionalProperties": false,
+      "properties": {
+        "bounds_policy": {
+          "default": "error",
+          "enum": [
+            "error",
+            "hold"
+          ],
+          "title": "Bounds Policy",
+          "type": "string"
+        },
+        "current_scale": {
+          "default": 1.0,
+          "minimum": 0.0,
+          "title": "Current Scale",
+          "type": "number"
+        },
+        "file": {
+          "format": "path",
+          "title": "File",
+          "type": "string"
+        },
+        "gap_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gap M"
+        },
+        "interpolation": {
+          "default": "linear",
+          "enum": [
+            "linear",
+            "previous"
+          ],
+          "title": "Interpolation",
+          "type": "string"
+        },
+        "kind": {
+          "const": "external_table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "plasma_potential_V": {
+          "default": 0.0,
+          "title": "Plasma Potential V",
+          "type": "number"
+        },
+        "power_scale": {
+          "default": 1.0,
+          "minimum": 0.0,
+          "title": "Power Scale",
+          "type": "number"
+        },
+        "total_density_m3": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Density M3"
+        },
+        "voltage_scale": {
+          "default": 1.0,
+          "minimum": 0.0,
+          "title": "Voltage Scale",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "file"
+      ],
+      "title": "ExternalTableModel",
+      "type": "object"
+    },
+    "FixedGasEnergy": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "fixed",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "FixedGasEnergy",
+      "type": "object"
+    },
+    "GasInletCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "flow_sccm": {
+          "additionalProperties": {
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "title": "Flow Sccm",
+          "type": "object"
+        }
+      },
+      "required": [
+        "flow_sccm"
+      ],
+      "title": "GasInletCommand",
+      "type": "object"
+    },
+    "GasInletConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "flow_sccm": {
+          "additionalProperties": {
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "title": "Flow Sccm",
+          "type": "object"
+        },
+        "inlet_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Inlet Id",
+          "type": "string"
+        },
+        "temperature_K": {
+          "exclusiveMinimum": 0.0,
+          "title": "Temperature K",
+          "type": "number"
+        },
+        "zone_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Zone Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "inlet_id",
+        "zone_id",
+        "temperature_K"
+      ],
+      "title": "GasInletConfig",
+      "type": "object"
+    },
+    "LocalFieldClosure": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "local_field",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "LocalFieldClosure",
+      "type": "object"
+    },
+    "MaxwellianElectronModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "maxwellian",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "MaxwellianElectronModel",
+      "type": "object"
+    },
+    "ModelsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "electron_closure": {
+          "discriminator": {
+            "mapping": {
+              "electron_energy": "#/$defs/ElectronEnergyClosure",
+              "local_field": "#/$defs/LocalFieldClosure"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ElectronEnergyClosure"
+            },
+            {
+              "$ref": "#/$defs/LocalFieldClosure"
+            }
+          ],
+          "title": "Electron Closure"
+        },
+        "electron_density": {
+          "discriminator": {
+            "mapping": {
+              "experimental.prescribed_profile": "#/$defs/PrescribedElectronDensity",
+              "quasineutral": "#/$defs/QuasiNeutralElectronDensity"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/QuasiNeutralElectronDensity"
+            },
+            {
+              "$ref": "#/$defs/PrescribedElectronDensity"
+            }
+          ],
+          "title": "Electron Density"
+        },
+        "electrons": {
+          "discriminator": {
+            "mapping": {
+              "experimental.approximate_two_term": "#/$defs/ApproximateTwoTermElectronModel",
+              "maxwellian": "#/$defs/MaxwellianElectronModel",
+              "table": "#/$defs/TableElectronModel"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MaxwellianElectronModel"
+            },
+            {
+              "$ref": "#/$defs/TableElectronModel"
+            },
+            {
+              "$ref": "#/$defs/ApproximateTwoTermElectronModel"
+            }
+          ],
+          "title": "Electrons"
+        },
+        "gas_energy": {
+          "discriminator": {
+            "mapping": {
+              "evolved": "#/$defs/EvolvedGasEnergy",
+              "fixed": "#/$defs/FixedGasEnergy"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/FixedGasEnergy"
+            },
+            {
+              "$ref": "#/$defs/EvolvedGasEnergy"
+            }
+          ],
+          "title": "Gas Energy"
+        },
+        "surface_kinetics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SurfaceKineticsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "electrons",
+        "electron_closure"
+      ],
+      "title": "ModelsConfig",
+      "type": "object"
+    },
+    "OffWallTransport": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "off",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "OffWallTransport",
+      "type": "object"
+    },
+    "OutputConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "observables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Observables",
+          "type": "array"
+        },
+        "summary_series": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Summary Series",
+          "type": "array"
+        }
+      },
+      "title": "OutputConfig",
+      "type": "object"
+    },
+    "PowerPortConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "coupling_target": {
+          "default": "",
+          "title": "Coupling Target",
+          "type": "string"
+        },
+        "model": {
+          "discriminator": {
+            "mapping": {
+              "dc_series": "#/$defs/DCSeriesModel",
+              "experimental.ccp": "#/$defs/ExperimentalCCPModel",
+              "experimental.icp": "#/$defs/ExperimentalICPModel",
+              "experimental.rf_envelope": "#/$defs/ExperimentalRFEnvelopeModel",
+              "external_table": "#/$defs/ExternalTableModel",
+              "prescribed_power": "#/$defs/PrescribedPowerModel"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PrescribedPowerModel"
+            },
+            {
+              "$ref": "#/$defs/DCSeriesModel"
+            },
+            {
+              "$ref": "#/$defs/ExternalTableModel"
+            },
+            {
+              "$ref": "#/$defs/ExperimentalRFEnvelopeModel"
+            },
+            {
+              "$ref": "#/$defs/ExperimentalCCPModel"
+            },
+            {
+              "$ref": "#/$defs/ExperimentalICPModel"
+            }
+          ],
+          "title": "Model"
+        },
+        "port_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Port Id",
+          "type": "string"
+        },
+        "zone_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Zone Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "port_id",
+        "zone_id",
+        "model"
+      ],
+      "title": "PowerPortConfig",
+      "type": "object"
+    },
+    "PrescribedElectronDensity": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "format": "path",
+          "title": "File",
+          "type": "string"
+        },
+        "hold": {
+          "default": "error",
+          "enum": [
+            "edge",
+            "error"
+          ],
+          "title": "Hold",
+          "type": "string"
+        },
+        "interpolation": {
+          "default": "linear",
+          "enum": [
+            "linear",
+            "previous"
+          ],
+          "title": "Interpolation",
+          "type": "string"
+        },
+        "kind": {
+          "const": "experimental.prescribed_profile",
+          "title": "Kind",
+          "type": "string"
+        },
+        "zone_columns": {
+          "additionalProperties": {
+            "minLength": 1,
+            "pattern": ".*\\S.*",
+            "type": "string"
+          },
+          "title": "Zone Columns",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "file"
+      ],
+      "title": "PrescribedElectronDensity",
+      "type": "object"
+    },
+    "PrescribedFrequencyWallTransport": {
+      "additionalProperties": false,
+      "properties": {
+        "frequency_s_inv": {
+          "minimum": 0.0,
+          "title": "Frequency S Inv",
+          "type": "number"
+        },
+        "kind": {
+          "const": "prescribed_frequency",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "frequency_s_inv"
+      ],
+      "title": "PrescribedFrequencyWallTransport",
+      "type": "object"
+    },
+    "PrescribedPowerCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Absorbed Power W"
+        },
+        "kind": {
+          "const": "prescribed_power",
+          "title": "Kind",
+          "type": "string"
+        },
+        "waveform": {
+          "discriminator": {
+            "mapping": {
+              "continuous": "#/$defs/ContinuousWaveform",
+              "square_pulse": "#/$defs/SquarePulseWaveform"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ContinuousWaveform"
+            },
+            {
+              "$ref": "#/$defs/SquarePulseWaveform"
+            }
+          ],
+          "title": "Waveform"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "PrescribedPowerCommand",
+      "type": "object"
+    },
+    "PrescribedPowerModel": {
+      "additionalProperties": false,
+      "properties": {
+        "default_absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Absorbed Power W"
+        },
+        "electron_fraction": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Electron Fraction",
+          "type": "number"
+        },
+        "gas_fraction": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Gas Fraction",
+          "type": "number"
+        },
+        "kind": {
+          "const": "prescribed_power",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "electron_fraction",
+        "gas_fraction"
+      ],
+      "title": "PrescribedPowerModel",
+      "type": "object"
+    },
+    "PumpConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "pump_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Pump Id",
+          "type": "string"
+        },
+        "speed_m3_s": {
+          "minimum": 0.0,
+          "title": "Speed M3 S",
+          "type": "number"
+        },
+        "zone_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Zone Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pump_id",
+        "zone_id",
+        "speed_m3_s"
+      ],
+      "title": "PumpConfig",
+      "type": "object"
+    },
+    "QuasiNeutralElectronDensity": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "quasineutral",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "QuasiNeutralElectronDensity",
+      "type": "object"
+    },
+    "ReactorConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "chamber_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Chamber Id",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/EdgeConfig"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "gas_inlets": {
+          "items": {
+            "$ref": "#/$defs/GasInletConfig"
+          },
+          "title": "Gas Inlets",
+          "type": "array"
+        },
+        "power_ports": {
+          "items": {
+            "$ref": "#/$defs/PowerPortConfig"
+          },
+          "title": "Power Ports",
+          "type": "array"
+        },
+        "pumps": {
+          "items": {
+            "$ref": "#/$defs/PumpConfig"
+          },
+          "title": "Pumps",
+          "type": "array"
+        },
+        "surfaces": {
+          "items": {
+            "$ref": "#/$defs/SurfaceConfig"
+          },
+          "title": "Surfaces",
+          "type": "array"
+        },
+        "zones": {
+          "items": {
+            "$ref": "#/$defs/ZoneConfig"
+          },
+          "title": "Zones",
+          "type": "array"
+        }
+      },
+      "required": [
+        "chamber_id",
+        "zones"
+      ],
+      "title": "ReactorConfig",
+      "type": "object"
+    },
+    "RecipeCommands": {
+      "additionalProperties": false,
+      "properties": {
+        "gas_inlets": {
+          "additionalProperties": {
+            "$ref": "#/$defs/GasInletCommand"
+          },
+          "title": "Gas Inlets",
+          "type": "object"
+        },
+        "power_ports": {
+          "additionalProperties": {
+            "discriminator": {
+              "mapping": {
+                "dc_series": "#/$defs/DCSeriesCommand",
+                "experimental.ccp": "#/$defs/ExperimentalCCPCommand",
+                "experimental.icp": "#/$defs/ExperimentalICPCommand",
+                "experimental.rf_envelope": "#/$defs/ExperimentalRFEnvelopeCommand",
+                "external_table": "#/$defs/ExternalTableCommand",
+                "prescribed_power": "#/$defs/PrescribedPowerCommand"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PrescribedPowerCommand"
+              },
+              {
+                "$ref": "#/$defs/DCSeriesCommand"
+              },
+              {
+                "$ref": "#/$defs/ExternalTableCommand"
+              },
+              {
+                "$ref": "#/$defs/ExperimentalRFEnvelopeCommand"
+              },
+              {
+                "$ref": "#/$defs/ExperimentalCCPCommand"
+              },
+              {
+                "$ref": "#/$defs/ExperimentalICPCommand"
+              }
+            ]
+          },
+          "title": "Power Ports",
+          "type": "object"
+        },
+        "surfaces": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SurfaceCommand"
+          },
+          "title": "Surfaces",
+          "type": "object"
+        }
+      },
+      "title": "RecipeCommands",
+      "type": "object"
+    },
+    "RecipeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "recipe_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Recipe Id",
+          "type": "string"
+        },
+        "start_time_s": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Start Time S",
+          "type": "number"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/RecipeStepConfig"
+          },
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "recipe_id",
+        "steps"
+      ],
+      "title": "RecipeConfig",
+      "type": "object"
+    },
+    "RecipeStepConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "$ref": "#/$defs/RecipeCommands"
+        },
+        "duration_s": {
+          "exclusiveMinimum": 0.0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "step_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "duration_s"
+      ],
+      "title": "RecipeStepConfig",
+      "type": "object"
+    },
+    "ReducedFieldGridConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "max_Td": {
+          "default": 2500.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Max Td",
+          "type": "number"
+        },
+        "min_Td": {
+          "default": 0.2,
+          "exclusiveMinimum": 0.0,
+          "title": "Min Td",
+          "type": "number"
+        },
+        "n": {
+          "default": 48,
+          "minimum": 2,
+          "title": "N",
+          "type": "integer"
+        }
+      },
+      "title": "ReducedFieldGridConfig",
+      "type": "object"
+    },
+    "SolverConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "atol": {
+          "default": 1e-14,
+          "description": "Dimensionless absolute tolerance applied after state scaling.",
+          "exclusiveMinimum": 0.0,
+          "title": "Atol",
+          "type": "number"
+        },
+        "first_step_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Step S"
+        },
+        "max_step_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Step S"
+        },
+        "method": {
+          "const": "BDF",
+          "default": "BDF",
+          "title": "Method",
+          "type": "string"
+        },
+        "rtol": {
+          "default": 1e-06,
+          "exclusiveMaximum": 1.0,
+          "minimum": 2.220446049250313e-14,
+          "title": "Rtol",
+          "type": "number"
+        },
+        "sample_interval_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Interval S"
+        },
+        "save_at_s": {
+          "anyOf": [
+            {
+              "items": {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Save At S"
+        }
+      },
+      "title": "SolverConfig",
+      "type": "object"
+    },
+    "SquarePulseWaveform": {
+      "additionalProperties": false,
+      "properties": {
+        "duty_cycle": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Duty Cycle",
+          "type": "number"
+        },
+        "kind": {
+          "const": "square_pulse",
+          "title": "Kind",
+          "type": "string"
+        },
+        "phase_s": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Phase S",
+          "type": "number"
+        },
+        "repetition_Hz": {
+          "exclusiveMinimum": 0.0,
+          "title": "Repetition Hz",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "duty_cycle",
+        "repetition_Hz"
+      ],
+      "title": "SquarePulseWaveform",
+      "type": "object"
+    },
+    "SurfaceCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "temperature_K": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature K"
+        }
+      },
+      "title": "SurfaceCommand",
+      "type": "object"
+    },
+    "SurfaceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "area_m2": {
+          "exclusiveMinimum": 0.0,
+          "title": "Area M2",
+          "type": "number"
+        },
+        "initial_coverages": {
+          "additionalProperties": {
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "title": "Initial Coverages",
+          "type": "object"
+        },
+        "ion_impact_energy_eV": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Ion Impact Energy Ev",
+          "type": "number"
+        },
+        "site_density_m2": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Site Density M2",
+          "type": "number"
+        },
+        "surface_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Surface Id",
+          "type": "string"
+        },
+        "temperature_K": {
+          "exclusiveMinimum": 0.0,
+          "title": "Temperature K",
+          "type": "number"
+        },
+        "wall_transport": {
+          "discriminator": {
+            "mapping": {
+              "ambipolar": "#/$defs/AmbipolarWallTransport",
+              "bohm": "#/$defs/BohmWallTransport",
+              "off": "#/$defs/OffWallTransport",
+              "prescribed_frequency": "#/$defs/PrescribedFrequencyWallTransport"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/BohmWallTransport"
+            },
+            {
+              "$ref": "#/$defs/PrescribedFrequencyWallTransport"
+            },
+            {
+              "$ref": "#/$defs/AmbipolarWallTransport"
+            },
+            {
+              "$ref": "#/$defs/OffWallTransport"
+            }
+          ],
+          "title": "Wall Transport"
+        },
+        "zone_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Zone Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface_id",
+        "zone_id",
+        "area_m2",
+        "temperature_K",
+        "wall_transport"
+      ],
+      "title": "SurfaceConfig",
+      "type": "object"
+    },
+    "SurfaceKineticsConfig": {
+      "additionalProperties": false,
+      "description": "Presence enables surface-coverage state and surface reactions.",
+      "properties": {},
+      "title": "SurfaceKineticsConfig",
+      "type": "object"
+    },
+    "TableElectronModel": {
+      "additionalProperties": false,
+      "properties": {
+        "bounds_policy": {
+          "default": "error",
+          "enum": [
+            "error",
+            "clip"
+          ],
+          "title": "Bounds Policy",
+          "type": "string"
+        },
+        "file": {
+          "format": "path",
+          "title": "File",
+          "type": "string"
+        },
+        "kind": {
+          "const": "table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lookup": {
+          "enum": [
+            "mean_energy",
+            "local_field"
+          ],
+          "title": "Lookup",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "file",
+        "lookup"
+      ],
+      "title": "TableElectronModel",
+      "type": "object"
+    },
+    "ZoneConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "gas_temperature_K": {
+          "exclusiveMinimum": 0.0,
+          "title": "Gas Temperature K",
+          "type": "number"
+        },
+        "initial_densities_m3": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Densities M3"
+        },
+        "initial_mean_energy_eV": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Mean Energy Ev"
+        },
+        "initial_mole_fractions": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Mole Fractions"
+        },
+        "initial_seed_densities_m3": {
+          "additionalProperties": {
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "title": "Initial Seed Densities M3",
+          "type": "object"
+        },
+        "pressure_Pa": {
+          "exclusiveMinimum": 0.0,
+          "title": "Pressure Pa",
+          "type": "number"
+        },
+        "volume_m3": {
+          "exclusiveMinimum": 0.0,
+          "title": "Volume M3",
+          "type": "number"
+        },
+        "zone_id": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Zone Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "zone_id",
+        "volume_m3",
+        "pressure_Pa",
+        "gas_temperature_K"
+      ],
+      "title": "ZoneConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "case": {
+      "$ref": "#/$defs/CaseMetadata"
+    },
+    "chemistry": {
+      "$ref": "#/$defs/ChemistryConfig"
+    },
+    "experimental": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExperimentalConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "models": {
+      "$ref": "#/$defs/ModelsConfig"
+    },
+    "output": {
+      "$ref": "#/$defs/OutputConfig"
+    },
+    "reactor": {
+      "$ref": "#/$defs/ReactorConfig"
+    },
+    "recipe": {
+      "$ref": "#/$defs/RecipeConfig"
+    },
+    "schema_version": {
+      "const": 3,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "solver": {
+      "$ref": "#/$defs/SolverConfig"
+    }
+  },
+  "required": [
+    "schema_version",
+    "case",
+    "chemistry",
+    "reactor",
+    "recipe",
+    "models",
+    "solver",
+    "output"
+  ],
+  "title": "CaseSpec",
+  "type": "object"
+}

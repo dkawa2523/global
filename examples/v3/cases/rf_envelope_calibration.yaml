@@ -1,0 +1,231 @@
+schema_version: 3
+case:
+  name: experimental_argon_rf_envelope_calibration
+  description: 'Experimental pure-Ar RF-envelope calibration case for tuning coupling_efficiency,
+    effective_impedance_ohm, and self_bias_fraction. Its empirical HF/LF response is
+    intended for calibration and qualitative trends, not uncalibrated production accuracy.
+
+    '
+chemistry:
+  manifest: ../chemistry/argon_lxcat/chemistry.yaml
+reactor:
+  chamber_id: argon_icp_two_zone_reactor
+  description: 'Pure-argon two-zone ICP baseline chamber. Argon enters the source
+    zone, flows to the process zone, and is pumped from the process zone.
+
+    '
+  zones:
+  - zone_id: source
+    description: upstream ICP source zone
+    volume_m3: 0.01
+    pressure_Pa: 8.0
+    gas_temperature_K: 350.0
+    initial_densities_m3:
+      Ar: 1.6555361179519817e+21
+      Ar_plus: 1.0e+12
+  - zone_id: process
+    description: downstream process zone
+    volume_m3: 0.03
+    pressure_Pa: 8.0
+    gas_temperature_K: 340.0
+    initial_densities_m3:
+      Ar: 1.7042283567152754e+21
+      Ar_plus: 1.0e+12
+  edges:
+  - edge_id: source_to_process
+    from_zone: source
+    to_zone: process
+    conductance_m3_s: 0.03
+  surfaces:
+  - surface_id: wafer
+    zone_id: process
+    area_m2: 0.0314
+    temperature_K: 320.0
+    site_density_m2: 5.0e+18
+    initial_coverages: {}
+    wall_transport:
+      kind: bohm
+      h_factor: 1.0
+      min_h_factor: 0.02
+      max_h_factor: 1.0
+      ion_neutral_cross_section_m2: 1.0e-18
+  - surface_id: grounded_wall
+    zone_id: process
+    area_m2: 0.45
+    temperature_K: 330.0
+    site_density_m2: 3.0e+18
+    initial_coverages: {}
+    wall_transport:
+      kind: bohm
+      h_factor: 1.0
+      min_h_factor: 0.02
+      max_h_factor: 1.0
+      ion_neutral_cross_section_m2: 1.0e-18
+  - surface_id: source_wall
+    zone_id: source
+    area_m2: 0.18
+    temperature_K: 360.0
+    site_density_m2: 3.0e+18
+    initial_coverages: {}
+    wall_transport:
+      kind: bohm
+      h_factor: 1.0
+      min_h_factor: 0.02
+      max_h_factor: 1.0
+      ion_neutral_cross_section_m2: 1.0e-18
+  gas_inlets:
+  - inlet_id: showerhead
+    zone_id: source
+    flow_sccm:
+      Ar: 100.0
+    temperature_K: 300.0
+  pumps:
+  - pump_id: main_pump
+    zone_id: process
+    speed_m3_s: 0.03
+  power_ports:
+  - port_id: source_rf
+    zone_id: source
+    coupling_target: source
+    model:
+      kind: experimental.rf_envelope
+      role: source
+      frequency_Hz: 13560000.0
+      control: absorbed_power
+      effective_impedance_ohm: 50.0
+      coupling_efficiency: 0.65
+      base_reduced_field_Td: 25.0
+      reduced_field_per_sqrt_W_Td: 0.8
+      self_bias_fraction: 0.35
+      plasma_potential_offset_V: 0.0
+      plasma_potential_per_sqrt_W: 0.0
+  - port_id: wafer_bias
+    zone_id: process
+    coupling_target: wafer
+    model:
+      kind: experimental.rf_envelope
+      role: bias
+      frequency_Hz: 2000000.0
+      control: voltage
+      effective_impedance_ohm: 200.0
+      coupling_efficiency: 0.2
+      base_reduced_field_Td: 0.0
+      reduced_field_per_sqrt_W_Td: 0.0
+      self_bias_fraction: 0.35
+      plasma_potential_offset_V: 0.0
+      plasma_potential_per_sqrt_W: 0.0
+recipe:
+  recipe_id: argon_rf_envelope_calibration
+  description: 'Pure-argon RF-envelope calibration example. The HF source is power-driven
+    with an explicit absorbed-power coupling efficiency. The LF bias is voltage-driven
+    with an explicit effective impedance and self-bias fraction.
+
+    '
+  start_time_s: 0.0
+  steps:
+  - step_id: ignition
+    duration_s: 0.0002
+    commands:
+      gas_inlets:
+        showerhead:
+          flow_sccm:
+            Ar: 100.0
+      power_ports:
+        source_rf:
+          kind: experimental.rf_envelope
+          absorbed_power_W: 500.0
+          waveform:
+            kind: continuous
+        wafer_bias:
+          kind: experimental.rf_envelope
+          voltage_rms_V: 50.0
+          waveform:
+            kind: continuous
+      surfaces: {}
+  - step_id: calibration_hold
+    duration_s: 0.002
+    commands:
+      gas_inlets:
+        showerhead:
+          flow_sccm:
+            Ar: 100.0
+      power_ports:
+        source_rf:
+          kind: experimental.rf_envelope
+          absorbed_power_W: 1500.0
+          waveform:
+            kind: continuous
+        wafer_bias:
+          kind: experimental.rf_envelope
+          voltage_rms_V: 120.0
+          waveform:
+            kind: continuous
+      surfaces: {}
+  - step_id: afterglow
+    duration_s: 0.00039999999999999975
+    commands:
+      gas_inlets:
+        showerhead:
+          flow_sccm:
+            Ar: 100.0
+      power_ports:
+        source_rf:
+          kind: experimental.rf_envelope
+          absorbed_power_W: 0.0
+          waveform:
+            kind: continuous
+        wafer_bias:
+          kind: experimental.rf_envelope
+          voltage_rms_V: 0.0
+          waveform:
+            kind: continuous
+      surfaces: {}
+models:
+  electrons:
+    kind: experimental.approximate_two_term
+    mixture_key_species:
+    - Ar
+    cache:
+      max_entries: 4
+      fraction_decimals: 4
+    energy_grid:
+      min_eV: 0.001
+      max_eV: 160.0
+      n: 360
+    reduced_field_grid:
+      min_Td: 0.2
+      max_Td: 2500.0
+      n: 48
+    max_shape_iterations: 48
+  electron_closure:
+    kind: local_field
+  electron_density:
+    kind: quasineutral
+  gas_energy:
+    kind: fixed
+  surface_kinetics: {}
+solver:
+  method: BDF
+  rtol: 1.0e-06
+  atol: 1.0e-14
+  first_step_s: 1.0e-10
+  max_step_s: 2.0e-06
+  sample_interval_s: 1.3065326633165828e-05
+output:
+  observables:
+  - electron_density_m3[source]
+  - mean_energy_eV[source]
+  - reduced_field_Td[source]
+  - absorbed_power_W[source]
+  - electron_density_m3[process]
+  - mean_energy_eV[process]
+  - reduced_field_Td[process]
+  - absorbed_power_W[process]
+  summary_series:
+  - n[source,Ar_plus]
+  - n[process,Ar_plus]
+  - electron_density_m3[source]
+  - reduced_field_Td[source]
+  - electron_density_m3[process]
+  - reduced_field_Td[process]
+  - absorbed_power_W[process]

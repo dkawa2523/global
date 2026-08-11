@@ -1,0 +1,33 @@
+schema_version: 3
+case:
+  name: minimal_argon
+chemistry:
+  manifest: chemistry/chemistry.yaml
+reactor:
+  chamber_id: reactor
+  zones:
+  - zone_id: plasma
+    volume_m3: 0.01
+    pressure_Pa: 9.94067280414195
+    gas_temperature_K: 300.0
+    initial_densities_m3:
+      Ar: 2.4e+21
+      Ar_plus: 1000000000000.0
+    initial_mean_energy_eV: 3.0
+recipe:
+  recipe_id: one_step
+  steps:
+  - step_id: hold
+    duration_s: 0.001
+models:
+  electrons:
+    kind: maxwellian
+  electron_closure:
+    kind: electron_energy
+  electron_density:
+    kind: quasineutral
+  gas_energy:
+    kind: fixed
+solver:
+  method: BDF
+output: {}

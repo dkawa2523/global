@@ -1,0 +1,72 @@
+schema_version: 3
+case:
+  name: crane_two_reaction_argon
+  description: 'Executable local reproduction of the public CRANE tutorials/TwoReactionArgon
+    chemistry benchmark. The comparison is restricted to the scalar ODE chemistry
+    because the CRANE tutorial does not solve wall losses, circuit coupling, or electron
+    energy.
+
+    '
+chemistry:
+  manifest: ../chemistry/crane_two_reaction_argon/chemistry.yaml
+reactor:
+  chamber_id: crane_two_reaction_argon
+  description: 'Zero-transport single-zone chamber for reproducing CRANE tutorials/TwoReactionArgon.
+    The explicit species initial densities are converted from CRANE cm^-3 input.
+
+    '
+  zones:
+  - zone_id: plasma
+    description: single scalar global zone matching the CRANE ODE tutorial
+    volume_m3: 1.0
+    pressure_Pa: 103548.675
+    gas_temperature_K: 300.0
+    initial_densities_m3:
+      Ar: 2.5e+25
+      Ar_plus: 1000000.0
+    initial_mean_energy_eV: 3.0
+  edges: []
+  surfaces: []
+  gas_inlets: []
+  pumps: []
+  power_ports: []
+recipe:
+  recipe_id: crane_two_reaction_argon
+  description: 'Single transient interval matching CRANE tutorials/TwoReactionArgon.
+    No inlet, pump, wall, or power source is included.
+
+    '
+  start_time_s: 0.0
+  steps:
+  - step_id: transient
+    duration_s: 7.5e-07
+    commands:
+      gas_inlets: {}
+      power_ports: {}
+      surfaces: {}
+models:
+  electrons:
+    kind: maxwellian
+  electron_closure:
+    kind: electron_energy
+  electron_density:
+    kind: quasineutral
+  gas_energy:
+    kind: fixed
+solver:
+  method: BDF
+  rtol: 1.0e-08
+  atol: 1.0e-14
+  first_step_s: 1.0e-12
+  max_step_s: 1.0e-09
+  sample_interval_s: 3.768844221105528e-09
+output:
+  observables:
+  - electron_density_m3[plasma]
+  - mean_energy_eV[plasma]
+  - charge_residual_m3[plasma]
+  summary_series:
+  - n[plasma,Ar]
+  - n[plasma,Ar_plus]
+  - electron_density_m3[plasma]
+  - mean_energy_eV[plasma]

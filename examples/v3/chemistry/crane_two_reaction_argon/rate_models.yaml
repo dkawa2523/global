@@ -1,0 +1,7 @@
+rate_models:
+  RM_CRANE_AR_ION:
+    kind: constant
+    value: 2.1736169000623e-18
+  RM_CRANE_ARPLUS_THREE_BODY_RECOMB:
+    kind: constant
+    value: 1.0e-37

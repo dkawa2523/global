@@ -1,3 +1,5 @@
-from plasma_global.api import build_case, load_case_from_yaml, run_from_yaml
+"""Public API for loading, simulating, and persisting a plasma-global case."""
 
-__all__ = ['load_case_from_yaml', 'build_case', 'run_from_yaml']
+from plasma_global.api import load_case, simulate, write_result
+
+__all__ = ["load_case", "simulate", "write_result"]

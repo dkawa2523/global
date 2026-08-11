@@ -1,0 +1,7 @@
+schema_version: 3
+species: species.csv
+gas_reactions: gas_reactions.csv
+boundary_reactions: boundary_reactions.csv
+rate_models: rate_models.yaml
+provenance:
+  fixture: canonical-minimal-v3

@@ -1,4 +1,0 @@
-source: ZDPlaskin example2 committed output
-generator: tools/external_benchmarks/build_zdplaskin_output_rate_table.py
-grid_column: EoverN_Td
-note: Rates are reverse-engineered from saved ZDPlaskin reaction-rate columns, including the BOLSIG+/superelastic behavior present in that run.

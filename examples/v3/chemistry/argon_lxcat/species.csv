@@ -1,0 +1,7 @@
+id,phase,charge,mass_amu,elements,state_tags,surfaces,display_name
+e,gas,-1,0.00054858,,electron,,e
+Ar,gas,0,39.948,Ar:1,stable|parent,,Ar
+Ar_plus,gas,1,39.948,Ar:1,ion,,Ar+
+wafer:*,surface,0,0.0,site:1,site,wafer,wafer:*
+wall:*,surface,0,0.0,site:1,site,grounded_wall,wall:*
+source:*,surface,0,0.0,site:1,site,source_wall,source:*

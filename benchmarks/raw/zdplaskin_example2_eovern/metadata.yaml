@@ -1,0 +1,5 @@
+source: ZDPlaskin example2 committed output
+source_repository: https://github.com/Hemadityamalla/ZDPlaskin
+source_artifact: example2/Ar2Reac_1000V_100kOhm_100t_0.4d_0.4r.dat
+provenance: tools/benchmarks/build_zdplaskin_rate_table.py
+note: Rates are reverse-engineered from saved ZDPlaskin reaction-rate columns, including the BOLSIG+/superelastic behavior present in that run.

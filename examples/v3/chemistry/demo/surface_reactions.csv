@@ -1,0 +1,8 @@
+id,equation,rate_model,energy_loss_eV,zones,surfaces,notes
+S1001,F + wafer:* -> wafer:F*,RM_S_F_WAFER_STICK,,process,wafer,adsorption on wafer
+S1002,CF3 + wafer:* -> wafer:poly* + F,RM_S_CF3_POLYMERIZE,,process,wafer,polymer precursor sticking
+S1003,F + wall:* -> wall:F*,RM_S_F_WALL_STICK,,process,grounded_wall,wall adsorption
+S1004,F + source:* -> source:F*,RM_S_F_SOURCE_RECOMB,,source,source_wall,representative source-wall fluorine sticking channel
+S1005,Ar_plus + wafer:F* -> Ar_plus + wafer:* + F,RM_S_AR_ION_DESORB,,process,wafer,ion-assisted desorption of adsorbed fluorine
+S1006,wafer:F* -> wafer:* + F,RM_S_F_DESORB,,process,wafer,thermal desorption example
+S1007,wafer:F* + wafer:F* -> wafer:* + wafer:* + F2,RM_S_F_LH_RECOMB,,process,wafer,Langmuir-Hinshelwood recombination example

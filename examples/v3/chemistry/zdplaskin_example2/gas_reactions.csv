@@ -1,0 +1,11 @@
+id,equation,rate_model,energy_loss_eV,zones,surfaces,notes
+ZDP_AR_ION,e + Ar -> e + e + Ar_plus,RM_E_AR_ION_ZDP,15.8,plasma,,ZDPlaskin example2 ground-state ionization
+ZDP_AR_EXC,e + Ar -> Ar_star + e,RM_E_AR_EXC_ZDP,11.5,plasma,,ZDPlaskin example2 lumped excitation Ar <-> Ar*; forward excitation only
+ZDP_ARSTAR_DEEXC,Ar_star + e -> Ar + e,RM_E_ARSTAR_DEEXC_ZDP,,plasma,,ZDPlaskin example2 BOLSIG superelastic/de-excitation rate from output-derived E/N table
+ZDP_ARSTAR_ION,e + Ar_star -> Ar_plus + e + e,RM_E_ARSTAR_ION_ZDP,4.3,plasma,,ZDPlaskin example2 shifted Ar* ionization
+ZDP_AR2PLUS_DISS_RECOMB,Ar2_plus + e -> Ar_star + Ar,RM_AR2PLUS_DISS_RECOMB_ZDP,,plasma,,8.5e-7 cm3/s electron dissociative recombination; Te power omitted
+ZDP_AR2PLUS_CONVERSION,Ar2_plus + Ar -> Ar_plus + Ar + Ar,RM_AR2PLUS_CONVERSION_ZDP,,plasma,,6.06e-6/Tgas exp(-15130/Tgas) cm3/s
+ZDP_ARSTAR_POOLING,Ar_star + Ar_star -> Ar2_plus + e,RM_ARSTAR_POOLING_ZDP,,plasma,,6.0e-10 cm3/s
+ZDP_ARPLUS_THREE_BODY_RECOMB,Ar_plus + e + e -> Ar + e,RM_ARPLUS_THREE_BODY_RECOMB_ZDP,,plasma,,8.75e-27 cm6/s three-body recombination; Te power omitted
+ZDP_ARSTAR_THREE_BODY_QUENCH,Ar_star + Ar + Ar -> Ar + Ar + Ar,RM_ARSTAR_THREE_BODY_QUENCH_ZDP,,plasma,,1.4e-32 cm6/s
+ZDP_ARPLUS_CLUSTERING,Ar_plus + Ar + Ar -> Ar2_plus + Ar,RM_ARPLUS_CLUSTERING_ZDP,,plasma,,2.25e-31 (Tgas/300)^-0.4 cm6/s

@@ -1,0 +1,3 @@
+id,equation,zones,surfaces
+wall_Ar_plus_neutralization,Ar_plus -> Ar,,
+wall_Ar2_plus_neutralization,Ar2_plus -> 2 Ar,,

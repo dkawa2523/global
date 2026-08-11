@@ -1,0 +1,125 @@
+rate_models:
+  RM_E_AR_ION:
+    kind: electron_impact
+    cross_section: xs_ar_ionization_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_01:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_01_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_02:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_02_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_03:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_03_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_04:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_04_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_05:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_05_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_06:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_06_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_07:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_07_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_08:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_08_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_09:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_09_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_10:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_10_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_11:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_11_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_12:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_12_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_13:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_13_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_14:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_14_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_15:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_15_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_16:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_16_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_17:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_17_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_18:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_18_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_19:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_19_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_20:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_20_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_21:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_21_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_22:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_22_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_23:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_23_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_24:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_24_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_25:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_25_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_26:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_26_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_27:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_27_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_28:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_28_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_29:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_29_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_30:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_30_zenodo
+    branching_yield: 1.0

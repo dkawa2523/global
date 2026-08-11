@@ -5,13 +5,11 @@ site_dir: site
 theme:
   name: readthedocs
 nav:
-  - Home: index.md
   - Architecture: ARCHITECTURE.md
-  - Configuration: CONFIGURATION.md
+  - Schema: SCHEMA.md
   - Physics and Numerics: PHYSICS_NUMERICS.md
-  - Swarm Rate Tables: SWARM_RATE_TABLES.md
-  - CLI and API: CLI_API.md
-  - Chemistry: CHEMISTRY.md
+  - Migration: MIGRATION.md
+  - Benchmarks: BENCHMARKS.md
 markdown_extensions:
   - fenced_code
   - tables

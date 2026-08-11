@@ -1,0 +1,57 @@
+schema_version: 3
+case:
+  name: canonical-minimal-v3
+  description: Minimal executable schema-v3 fixture
+chemistry:
+  manifest: chemistry.yaml
+reactor:
+  chamber_id: chamber
+  zones:
+    - zone_id: plasma
+      volume_m3: 0.01
+      pressure_Pa: 0.8283894
+      gas_temperature_K: 300.0
+      initial_densities_m3:
+        Ar: 2.0e+20
+        Ar_plus: 1.0e+12
+      initial_mean_energy_eV: 3.0
+  surfaces:
+    - surface_id: wall
+      zone_id: plasma
+      area_m2: 0.1
+      temperature_K: 300.0
+      wall_transport:
+        kind: bohm
+  power_ports:
+    - port_id: source
+      zone_id: plasma
+      model:
+        kind: prescribed_power
+        electron_fraction: 1.0
+        gas_fraction: 0.0
+recipe:
+  recipe_id: pulse
+  start_time_s: 0.0
+  steps:
+    - step_id: powered
+      duration_s: 1.0e-7
+      commands:
+        power_ports:
+          source:
+            kind: prescribed_power
+            absorbed_power_W: 1.0e-6
+models:
+  electrons:
+    kind: maxwellian
+  electron_closure:
+    kind: electron_energy
+  electron_density:
+    kind: quasineutral
+  gas_energy:
+    kind: fixed
+solver:
+  method: BDF
+  rtol: 1.0e-6
+  atol: 1.0e-14
+  max_step_s: 2.5e-8
+output: {}

@@ -1,98 +1,48 @@
 # Plasma Global Model
 
-YAML-driven 0D / multi-zone low-pressure plasma global model.
+反応機構、装置、レシピを入力として、低圧プラズマの体積平均状態を計算する
+0D／multi-zone global model です。空間分布を解く流体・PIC・電磁界ソルバーでは
+ありません。定量利用には対象装置での検証が必要です。
 
-The core loads a case, builds chemistry/reactor/EEDF/electrical/numerics
-components, solves the ODE system, and writes configured outputs.
-
-## Reading Map
-
-Start here when reviewing or extending the code:
-
-1. `plasma_global/workflows/runner.py` is the shortest end-to-end path:
-   load, build, solve, write outputs.
-2. `plasma_global/workflows/case_loader.py` validates and loads YAML, reactor,
-   recipe, chemistry, rate, and cross-section inputs.
-3. `plasma_global/workflows/case_builder.py` turns loaded inputs into backend
-   instances, state layout, and `GlobalPlasmaSystem`.
-4. `plasma_global/numerics/system.py` is the solver-facing coordinator. It owns
-   the state vector contract and delegates gas, surface, process, EEDF, and
-   electrical details to smaller modules.
-5. `plasma_global/coupling/evaluation.py` evaluates the algebraic
-   coupling needed by each RHS call: electrical power, EEDF rates, transport,
-   electron density, mean energy, pressure, and ion metadata.
-6. `plasma_global/physics/*_core.py` modules apply RHS terms. They should remain
-   small orchestrators over helper modules, not become new monoliths.
-
-The main design rule is: keep external data loading, validation, backend
-selection, RHS assembly, and postprocessing in separate layers. Runtime RHS code
-consumes prepared Python objects and does not call external executables.
-
-## Non-Goals
-
-This package is not:
-
-- a spatial fluid or PIC solver
-- a detailed RF sheath or electromagnetic solver
-- a feature-scale surface simulator
-- a runtime wrapper around external swarm or circuit executables
-
-Use the results as reduced-order model output. Quantitative cases need
-case-specific calibration or validation.
-
-## Install
-
-Python 3.11 or newer is expected.
+Python 3.11 以上を対象とします。
 
 ```bash
-python -m pip install -e ".[io,dev]"
+python -m pip install -e ".[dev]"
 ```
 
-Minimal install:
-
-```bash
-python -m pip install -e .
-```
-
-## CLI
-
-```bash
-python -m plasma_global.cli validate examples/configs/case_smoke.yaml
-python -m plasma_global.cli run examples/configs/case_smoke.yaml
-python -m plasma_global.cli list-backends
-python -m plasma_global.cli export-config examples/configs/case_smoke.yaml tmp_case_export
-```
-
-## Python API
+公開 Python API は、読み込み・計算・保存の3操作だけです。
 
 ```python
-from plasma_global import load_case_from_yaml, build_case, run_from_yaml
+from plasma_global import load_case, simulate, write_result
 
-loaded = load_case_from_yaml("examples/configs/case_smoke.yaml")
-built = build_case(loaded)
-result = run_from_yaml("examples/configs/case_smoke.yaml")
+case = load_case("case.yaml")
+result = simulate(case)
+paths = write_result(result, "runs/case")
 ```
 
-Stable public API:
+`write_result` は常に `result.h5` と `summary.yaml` を作成します。
 
-- `load_case_from_yaml`
-- `build_case`
-- `run_from_yaml`
+通常利用の標準範囲は、固定気体温度、準中性・電気的正性、実断面積を使う
+Maxwellian electron-energy closure、prescribed absorbed power、単一一価正イオンの
+Bohm floating wall、生成物が一意な boundary reaction、inlet／pump／zone transport です。
+`plasma-global audit` は、この allow-list 内を `standard`、それ以外を `experimental` と
+分類します。experimental 機能も明示指定すれば実行できますが、装置予測精度は主張しません。
 
-## Outputs
-
-Configured runs may write:
-
-- `summary.yaml`
-- `observables.csv`
-- `solution.h5` when HDF5 output is enabled and `h5py` is installed
-- `effective_case.yaml`
-- `resolved_paths.yaml`
-
-Generated outputs are ignored by git and should be regenerated from case files.
-
-## Tests
+CLI は次の7コマンドです。
 
 ```bash
-python -m pytest
+plasma-global validate case.yaml
+plasma-global run case.yaml --output runs/case
+plasma-global audit case.yaml
+plasma-global migrate-v2 old-case.yaml --output migrated-case.yaml
+plasma-global models
+plasma-global export runs/case/result.h5 --csv result.csv
+plasma-global plot runs/case/result.h5 "n[plasma,Ar_plus]"
 ```
+
+`examples/v3/cases/argon_lxcat.yaml`、`rf_envelope_calibration.yaml`、`smoke.yaml` は
+それぞれ trend／calibration／stress fixture であり、production benchmark ではありません。
+
+詳細は [Architecture](docs/ARCHITECTURE.md)、[Schema](docs/SCHEMA.md)、
+[Physics and Numerics](docs/PHYSICS_NUMERICS.md)、
+[Migration](docs/MIGRATION.md)、[Benchmarks](docs/BENCHMARKS.md) を参照してください。

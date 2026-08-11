@@ -1,117 +1,147 @@
 from __future__ import annotations
 
+import json
+from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 
-import pytest
-import yaml
+import numpy as np
 
-from plasma_global.cli import main
-from plasma_global import build_case, load_case_from_yaml
-from plasma_global.eedf.registry import EEDF_REGISTRY
-from plasma_global.electrical.registry import ELECTRICAL_REGISTRY
-
-
-ROOT = Path(__file__).resolve().parents[1]
-SMOKE_CASE = ROOT / 'examples' / 'configs' / 'case_smoke.yaml'
+import plasma_global
+from plasma_global import cli
+from plasma_global.audit import AuditReport
+from plasma_global.core.result import SimulationResult
+from plasma_global.output import ResultPaths
 
 
-def test_smoke_case_validates() -> None:
-    loaded = load_case_from_yaml(SMOKE_CASE)
-    assert loaded.run_config.case.name == 'smoke_maxwell'
-    assert not any(msg['level'] == 'ERROR' for msg in loaded.validation_messages)
+def _result(*, success: bool = True) -> SimulationResult:
+    from plasma_global.core.result import SimulationStatus
 
-
-def test_backend_registries_expose_descriptions() -> None:
-    details = EEDF_REGISTRY.details()
-    assert set(details) == {'maxwell', 'swarm'}
-    assert 'description' in details['swarm']
-    assert 'swarm.model_name' in details['swarm']['description']
-    assert details['swarm']['maturity'] == 'configuration_dependent'
-    assert 'Prepared HDF5' in details['swarm']['intended_use']
-    assert 'approximate' in details['swarm']['caveat']
-    electrical = ELECTRICAL_REGISTRY.details()
-    assert 'description' in electrical['dc_series_circuit']
-    assert 'ballast-resistor' in electrical['dc_series_circuit']['description']
-    assert electrical['external_circuit_table']['maturity'] == 'data_driven'
-
-
-def test_state_layout_labels_are_stable() -> None:
-    built = build_case(load_case_from_yaml(SMOKE_CASE))
-    labels = built.system.state_labels()
-    assert len(labels) == built.state_layout.size
-    assert len(set(labels)) == len(labels)
-    assert any(label.startswith('n[') for label in labels)
-    assert any(label.startswith('We[') for label in labels)
-    assert 'film_thickness' in built.state_layout.slices
-    assert any(label.startswith('film[') for label in labels)
-    assert built.system.surface_core.enabled is True
-    assert built.system.surface_core.surface_reactions
-
-
-def test_cli_validate_returns_success() -> None:
-    assert main(['validate', str(SMOKE_CASE)]) == 0
-
-
-def test_schema_v1_run_yaml_shape_is_rejected(tmp_path: Path) -> None:
-    case_path = tmp_path / 'run.yaml'
-    case_path.write_text(
-        yaml.safe_dump(
-            {
-                'project': {'name': 'schema_v1_case'},
-                'paths': {
-                    'chamber_file': 'chamber.yaml',
-                    'recipe_file': 'recipe.yaml',
-                    'output_dir': 'out',
-                },
-                'model': {'eedf_backend': 'maxwell'},
-            },
-            sort_keys=False,
-        ),
-        encoding='utf-8',
+    return SimulationResult(
+        time_s=np.array([0.0, 1.0]),
+        state=np.array([[1.0], [2.0]]),
+        state_labels=("density",),
+        status=SimulationStatus(success, "completed" if success else "failed"),
     )
-    with pytest.raises(ValueError, match='Unsupported configuration schema'):
-        load_case_from_yaml(case_path)
 
 
-def test_schema_version_one_is_validation_error(tmp_path: Path) -> None:
-    raw = yaml.safe_load(SMOKE_CASE.read_text(encoding='utf-8'))
-    raw['include'] = str((SMOKE_CASE.parent / raw['include']).resolve())
-    raw.setdefault('case', {})['schema_version'] = 1
-    case_path = tmp_path / 'case_schema_v1.yaml'
-    case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
-
-    with pytest.raises(ValueError, match='UNSUPPORTED_SCHEMA_VERSION'):
-        load_case_from_yaml(case_path)
+def test_top_level_api_exposes_only_three_operations() -> None:
+    assert plasma_global.__all__ == ["load_case", "simulate", "write_result"]
 
 
-def test_chemistry_directory_config_is_rejected(tmp_path: Path) -> None:
-    raw = yaml.safe_load(SMOKE_CASE.read_text(encoding='utf-8'))
-    raw['include'] = str((SMOKE_CASE.parent / raw['include']).resolve())
-    raw['files']['chemistry'] = {'directory': str(ROOT / 'examples' / 'chemistry')}
-    case_path = tmp_path / 'case_chemistry_directory.yaml'
-    case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
+def test_cli_validate_is_monkeypatchable_without_build(tmp_path, monkeypatch) -> None:
+    case = object()
+    compiled: list[object] = []
+    monkeypatch.setattr(cli, "load_case", lambda _path: case)
+    monkeypatch.setattr(cli, "_compile_case", compiled.append)
 
-    with pytest.raises(ValueError, match='Unsupported files.chemistry keys: directory'):
-        load_case_from_yaml(case_path)
-
-
-def test_unknown_outputs_key_is_rejected_at_load_time(tmp_path: Path) -> None:
-    raw = yaml.safe_load(SMOKE_CASE.read_text(encoding='utf-8'))
-    raw['include'] = str((SMOKE_CASE.parent / raw['include']).resolve())
-    raw.setdefault('outputs', {})['debug_bundle'] = True
-    case_path = tmp_path / 'case_unknown_outputs.yaml'
-    case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
-
-    with pytest.raises(ValueError, match='Unsupported outputs keys: debug_bundle'):
-        load_case_from_yaml(case_path)
+    assert cli.main(["validate", str(tmp_path / "case.yaml")]) == 0
+    assert compiled == [case]
 
 
-def test_unknown_swarm_key_is_rejected_at_load_time(tmp_path: Path) -> None:
-    raw = yaml.safe_load(SMOKE_CASE.read_text(encoding='utf-8'))
-    raw['include'] = str((SMOKE_CASE.parent / raw['include']).resolve())
-    raw.setdefault('swarm', {})['debug_transport_dump'] = True
-    case_path = tmp_path / 'case_unknown_swarm.yaml'
-    case_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding='utf-8')
+def test_cli_run_uses_three_public_operations(tmp_path, monkeypatch) -> None:
+    output = tmp_path / "run"
+    case = object()
+    result = _result()
+    calls: list[tuple[SimulationResult, Path]] = []
+    monkeypatch.setattr(cli, "load_case", lambda _path: case)
+    monkeypatch.setattr(
+        cli, "simulate", lambda value: result if value is case else None
+    )
 
-    with pytest.raises(ValueError, match='Unsupported swarm keys: debug_transport_dump'):
-        load_case_from_yaml(case_path)
+    def fake_write(value, directory):
+        calls.append((value, directory))
+        return ResultPaths(
+            directory, directory / "result.h5", directory / "summary.yaml"
+        )
+
+    monkeypatch.setattr(cli, "write_result", fake_write)
+
+    assert cli.main(["run", str(tmp_path / "case.yaml"), "--output", str(output)]) == 0
+    assert calls == [(result, output)]
+
+
+def test_cli_audit_export_and_plot_use_canonical_syntax(tmp_path, monkeypatch) -> None:
+    case_path = tmp_path / "case.yaml"
+    result_path = tmp_path / "result.h5"
+    exported = tmp_path / "result.csv"
+    plot_dir = tmp_path / "figures"
+    calls: dict[str, object] = {}
+
+    case = object()
+
+    def fake_audit(value):
+        calls["audit"] = value
+        return AuditReport()
+
+    def fake_export(source, destination):
+        calls["export"] = (source, destination)
+        return destination
+
+    def fake_plot(source, destination, **options):
+        calls["plot"] = (source, destination, options)
+        return (destination / "density.png",)
+
+    monkeypatch.setattr(
+        cli, "load_case", lambda path: case if path == case_path else None
+    )
+    monkeypatch.setattr(cli, "audit_case", fake_audit)
+    monkeypatch.setattr(cli, "export_result_csv", fake_export)
+    monkeypatch.setattr(cli, "plot_result_h5", fake_plot)
+
+    assert cli.main(["audit", str(case_path)]) == 0
+    assert cli.main(["export", str(result_path), "--csv", str(exported)]) == 0
+    assert (
+        cli.main(
+            [
+                "plot",
+                str(result_path),
+                "density",
+                "--output",
+                str(plot_dir),
+            ]
+        )
+        == 0
+    )
+    assert calls["export"] == (result_path, exported)
+    assert calls["audit"] is case
+    assert calls["plot"][1] == plot_dir
+    assert calls["plot"][2]["series"] == ["density"]
+
+
+def test_cli_migrate_v2_calls_the_real_migration_boundary(
+    tmp_path, monkeypatch
+) -> None:
+    migration = import_module("plasma_global.input.migrate_v2")
+
+    source = tmp_path / "v2.yaml"
+    destination = tmp_path / "v3.yaml"
+    called: list[tuple[Path, Path]] = []
+
+    def fake_migrate(source_path, destination_path, **options):
+        called.append((source_path, destination_path))
+        assert options == {
+            "boundary_products": None,
+            "cross_section_segments": None,
+        }
+        return SimpleNamespace(
+            report=SimpleNamespace(warnings=("review me",), unused_keys=("old.key",))
+        )
+
+    monkeypatch.setattr(migration, "migrate_v2_to_yaml", fake_migrate)
+
+    assert cli.main(["migrate-v2", str(source), "--output", str(destination)]) == 0
+    assert called == [(source, destination)]
+
+
+def test_cli_models_lists_schema_v3_discriminator_ids(capsys) -> None:
+    assert cli.main(["models", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["electrons"] == [
+        "maxwellian",
+        "table",
+        "experimental.approximate_two_term",
+    ]
+    assert "experimental.icp" in payload["power"]
+    assert "bohm" in payload["wall_transport"]

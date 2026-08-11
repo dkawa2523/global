@@ -1,0 +1,3 @@
+id,equation,rate_model,energy_loss_eV,zones,surfaces,notes
+CRANE_AR_ION,e + Ar -> e + e + Ar_plus,RM_CRANE_AR_ION,,plasma,,CRANE TwoReactionArgon ionization rate at E/N=30 Td; converted from 2.1736169000623e-12 cm3/s.
+CRANE_ARPLUS_THREE_BODY_RECOMB,e + Ar_plus + Ar -> Ar + Ar,RM_CRANE_ARPLUS_THREE_BODY_RECOMB,,plasma,,CRANE TwoReactionArgon three-body recombination; converted from 1.0e-25 cm6/s.

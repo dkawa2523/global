@@ -1,0 +1,64 @@
+cross_sections:
+- id: xs_ar_mt
+  kind: momentum_transfer
+  target: Ar
+  threshold_eV: 0.0
+  energy_loss_eV: 0.0
+  file: cross_sections/xs_ar_mt.csv
+  metadata:
+    demo_data: true
+    note: synthetic demo table for reader testing
+- id: xs_cf4_mt
+  kind: momentum_transfer
+  target: CF4
+  threshold_eV: 0.0
+  energy_loss_eV: 0.0
+  file: cross_sections/xs_cf4_mt.csv
+  metadata:
+    demo_data: true
+    note: synthetic demo table for reader testing
+- id: xs_o2_mt
+  kind: momentum_transfer
+  target: O2
+  threshold_eV: 0.0
+  energy_loss_eV: 0.0
+  file: cross_sections/xs_o2_mt.csv
+  metadata:
+    demo_data: true
+    note: synthetic demo table for reader testing
+- id: xs_ar_ionization
+  kind: ionization
+  target: Ar
+  threshold_eV: 15.76
+  energy_loss_eV: 15.76
+  file: cross_sections/xs_ar_ionization.csv
+  metadata:
+    demo_data: true
+    note: synthetic demo table for reader testing
+- id: xs_cf4_dissociation
+  kind: dissociation
+  target: CF4
+  threshold_eV: 12.5
+  energy_loss_eV: 12.5
+  file: cross_sections/xs_cf4_dissociation.csv
+  metadata:
+    demo_data: true
+    note: synthetic demo table for reader testing
+- id: xs_o2_dissociation
+  kind: dissociation
+  target: O2
+  threshold_eV: 6.0
+  energy_loss_eV: 6.0
+  file: cross_sections/xs_o2_dissociation.csv
+  metadata:
+    demo_data: true
+    note: synthetic demo table for reader testing
+- id: xs_o2_attachment
+  kind: attachment
+  target: O2
+  threshold_eV: 4.5
+  energy_loss_eV: 4.5
+  file: cross_sections/xs_o2_attachment.csv
+  metadata:
+    demo_data: true
+    note: synthetic demo table for reader testing

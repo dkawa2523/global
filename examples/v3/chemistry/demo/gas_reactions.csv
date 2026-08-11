@@ -1,0 +1,6 @@
+id,equation,rate_model,energy_loss_eV,zones,surfaces,notes
+G0000,e + Ar -> Ar_plus + e + e,RM_E_AR_ION,15.8,source|process,,seed ionization for algebraic quasi-neutrality
+G0001,e + CF4 -> CF3 + F + e,RM_E_CF4_DISS,12.5,source|process,,example electron-impact dissociation
+G0002,e + O2 -> O + O + e,RM_E_O2_DISS,6.0,source|process,,example electron-impact dissociation
+G0003,e + O2 -> O_minus + O,RM_E_O2_ATTACH,4.5,source|process,,example attachment
+G0004,F + CF3 -> CF4,RM_NEUTRAL_RECOMB,,source|process,,example neutral recombination

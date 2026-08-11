@@ -1,113 +1,98 @@
 # Architecture
 
-The package is a small YAML-to-ODE workflow for 0D / multi-zone global plasma
-models.
+## 設計の中心
 
-## Design Principles
-
-- Keep the runtime path explicit: YAML/CSV/HDF5 inputs are normalized before the
-  ODE system is built.
-- Keep the solver-facing core small: `GlobalPlasmaSystem` owns the state vector,
-  RHS composition, projection, labels, and events, then delegates domain logic.
-- Prefer simple registries over implicit plugin discovery. Adding a backend
-  should be a visible change in the registry owned by that backend domain.
-- Treat EEDF, electrical power, wall loss, surface chemistry, and postprocessing
-  as separate concerns. Data should cross boundaries through typed request/result
-  objects or compact dataclasses.
-- Keep external solvers offline. The runtime can read prepared rate, transport,
-  or circuit tables, but the RHS should not launch external programs.
-
-## Run Flow
+本パッケージは、反応機構・反応器・時間レシピから、体積平均した 0D / multi-zone
+プラズマの粒子密度とエネルギーを積分する Global Model です。設定辞書を実行時に
+参照せず、入力時に一度だけ検証・コンパイルします。
 
 ```text
-run_from_yaml(case.yaml)
-  -> load_case_from_yaml
-       -> load schema-v2 case config
-       -> resolve paths relative to the case file
-       -> validate config, reactor/recipe structure, and chemistry
-       -> load chamber, recipe, species, reactions, rate models, cross sections
-  -> build_case
-       -> build EEDF, electrical, and integrator backends from registries
-       -> prepare backends with loaded inputs
-       -> build the ODE state layout
-       -> create GlobalPlasmaSystem
-  -> solve_built_case
-       -> initialize and project state
-       -> solve each recipe step with the configured integrator
-       -> project segment outputs and pass final state to the next step
-  -> write_run_outputs
-       -> compute observables and summaries
-       -> write configured files and plots
+case.yaml
+  -> input/load.py + input/schema.py       strict schema v3
+  -> chemistry/data.py + chemistry/compile.py
+  -> build.py                              composition root
+  -> core/compiled.py + models/            immutable numerical model
+  -> core/solver.py                        segmented SciPy BDF
+  -> core/result.py                        immutable result
+  -> output.py / audit.py                  persistence / detailed audit
 ```
 
-During each RHS call:
+公開 Python API は次の 3 操作だけです。
 
-```text
-GlobalPlasmaSystem.rhs(t, y)
-  -> current recipe step
-  -> PlasmaCouplingEvaluator.evaluate
-       -> project state into zone electrical metadata
-       -> evaluate electrical backend
-       -> evaluate EEDF backend using power/field and plasma state
-       -> optionally iterate transport mobility coupling
-  -> GasPhaseCore.apply_rhs
-       -> gas reactions, ion wall losses, flows, power, energy relaxation
-  -> SurfaceCore.apply_rhs, if enabled
-  -> ProcessCore.apply_rhs, if enabled
-  -> positivity guard
+```python
+from plasma_global import load_case, simulate, write_result
+
+case = load_case("case.yaml")
+result = simulate(case)  # ファイルを書かない
+paths = write_result(result, "runs/case")  # result.h5 + summary.yaml
 ```
 
-## Layers
+## 責務
 
-- `config`: schema-v2 loading, includes, path resolution, validation, exports.
-- `chemistry`: species, reactions, cross sections, rate models, provenance.
-- `reactor`: chamber, zone, surface, inlet, pump, edge, recipe data, and structural validation.
-- `eedf`: Maxwell closure plus a swarm wrapper for Boltzmann-like and HDF5 table models.
-- `electrical`: reduced absorbed-power, RF, DC, and one-way table backends.
-- `coupling`: per-RHS-call projection and algebraic power/EEDF coupling.
-- `physics`: gas-phase RHS, wall loss, and optional surface RHS terms.
-- `numerics`: state layout, `GlobalPlasmaSystem`, and SciPy BDF integration.
-- `observables`: compact postprocessed records and summaries.
-- `workflows`: load, build, solve, and output orchestration.
+| 場所 | 責務 |
+|---|---|
+| `input/schema.py` | strict・frozen な v3 入力型と相互参照の検証 |
+| `input/load.py` | YAML、単一 `include`、宣言元基準の相対 path 解決 |
+| `chemistry/data.py` | canonical SI chemistry と外部表の厳格な読込み |
+| `chemistry/compile.py` | 化学量論、反応次数、rate evaluator、Jacobian 依存関係の配列化 |
+| `input/compile_reactor.py` | zone、wall/surface、transport、power port の構築 |
+| `input/compile_recipe.py` | step、pulse、table/profile 不連続点を固定 segment へ bind |
+| `build.py` | `CaseSpec` から完全初期化済み `CompiledCase` を一度だけ構築 |
+| `core/compiled.py` | state layout、RHS、wall/surface flux ledger、energy ledger |
+| `core/solver.py` | segment ごとの BDF、内部 state scaling、sparsity、sampling |
+| `postprocess.py` | 明示選択された observable と通常診断の一回の評価 |
+| `core/result.py` | solver 非依存、time-major、read-only の結果契約 |
+| `output.py` | 固定 HDF5、summary、明示的 CSV export / plot |
+| `audit.py` | 実行を伴う詳細診断、反応保存則、file checksum provenance |
+| `experimental/` | 明示 opt-in の近似 EEDF、RF/CCP/ICP、外部電子密度、拡張状態、event stop |
 
-## Entry Points
+`core` は `input` と `experimental` を import しません。experimental model も入力時に
+標準 model と同じ小さな実行契約へ変換され、RHS には Pydantic model や YAML 辞書を
+渡しません。
 
-Python API:
+標準機能は、固定気体温度、準中性・電気的正性、実断面積 Maxwellian と electron-energy
+closure、prescribed absorbed power、単一一価正イオンの Bohm floating wall、決定的な
+boundary reaction、inlet／pump／inter-zone transport に限定します。別の設定を同じ標準契約へ
+押し込まず、実行機能を保ったまま audit で `experimental` と分類します。
 
-- `load_case_from_yaml(path)`
-- `build_case(loaded_case)`
-- `run_from_yaml(path)`
+## コンパイルと時間積分
 
-CLI:
+`simulate` は渡された `CaseSpec` を入口で再検証して snapshot を作り、呼出し側による読込み後の
+入れ子データ変更を hot path へ持ち込みません。`compile_case` は chemistry、外部
+rate/EEDF/power/profile table、flow、wall branch、
+surface kinetics、step command を読み、配列と immutable object へ変換します。外部ファイル
+の ID 解決、sort、static validation は RHS では行いません。
 
-- `validate`
-- `run`
-- `list-backends`
-- `export-config`
+state は zone-major で、各 zone の heavy species density に続いて、選択した closure に
+応じた electron energy と gas internal energy を置きます。その後に surface coverage と
+experimental accumulator state が続きます。唯一の位置契約は `StateLayout` が所有し、
+出力は `state.shape == (n_time, n_state)` の time-major です。
 
-See [CLI and API](CLI_API.md).
+recipe step、square pulse、`external_table` の previous 補間、prescribed electron profile の
+不連続時刻は、積分前に連続な forcing segment へ分割します。一つの `solve_ivp` 呼出しは
+一つの固定 segment だけを参照するため、境界時刻を次 step と誤認しません。sampling は
+積分制御と分離され、未指定時は solver accepted points と全 forcing 境界を保存します。
+保存点は入力形式を増やさない固定上限 100,000 点で制限します。
 
-## Core Boundary
+## 結果と診断
 
-`GlobalPlasmaSystem` owns the solver-facing state layout, initial state, RHS,
-projection, labels, and solver events. Gas, surface, process, EEDF, and
-electrical details stay in their modules. `GasPhaseCore` is the gas RHS
-orchestrator; gas state projection/initialization, wall-loss terms, gas
-reactions, flow terms, and table-driven electron-energy relaxation live in
-small helper modules. Coupled-state construction and the power/EEDF handshake
-live in `coupling/state_view.py` and `coupling/evaluation.py`.
+`SimulationResult` が公開するのは時刻、state、label、選択済み observable、status、solver
+statistics、`series(name)` です。backend、integrator、compiled system は漏らしません。
 
-Chemistry validation is similarly split by responsibility: `validators.py`
-coordinates the checks, `reaction_validation.py` validates reaction balance and
-rate references, and `extension_validation.py` validates extra state/process
-extensions. Chemistry loading keeps manifest parsing and rate-model file
-loading outside the top-level `io.py` entry point.
+通常の `run` は fail-fast で、成功時は固定構造の `result.h5` と簡潔な `summary.yaml` だけを
+生成します。両ファイルは同じ出力 directory の一時ファイルへ書き、serialize 完了後に
+replace します。summary の保存則欄には保存点での charge-closure 最大残差を含めます。`audit` は
+同じ case を積分し、静的な元素・電荷・site balance、particle/wall/flow と
+electron/heavy energy ledger closure、
+`standard` / `experimental` 分類、全入力ファイルの SHA-256 provenance を加えます。
 
-The core consumes prepared YAML, CSV, and HDF5 inputs. It does not call external
-solver executables from the RHS or normal case-building path. Observables,
-optional budget fields, summaries, plots, reports, and generated files are
-postprocessing.
+CSV と plot は canonical artifact ではなく、`export` / `plot` の明示操作です。
+matplotlib は plot 実行時だけ lazy import されます。
 
-Backends are selected by simple domain registries in `eedf/registry.py`,
-`electrical/registry.py`, and `numerics/registry.py`. Avoid plugin discovery,
-hidden metadata buses, or large protocol hierarchies in the core workflow.
+## 拡張の原則
+
+標準 allow-list を広げる変更は、物理閉包と benchmark を同時に検証した場合だけ行います。
+標準機能は `models/` の小さな責務として実装し、`build.py` で明示選択します。
+経験式、装置固有 closure、精度検証中の状態は `experimental.*` ID と provenance を必須に
+します。設定キーだけを増やす、RHS からファイルを読む、単一実装 registry や forwarding
+module を作る、暗黙 fallback で別モデルへ置換する、という拡張は行いません。

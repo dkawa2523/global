@@ -1,0 +1,10 @@
+schema_version: 3
+species: species.csv
+gas_reactions: gas_reactions.csv
+boundary_reactions: boundary_reactions.csv
+surface_reactions: surface_reactions.csv
+rate_models: rate_models.yaml
+cross_sections: cross_sections.yaml
+provenance:
+  migration_source: legacy-v2/demo
+  importer: tools.importers.chemistry_v2

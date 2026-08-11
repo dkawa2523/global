@@ -1,0 +1,43 @@
+rate_models:
+  RM_E_AR_ION_ZDP:
+    kind: electron_impact
+    cross_section: xs_zdp_ar_ionization
+    branching_yield: 1.0
+  RM_E_AR_EXC_ZDP:
+    kind: electron_impact
+    cross_section: xs_zdp_ar_excitation
+    branching_yield: 1.0
+  RM_E_ARSTAR_DEEXC_ZDP:
+    kind: electron_impact
+    cross_section: xs_zdp_ar_star_deexcitation
+    branching_yield: 1.0
+  RM_E_ARSTAR_ION_ZDP:
+    kind: electron_impact
+    cross_section: xs_zdp_ar_star_ionization
+    branching_yield: 1.0
+  RM_AR2PLUS_DISS_RECOMB_ZDP:
+    kind: experimental.electron_temperature_power_law
+    A: 8.5e-13
+    reference_temperature_K: 300.0
+    exponent: -0.67
+  RM_AR2PLUS_CONVERSION_ZDP:
+    kind: arrhenius
+    A: 2.02e-14
+    beta: -1.0
+    activation_eV: 1.3038025225625385
+  RM_ARSTAR_POOLING_ZDP:
+    kind: constant
+    value: 6.0e-16
+  RM_ARPLUS_THREE_BODY_RECOMB_ZDP:
+    kind: experimental.electron_temperature_power_law
+    A: 8.749999999999999e-39
+    reference_temperature_K: 11600.0
+    exponent: -4.5
+  RM_ARSTAR_THREE_BODY_QUENCH_ZDP:
+    kind: constant
+    value: 1.4e-44
+  RM_ARPLUS_CLUSTERING_ZDP:
+    kind: arrhenius
+    A: 2.25e-43
+    beta: -0.4
+    activation_eV: 0.0

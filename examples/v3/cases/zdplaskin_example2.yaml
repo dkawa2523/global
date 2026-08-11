@@ -1,0 +1,120 @@
+schema_version: 3
+case:
+  name: zdplaskin_example2_dc_series
+  description: 'Local executable parity case using the species set, nominal pressure,
+    nominal geometry, DC source/resistor drive, and output-derived E/N-rate table
+    from ZDPlaskin example2. The numerical method remains local to this code; the
+    benchmark setup is intentionally isolated from calibrated reactor cases.
+
+    '
+chemistry:
+  manifest: ../chemistry/zdplaskin_example2/chemistry.yaml
+reactor:
+  chamber_id: zdplaskin_example2_single_zone
+  description: 'Single-zone chamber matching the nominal dimensions and pressure of
+    ZDPlaskin example2. The original example is a voltage-resistor circuit discharge;
+    this chamber carries the geometry, pressure, gas, wall area, and a local DC series-circuit
+    power port into the global-model framework. The electron-impact rates are supplied
+    separately by the case E/N-rate table.
+
+    '
+  zones:
+  - zone_id: plasma
+    description: ZDPlaskin example2 cylinder volume
+    volume_m3: 2.010619298e-07
+    pressure_Pa: 13332.23684
+    gas_temperature_K: 300.0
+    initial_densities_m3:
+      Ar: 3.218833278166041e+24
+      Ar_star: 0.0
+      Ar_plus: 1.0e+12
+      Ar2_plus: 1.0e+12
+  edges: []
+  surfaces:
+  - surface_id: wall
+    zone_id: plasma
+    area_m2: 0.0002010619298
+    temperature_K: 300.0
+    site_density_m2: 1.0e+18
+    initial_coverages: {}
+    wall_transport:
+      kind: prescribed_frequency
+      frequency_s_inv: 3230.0
+  gas_inlets:
+  - inlet_id: initial_argon_seed
+    zone_id: plasma
+    flow_sccm:
+      Ar: 1.0e-30
+    temperature_K: 300.0
+  pumps: []
+  power_ports:
+  - port_id: dc_series_drive
+    zone_id: plasma
+    coupling_target: plasma
+    model:
+      kind: dc_series
+      ballast_resistance_ohm: 100000.0
+      gap_m: 0.004
+      electrode_area_m2: 5.0265482457e-05
+      source_voltage_V: 1000.0
+      power_absorption_fraction: 1.0
+      electron_mobility_m2_V_s: 0.45
+recipe:
+  recipe_id: zdplaskin_example2_surrogate
+  description: 'ZDPlaskin example2-inspired Ar discharge recipe. The source example
+    uses a 1000 V / 100 kOhm voltage-resistor circuit; this local case now uses the
+    internal DC series-circuit backend and an external E/N-rate table instead of a
+    fixed absorbed-power surrogate. The circuit parameters live on the chamber power
+    port so they are visible in one place.
+
+    '
+  start_time_s: 0.0
+  steps:
+  - step_id: dc_series_circuit
+    duration_s: 0.001
+    commands:
+      gas_inlets:
+        initial_argon_seed:
+          flow_sccm:
+            Ar: 1.0e-30
+      power_ports:
+        dc_series_drive:
+          kind: dc_series
+          off_voltage_V: 0.0
+          waveform:
+            kind: continuous
+      surfaces: {}
+models:
+  electrons:
+    kind: table
+    file: ../chemistry/zdplaskin_example2/tables/zdplaskin_example2_eovern_rates.h5
+    lookup: local_field
+    bounds_policy: error
+  electron_closure:
+    kind: local_field
+  electron_density:
+    kind: quasineutral
+  gas_energy:
+    kind: fixed
+solver:
+  method: BDF
+  rtol: 3.0e-06
+  atol: 1.0e-14
+  first_step_s: 1.0e-12
+  max_step_s: 1.0e-06
+  sample_interval_s: 5.025125628140704e-06
+output:
+  observables:
+  - electron_density_m3[plasma]
+  - mean_energy_eV[plasma]
+  - reduced_field_Td[plasma]
+  - absorbed_power_W[plasma]
+  - charge_residual_m3[plasma]
+  summary_series:
+  - n[plasma,Ar]
+  - n[plasma,Ar_star]
+  - n[plasma,Ar_plus]
+  - n[plasma,Ar2_plus]
+  - electron_density_m3[plasma]
+  - reduced_field_Td[plasma]
+  - absorbed_power_W[plasma]
