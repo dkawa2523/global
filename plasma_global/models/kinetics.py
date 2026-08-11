@@ -180,7 +180,10 @@ class TabulatedElectronKinetics:
                 f"{self.lookup} electron table lookup value is required"
             )
         query = self._query(supplied)
-        interpolate = lambda values: float(np.interp(query, self.axis, values))
+
+        def interpolate(values: np.ndarray) -> float:
+            return float(np.interp(query, self.axis, values))
+
         mean_energy = interpolate(self.mean_energy_eV)
         return ElectronKineticsResult(
             mean_energy_eV=mean_energy,

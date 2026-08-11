@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import h5py
@@ -18,12 +19,24 @@ from plasma_global.output import (
     audit_result_h5,
     build_summary,
     export_result_csv,
+    plot_result_h5,
     read_result_csv,
     read_result_h5,
     write_result,
     write_result_csv,
     write_result_h5,
 )
+
+
+def test_plotting_reports_the_missing_optional_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(output_module, "read_result_h5", lambda _path: _result())
+    monkeypatch.setitem(sys.modules, "matplotlib", None)
+
+    with pytest.raises(RuntimeError, match="optional dependency"):
+        plot_result_h5("result.h5", tmp_path)
 
 
 def _result() -> SimulationResult:

@@ -58,12 +58,15 @@ class ElectronCollision:
         object.__setattr__(self, "cross_section_m2", sigma)
 
     def interpolate(self, energy_eV: np.ndarray) -> np.ndarray:
-        return np.interp(
-            energy_eV,
-            self.energy_eV,
-            self.cross_section_m2,
-            left=0.0,
-            right=float(self.cross_section_m2[-1]),
+        return np.asarray(
+            np.interp(
+                energy_eV,
+                self.energy_eV,
+                self.cross_section_m2,
+                left=0.0,
+                right=float(self.cross_section_m2[-1]),
+            ),
+            dtype=float,
         )
 
 

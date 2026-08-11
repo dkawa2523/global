@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import os
 import re
 import shutil
@@ -561,8 +562,8 @@ def plot_result_h5(
     if not image_format.isalnum() or dpi <= 0:
         raise ValueError("plot format and dpi are invalid")
     try:
-        import matplotlib.pyplot as plt
-    except ImportError as exc:  # pragma: no cover - optional dependency
+        plt = importlib.import_module("matplotlib.pyplot")
+    except ImportError as exc:
         raise RuntimeError(
             "Plotting requires the optional dependency: pip install .[plot]"
         ) from exc

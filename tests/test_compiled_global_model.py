@@ -246,6 +246,63 @@ def test_rhs_never_clips_negative_density() -> None:
         model.evaluate(0.0, state, model.segments[0])
 
 
+def test_domain_tolerance_boundary_survives_validation_refactor() -> None:
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("z", 1.0),),
+        segments=(RecipeSegment("step", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+        domain_atol=0.2,
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={"z": {"Ar": 1.0e20, "Ar_plus": 1.0e15}},
+            mean_energy_eV_by_zone={"z": 3.0},
+        )
+    )
+    neutral_index = model.layout.density_slices["z"].start
+    state[neutral_index] = -2.0
+
+    accepted = model.evaluate(0.0, state, model.segments[0])
+    assert np.isfinite(accepted.derivative).all()
+
+    state[neutral_index] = np.nextafter(-2.0, -np.inf)
+    with pytest.raises(StateDomainError, match=r"-10\*domain_atol"):
+        model.evaluate(0.0, state, model.segments[0])
+
+
+def test_evaluation_ledger_reconstructs_energy_derivative() -> None:
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("plasma", 2.0),),
+        segments=(
+            RecipeSegment(
+                "powered", 0.0, 1.0, absorbed_power_W_by_zone={"plasma": 6.0}
+            ),
+        ),
+        electron_closure=ElectronEnergyClosure(),
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={"plasma": {"Ar": 1.0e20, "Ar_plus": 1.0e15}},
+            mean_energy_eV_by_zone={"plasma": 3.0},
+        )
+    )
+
+    evaluated = model.evaluate(0.0, state, model.segments[0])
+    ledger = evaluated.ledger_by_zone["plasma"]
+    energy_index = model.layout.electron_energy_indices["plasma"]
+    reconstructed = (
+        ledger.absorbed_power_J_m3_s
+        - ledger.reaction_energy_loss_J_m3_s
+        - ledger.wall_energy_loss_J_m3_s
+        - ledger.elastic_heating_J_m3_s
+        + ledger.transport_electron_energy_J_m3_s
+    )
+
+    assert evaluated.derivative[energy_index] == pytest.approx(reconstructed)
+
+
 def test_jacobian_sparsity_uses_chemistry_dependencies_with_no_cross_zone_fill() -> (
     None
 ):

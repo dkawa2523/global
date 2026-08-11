@@ -143,6 +143,7 @@ class CompiledTransport:
         density_rhs = np.array(forcing.particle_source_m3_s, copy=True)
         density_rhs -= self.pump_frequency_s_inv[:, None] * density
 
+        electron: np.ndarray | None = None
         electron_rhs = None
         if electron_energy_J_m3 is not None:
             electron = np.asarray(electron_energy_J_m3, dtype=float)
@@ -152,6 +153,7 @@ class CompiledTransport:
                 raise ValueError("electron-energy array must contain finite values")
             electron_rhs = -self.pump_frequency_s_inv * electron
 
+        heavy: np.ndarray | None = None
         heavy_rhs = None
         if heavy_energy_J_m3 is not None:
             heavy = np.asarray(heavy_energy_J_m3, dtype=float)
@@ -170,12 +172,12 @@ class CompiledTransport:
             target_frequency = conductance / self.volumes_m3[target]
             density_rhs[source] -= source_frequency * density[source]
             density_rhs[target] += target_frequency * density[source]
-            if electron_rhs is not None:
-                electron_rhs[source] -= source_frequency * electron_energy_J_m3[source]
-                electron_rhs[target] += target_frequency * electron_energy_J_m3[source]
-            if heavy_rhs is not None:
-                heavy_rhs[source] -= source_frequency * heavy_energy_J_m3[source]
-                heavy_rhs[target] += target_frequency * heavy_energy_J_m3[source]
+            if electron_rhs is not None and electron is not None:
+                electron_rhs[source] -= source_frequency * electron[source]
+                electron_rhs[target] += target_frequency * electron[source]
+            if heavy_rhs is not None and heavy is not None:
+                heavy_rhs[source] -= source_frequency * heavy[source]
+                heavy_rhs[target] += target_frequency * heavy[source]
         return density_rhs, electron_rhs, heavy_rhs
 
 

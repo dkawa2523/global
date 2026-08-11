@@ -36,8 +36,9 @@ def _positive(value: float | None) -> float | None:
 
 
 def _net_commanded_power(inp: RFEnvelopeCalibrationInput) -> float | None:
-    if _positive(inp.commanded_power_W) is not None:
-        return float(inp.commanded_power_W)
+    commanded = _positive(inp.commanded_power_W)
+    if commanded is not None:
+        return commanded
     if inp.forward_power_W is not None:
         reflected = max(float(inp.reflected_power_W or 0.0), 0.0)
         return max(float(inp.forward_power_W) - reflected, 0.0)

@@ -453,6 +453,7 @@ def _compile_power_ports(
         elif isinstance(model, ExperimentalCCPModel):
             from plasma_global.experimental.power import CCPPowerPort
 
+            geometry = _ccp_geometry(case, port, chemistry)
             physical_port = CCPPowerPort(
                 port_id=port.port_id,
                 zone_id=port.zone_id,
@@ -465,7 +466,12 @@ def _compile_power_ports(
                 default_voltage_V=(
                     model.default_voltage_rms_V if model.control == "voltage" else None
                 ),
-                **_ccp_geometry(case, port, chemistry),
+                zone_volume_m3=geometry["zone_volume_m3"],
+                powered_area_m2=geometry["powered_area_m2"],
+                grounded_area_m2=geometry["grounded_area_m2"],
+                electrode_gap_m=geometry["electrode_gap_m"],
+                dominant_ion_mass_kg=geometry["dominant_ion_mass_kg"],
+                gas_temperature_K=geometry["gas_temperature_K"],
             )
         elif isinstance(model, ExperimentalICPModel):
             from plasma_global.experimental.power import ICPPowerPort

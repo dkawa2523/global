@@ -49,10 +49,17 @@ _MAXWELL_TAIL_CUTOFF = _maxwell_tail_cutoff(_MAXWELL_UNRESOLVED_TAIL_FRACTION)
 
 
 class RateContextLike(Protocol):
-    mean_energy_eV: float
-    electron_temperature_eV: float
-    reduced_field_Td: float
-    gas_temperature_K: float
+    @property
+    def mean_energy_eV(self) -> float: ...
+
+    @property
+    def electron_temperature_eV(self) -> float: ...
+
+    @property
+    def reduced_field_Td(self) -> float | None: ...
+
+    @property
+    def gas_temperature_K(self) -> float: ...
 
 
 RateEvaluator = Callable[[RateContextLike], float]

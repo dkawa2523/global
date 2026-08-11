@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -44,7 +44,9 @@ class PreparedApproximateTwoTermKinetics:
         object.__setattr__(self, "provenance", MappingProxyType(dict(self.provenance)))
 
 
-def _collision_kind(cross_section: CrossSectionData) -> str:
+def _collision_kind(
+    cross_section: CrossSectionData,
+) -> Literal["inelastic", "momentum"]:
     return (
         "momentum"
         if cross_section.kind.strip().lower() in _MOMENTUM_KINDS
@@ -138,7 +140,7 @@ def _mixture_identity(
     return tuple((target, float(densities_m3[target]).hex()) for target in targets)
 
 
-def _readonly(values: Sequence[float]) -> np.ndarray:
+def _readonly(values: object) -> np.ndarray:
     array = np.asarray(values, dtype=float)
     array.setflags(write=False)
     return array

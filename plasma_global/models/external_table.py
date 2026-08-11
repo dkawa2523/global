@@ -118,7 +118,14 @@ def load_external_table(path: str | Path) -> ExternalTableData:
     voltage = column("voltage_V")
     current = column("current_A")
     direct_name = next(iter(direct_columns), None)
-    electron = column(direct_name) if direct_name is not None else voltage * current
+    if direct_name is not None:
+        electron = column(direct_name)
+    else:
+        if voltage is None or current is None:
+            raise CaseValidationError(
+                f"external power table {source} needs voltage_V and current_A"
+            )
+        electron = voltage * current
     gas = column("gas_power_W", default=0.0)
     field_values = column("reduced_field_Td")
     assert time is not None and electron is not None and gas is not None

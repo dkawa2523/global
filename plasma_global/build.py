@@ -10,7 +10,7 @@ from typing import Any, assert_never
 import yaml
 from pydantic import ValidationError
 
-from plasma_global.audit import runtime_diagnostic_maxima
+from plasma_global._audit_runtime import runtime_diagnostic_maxima
 from plasma_global.chemistry.compile import CompiledChemistry, compile_chemistry
 from plasma_global.chemistry.data import ChemistryData, load_chemistry
 from plasma_global.core.compiled import CompiledGlobalModel
@@ -87,7 +87,7 @@ def _compile_initial_state(
             zone.zone_id: zone.gas_temperature_K for zone in case.reactor.zones
         }
     elif isinstance(gas_energy, FixedGasEnergy):
-        gas_temperatures = {}
+        gas_temperatures: dict[str, float] = {}
     else:
         assert_never(gas_energy)
     return InitialState(

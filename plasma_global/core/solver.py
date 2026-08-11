@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -176,32 +177,42 @@ class _ScaledSegmentRHS:
         return self.physical_rhs.jac_sparsity
 
 
+@dataclass(frozen=True, slots=True)
+class _QuasiSteadyEvent:
+    rhs: Callable[[float, np.ndarray], np.ndarray]
+    earliest_s: float
+    gate_scale_s: float
+    relative_rhs_norm_s_inv: float
+    terminal: bool = True
+    direction: float = -1.0
+
+    def __call__(self, time_s: float, scaled_state: np.ndarray) -> float:
+        time_gate = (self.earliest_s - float(time_s)) / self.gate_scale_s
+        if time_s < self.earliest_s:
+            return time_gate
+        derivative = self.rhs(time_s, scaled_state)
+        if not np.all(np.isfinite(scaled_state)) or not np.all(np.isfinite(derivative)):
+            return math.inf
+        scale = np.maximum(np.abs(scaled_state), 1.0)
+        relative_residual = (
+            float(np.max(np.abs(derivative) / scale)) - self.relative_rhs_norm_s_inv
+        )
+        return max(time_gate, relative_residual)
+
+
 def _quasi_steady_event(
     rhs: Callable[[float, np.ndarray], np.ndarray],
     segment: RecipeSegment,
     *,
     relative_rhs_norm_s_inv: float,
     min_time_s: float,
-) -> Callable[[float, np.ndarray], float]:
-    earliest_s = segment.start_s + min_time_s
-    gate_scale_s = max(segment.end_s - segment.start_s, 1.0e-300)
-
-    def event(time_s: float, scaled_state: np.ndarray) -> float:
-        time_gate = (earliest_s - float(time_s)) / gate_scale_s
-        if time_s < earliest_s:
-            return time_gate
-        derivative = rhs(time_s, scaled_state)
-        if not np.all(np.isfinite(scaled_state)) or not np.all(np.isfinite(derivative)):
-            return math.inf
-        scale = np.maximum(np.abs(scaled_state), 1.0)
-        relative_residual = (
-            float(np.max(np.abs(derivative) / scale)) - relative_rhs_norm_s_inv
-        )
-        return max(time_gate, relative_residual)
-
-    event.terminal = True  # type: ignore[attr-defined]
-    event.direction = -1.0  # type: ignore[attr-defined]
-    return event
+) -> _QuasiSteadyEvent:
+    return _QuasiSteadyEvent(
+        rhs=rhs,
+        earliest_s=segment.start_s + min_time_s,
+        gate_scale_s=max(segment.end_s - segment.start_s, 1.0e-300),
+        relative_rhs_norm_s_inv=relative_rhs_norm_s_inv,
+    )
 
 
 def _validate_experimental_quasi_steady(model: CompiledGlobalModel) -> None:

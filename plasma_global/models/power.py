@@ -10,7 +10,7 @@ import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import ClassVar, Literal, Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 
@@ -27,6 +27,11 @@ from plasma_global.models.kinetics import (
     ElectronKineticsResult,
     TabulatedElectronKinetics,
 )
+
+
+def _empty_observables() -> Mapping[str, float]:
+    return MappingProxyType({})
+
 
 E_CHARGE = 1.602176634e-19
 TD_TO_V_M2 = 1.0e-21
@@ -129,9 +134,7 @@ class PowerPortResult:
     electron_power_W: float
     gas_power_W: float = 0.0
     reduced_field_Td: float | None = None
-    observables: Mapping[str, float] = field(
-        default_factory=lambda: MappingProxyType({})
-    )
+    observables: Mapping[str, float] = field(default_factory=_empty_observables)
 
     def __post_init__(self) -> None:
         if (
@@ -149,10 +152,17 @@ class PowerPortResult:
 
 
 class PowerPort(Protocol):
-    port_id: str
-    zone_id: str
-    time_dependent: bool
-    produces_reduced_field: bool
+    @property
+    def port_id(self) -> str: ...
+
+    @property
+    def zone_id(self) -> str: ...
+
+    @property
+    def time_dependent(self) -> bool: ...
+
+    @property
+    def produces_reduced_field(self) -> bool: ...
 
     def evaluate(
         self, time_s: float, state: PowerState, command: CompiledPowerCommand | None
@@ -161,14 +171,19 @@ class PowerPort(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PrescribedPowerPort:
-    time_dependent: ClassVar[bool] = False
-    produces_reduced_field: ClassVar[bool] = False
-
     port_id: str
     zone_id: str
     electron_fraction: float = 1.0
     gas_fraction: float = 0.0
     default_power_W: float | None = None
+
+    @property
+    def time_dependent(self) -> bool:
+        return False
+
+    @property
+    def produces_reduced_field(self) -> bool:
+        return False
 
     def __post_init__(self) -> None:
         fractions = self.electron_fraction, self.gas_fraction
@@ -207,9 +222,6 @@ class PrescribedPowerPort:
 
 @dataclass(frozen=True, slots=True)
 class DCSeriesPort:
-    time_dependent: ClassVar[bool] = False
-    produces_reduced_field: ClassVar[bool] = True
-
     port_id: str
     zone_id: str
     ballast_resistance_ohm: float
@@ -218,6 +230,14 @@ class DCSeriesPort:
     absorption_fraction: float = 1.0
     configured_mobility_m2_V_s: float | None = None
     default_voltage_V: float | None = None
+
+    @property
+    def time_dependent(self) -> bool:
+        return False
+
+    @property
+    def produces_reduced_field(self) -> bool:
+        return True
 
     def __post_init__(self) -> None:
         positive = {
@@ -398,7 +418,11 @@ class DCSeriesPort:
             selector_mobility = float(np.interp(selector, axis, mobility))
             selector = vacuum_field_Td / (1.0 + conductance_factor * selector_mobility)
             selector = float(np.clip(selector, axis[0], axis[-1]))
-        return min(candidates, key=lambda value: abs(value - selector))
+
+        def distance_from_selector(value: float) -> float:
+            return abs(value - selector)
+
+        return min(candidates, key=distance_from_selector)
 
 
 @dataclass(frozen=True, slots=True)

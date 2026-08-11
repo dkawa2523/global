@@ -13,16 +13,36 @@ dependencies = [
   "numpy>=1.26",
   "pydantic>=2.8",
   "scipy>=1.11",
+  "typing_extensions>=4.12",
   "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.7"]
 docs = ["mkdocs>=1.6"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+dev = [
+  "bandit[toml]>=1.8",
+  "coverage[toml]>=7.6",
+  "detect-secrets>=1.5",
+  "diff-cover>=9.2",
+  "hypothesis>=6.112",
+  "import-linter>=2.1",
+  "mutmut>=3.0",
+  "pip-audit>=2.7",
+  "pyrefly>=0.27",
+  "pytest>=8.0",
+  "pytest-cov>=6.0",
+  "radon>=6.0",
+  "ruff>=0.5",
+  "vulture>=2.13",
+]
 
 [project.scripts]
 plasma-global = "plasma_global.cli:main"
+quality-baseline = "tools.quality:baseline_main"
+quality-fast = "tools.quality:fast_main"
+quality-nightly = "tools.quality:nightly_main"
+quality-pr = "tools.quality:pr_main"
 
 [tool.setuptools.packages.find]
 include = ["plasma_global*", "tools*"]
@@ -33,15 +53,19 @@ include-package-data = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q -m 'not external_benchmark'"
+addopts = "-q -m 'not external_benchmark and not nightly'"
 markers = [
   "external_benchmark: tests for optional external benchmark helpers",
+  "nightly: deterministic stress tests reserved for the nightly quality job",
+  "property: property-based tests repeated with multiple nightly seeds",
 ]
 
 [tool.deptry]
 optional_dependencies_dev_groups = ["dev", "docs"]
 
 [tool.ruff]
+target-version = "py311"
+line-length = 88
 extend-exclude = [
   ".pytest_cache",
   ".ruff_cache",
@@ -55,5 +79,105 @@ extend-exclude = [
   "site",
 ]
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "A", "TID", "PT", "RUF", "S", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
 [tool.ruff.lint.per-file-ignores]
 "tools/benchmarks/*.py" = ["E402"]
+"tools/quality_gate/context.py" = ["S603", "S607"]
+"tests/**/*.py" = ["S101"]
+
+[tool.pyrefly]
+preset = "strict"
+min-severity = "warn"
+project-includes = ["plasma_global/**/*.py", "tools/**/*.py"]
+
+[tool.coverage.run]
+branch = true
+source = ["plasma_global"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 6
+
+[tool.importlinter]
+root_package = "plasma_global"
+
+[[tool.importlinter.contracts]]
+name = "Core cannot reach input, experiments, or orchestration directly"
+type = "forbidden"
+source_modules = ["plasma_global.core"]
+forbidden_modules = [
+  "plasma_global.api",
+  "plasma_global.audit",
+  "plasma_global.build",
+  "plasma_global.chemistry",
+  "plasma_global.cli",
+  "plasma_global.experimental",
+  "plasma_global.input",
+  "plasma_global.output",
+  "plasma_global.postprocess",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Chemistry remains below runtime model layers"
+type = "forbidden"
+source_modules = ["plasma_global.chemistry"]
+forbidden_modules = [
+  "plasma_global.api",
+  "plasma_global.audit",
+  "plasma_global.build",
+  "plasma_global.cli",
+  "plasma_global.core",
+  "plasma_global.experimental",
+  "plasma_global.input",
+  "plasma_global.models",
+  "plasma_global.output",
+  "plasma_global.postprocess",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Models cannot depend on input, experiments, or orchestration"
+type = "forbidden"
+source_modules = ["plasma_global.models"]
+forbidden_modules = [
+  "plasma_global.api",
+  "plasma_global.audit",
+  "plasma_global.build",
+  "plasma_global.cli",
+  "plasma_global.experimental",
+  "plasma_global.input",
+  "plasma_global.output",
+  "plasma_global.postprocess",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Input schema is a pure data boundary"
+type = "forbidden"
+source_modules = ["plasma_global.input.schema"]
+forbidden_modules = [
+  "plasma_global.api",
+  "plasma_global.audit",
+  "plasma_global.build",
+  "plasma_global.chemistry",
+  "plasma_global.cli",
+  "plasma_global.core",
+  "plasma_global.experimental",
+  "plasma_global.models",
+  "plasma_global.output",
+  "plasma_global.postprocess",
+]
+as_packages = false
+allow_indirect_imports = true
+
+[tool.mutmut]
+source_paths = ["plasma_global"]
+only_mutate = ["plasma_global/models/rates.py"]
+pytest_add_cli_args_test_selection = ["tests/test_rate_contracts.py"]

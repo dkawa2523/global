@@ -22,6 +22,11 @@ from plasma_global.errors import ChemistryError
 
 AMU_TO_KG = 1.66053906660e-27
 
+
+def _empty_metadata() -> Mapping[str, Any]:
+    return MappingProxyType({})
+
+
 _TERM = re.compile(r"^\s*(?:(\d+(?:\.\d+)?)\s+)?([^\s].*?)\s*$")
 
 
@@ -83,7 +88,7 @@ class SpeciesData:
     state_tags: frozenset[str] = frozenset()
     surfaces: tuple[str, ...] = ()
     cv_over_kb: float | None = None
-    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
     @property
     def mass_kg(self) -> float:
@@ -100,7 +105,7 @@ class ReactionData:
     gas_heating_eV: float = 0.0
     zones: tuple[str, ...] = ()
     surfaces: tuple[str, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +124,7 @@ class CrossSectionData:
     energy_loss_eV: float
     energy_eV: np.ndarray
     sigma_m2: np.ndarray
-    metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,10 +136,8 @@ class ChemistryData:
     surface_reactions: tuple[ReactionData, ...]
     rate_models: Mapping[str, RateModelData]
     cross_sections: Mapping[str, CrossSectionData]
-    experimental: Mapping[str, Any] = field(
-        default_factory=lambda: MappingProxyType({})
-    )
-    provenance: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    experimental: Mapping[str, Any] = field(default_factory=_empty_metadata)
+    provenance: Mapping[str, Any] = field(default_factory=_empty_metadata)
     source_files: tuple[Path, ...] = ()
 
 

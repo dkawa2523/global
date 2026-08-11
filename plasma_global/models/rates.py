@@ -8,8 +8,31 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
+from typing_extensions import override
 
 from plasma_global.core.exceptions import ModelConfigurationError, StateDomainError
+
+
+def _density_value(
+    values: np.ndarray,
+    index_by_species: Mapping[str, int],
+    species_id: str,
+) -> float:
+    return float(values[index_by_species[species_id]])
+
+
+def _validate_electron_mobility(mobility_m2_V_s: float | None) -> None:
+    if mobility_m2_V_s is not None and (
+        not math.isfinite(mobility_m2_V_s) or mobility_m2_V_s <= 0.0
+    ):
+        raise StateDomainError("Electron mobility must be finite and positive")
+
+
+def _validate_constant_coefficient(coefficient: float) -> None:
+    if not math.isfinite(coefficient) or coefficient < 0.0:
+        raise ModelConfigurationError(
+            "Constant rate coefficient must be finite and non-negative"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,14 +41,21 @@ class DensityView(Mapping[str, float]):
 
     species_ids: tuple[str, ...]
     index_by_species: Mapping[str, int]
-    values: np.ndarray
+    density_values: np.ndarray
 
+    @override
     def __getitem__(self, species_id: str) -> float:
-        return float(self.values[self.index_by_species[species_id]])
+        return _density_value(
+            self.density_values,
+            self.index_by_species,
+            species_id,
+        )
 
+    @override
     def __iter__(self):
         return iter(self.species_ids)
 
+    @override
     def __len__(self) -> int:
         return len(self.species_ids)
 
@@ -51,11 +81,7 @@ class RateContext:
     densities_m3: Mapping[str, float]
 
     def __post_init__(self) -> None:
-        if self.electron_mobility_m2_V_s is not None and (
-            not math.isfinite(self.electron_mobility_m2_V_s)
-            or self.electron_mobility_m2_V_s <= 0.0
-        ):
-            raise StateDomainError("Electron mobility must be finite and positive")
+        _validate_electron_mobility(self.electron_mobility_m2_V_s)
 
 
 class RateEvaluator(Protocol):
@@ -68,12 +94,10 @@ class ConstantRate:
     coefficient: float
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.coefficient) or self.coefficient < 0.0:
-            raise ModelConfigurationError(
-                "Constant rate coefficient must be finite and non-negative"
-            )
+        _validate_constant_coefficient(self.coefficient)
 
-    def __call__(self, _context: RateContext) -> float:
+    def __call__(self, context: RateContext) -> float:
+        del context
         return self.coefficient
 
 

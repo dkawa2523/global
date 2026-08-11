@@ -86,8 +86,9 @@ def compile_experimental_accumulator(
                 "experimental.wall_inventory requires at least one initial inventory key"
             )
         features.append("wall_inventory")
-    inventory_events = (
-        {}
+    empty_inventory_events: dict[tuple[str, str], dict[str, float]] = {}
+    inventory_events: dict[tuple[str, str], dict[str, float]] = (
+        empty_inventory_events
         if inventory_config is None
         else {
             (event.reaction_id, event.surface_id): dict(

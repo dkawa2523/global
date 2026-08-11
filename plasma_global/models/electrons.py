@@ -27,9 +27,14 @@ class ElectronState:
 
 
 class ElectronClosure(Protocol):
-    evolves_energy: bool
-    mode: str
-    mean_energy_from_field: FieldMeanEnergy | None
+    @property
+    def evolves_energy(self) -> bool: ...
+
+    @property
+    def mode(self) -> str: ...
+
+    @property
+    def mean_energy_from_field(self) -> FieldMeanEnergy | None: ...
 
     def evaluate(
         self,

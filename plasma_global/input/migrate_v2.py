@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -994,6 +994,464 @@ def _initial_zone_densities(
     return concrete
 
 
+def _migrate_reactor_zones(
+    loaded: Any,
+    chamber: Any,
+    models: Mapping[str, Any],
+    unused: set[str],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    zones: list[dict[str, Any]] = []
+    for index, zone in enumerate(chamber.zones):
+        if str(zone.role) != "process":
+            unused.add(f"reactor.zones[{index}].role")
+        zones.append(
+            {
+                "zone_id": str(zone.zone_id),
+                "description": str(zone.description),
+                "volume_m3": float(zone.volume_m3),
+                "pressure_Pa": float(zone.pressure_Pa),
+                "gas_temperature_K": float(zone.gas_temperature_K),
+                "initial_densities_m3": _initial_zone_densities(loaded, zone, warnings),
+                "initial_mean_energy_eV": (
+                    3.0
+                    if models["electron_closure"]["kind"] == "electron_energy"
+                    else None
+                ),
+            }
+        )
+    return zones
+
+
+def _migrate_reactor_edges(chamber: Any, unused: set[str]) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for index, edge in enumerate(chamber.edges):
+        if edge.notes:
+            unused.add(f"reactor.edges[{index}].notes")
+        edges.append(
+            {
+                "edge_id": str(edge.edge_id),
+                "from_zone": str(edge.from_zone),
+                "to_zone": str(edge.to_zone),
+                "conductance_m3_s": float(edge.conductance_m3_s),
+            }
+        )
+    return edges
+
+
+def _migrate_reactor_surfaces(
+    loaded: Any, chamber: Any, unused: set[str]
+) -> list[dict[str, Any]]:
+    free_site_ids, film_fragment_ids = _legacy_surface_species_groups(loaded)
+    return [
+        _migrate_reactor_surface(
+            surface,
+            index=index,
+            free_site_ids=free_site_ids,
+            film_fragment_ids=film_fragment_ids,
+            unused=unused,
+        )
+        for index, surface in enumerate(chamber.surfaces)
+    ]
+
+
+def _legacy_surface_species_groups(loaded: Any) -> tuple[set[str], set[str]]:
+    surface_species = getattr(loaded.mechanism, "surface_species", [])
+    free_site_ids = {
+        str(species.canonical_id)
+        for species in surface_species
+        if "site" in set(getattr(species, "state_tags", set()) or set())
+    }
+    film_fragment_ids = {
+        str(species.canonical_id)
+        for species in surface_species
+        if "film_fragment" in set(getattr(species, "state_tags", set()) or set())
+    }
+    return free_site_ids, film_fragment_ids
+
+
+def _migrate_reactor_surface(
+    surface: Any,
+    *,
+    index: int,
+    free_site_ids: set[str],
+    film_fragment_ids: set[str],
+    unused: set[str],
+) -> dict[str, Any]:
+    prefix = f"reactor.surfaces[{index}]"
+    unused.update((f"{prefix}.kind", f"{prefix}.material"))
+    excluded = free_site_ids | film_fragment_ids
+    coverages = {
+        str(key): float(value)
+        for key, value in surface.initial_coverages.items()
+        if str(key) not in excluded
+    }
+    ignored_coverages = set(surface.initial_coverages) - set(coverages)
+    unused.update(f"{prefix}.initial_coverages.{key}" for key in ignored_coverages)
+    return {
+        "surface_id": str(surface.surface_id),
+        "zone_id": str(surface.zone_id),
+        "area_m2": float(surface.area_m2),
+        "temperature_K": float(surface.temperature_K),
+        "site_density_m2": float(surface.site_density_m2),
+        "initial_coverages": coverages,
+        "wall_transport": _wall_transport(surface.models, f"{prefix}.models", unused),
+    }
+
+
+def _migrate_reactor_flow_devices(
+    chamber: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    inlets = [
+        {
+            "inlet_id": str(inlet.inlet_id),
+            "zone_id": str(inlet.zone_id),
+            "flow_sccm": {
+                str(key): float(value) for key, value in inlet.flow_sccm.items()
+            },
+            "temperature_K": float(inlet.temperature_K),
+        }
+        for inlet in chamber.gas_inlets
+    ]
+    pumps = [
+        {
+            "pump_id": str(pump.pump_id),
+            "zone_id": str(pump.zone_id),
+            "speed_m3_s": float(pump.speed_m3_s),
+        }
+        for pump in chamber.pumps
+    ]
+    return inlets, pumps
+
+
+def _migrate_power_ports(
+    *,
+    chamber: Any,
+    run: Any,
+    recipe: Any,
+    resolved: Any,
+    gas_fraction: float,
+    used_external: set[str],
+    unused: set[str],
+) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, Mapping[str, Any]]]:
+    ports: list[dict[str, Any]] = []
+    kind_by_id: dict[str, str] = {}
+    model_by_id: dict[str, Mapping[str, Any]] = {}
+    for index, port in enumerate(chamber.power_ports):
+        model = _port_model(
+            port=port,
+            backend=str(run.physics.electrical_backend),
+            recipe=recipe,
+            legacy_base_dir=Path(resolved.base_dir),
+            external_inputs=resolved.external_inputs,
+            used_external=used_external,
+            unused=unused,
+            prefix=f"reactor.power_ports[{index}]",
+            gas_fraction=gas_fraction,
+        )
+        port_id = str(port.port_id)
+        kind_by_id[port_id] = str(model["kind"])
+        model_by_id[port_id] = model
+        ports.append(
+            {
+                "port_id": port_id,
+                "zone_id": str(port.zone_id),
+                "coupling_target": str(port.coupling_target),
+                "model": model,
+            }
+        )
+    return ports, kind_by_id, model_by_id
+
+
+def _migrate_reactor(
+    *,
+    loaded: Any,
+    models: Mapping[str, Any],
+    gas_fraction: float,
+    used_external: set[str],
+    unused: set[str],
+    warnings: list[str],
+) -> tuple[dict[str, Any], dict[str, str], dict[str, Mapping[str, Any]]]:
+    chamber = loaded.chamber
+    inlets, pumps = _migrate_reactor_flow_devices(chamber)
+    ports, kind_by_id, model_by_id = _migrate_power_ports(
+        chamber=chamber,
+        run=loaded.run_config,
+        recipe=loaded.recipe,
+        resolved=loaded.resolved_paths,
+        gas_fraction=gas_fraction,
+        used_external=used_external,
+        unused=unused,
+    )
+    reactor = {
+        "chamber_id": str(chamber.chamber_id),
+        "description": str(chamber.description),
+        "zones": _migrate_reactor_zones(loaded, chamber, models, unused, warnings),
+        "edges": _migrate_reactor_edges(chamber, unused),
+        "surfaces": _migrate_reactor_surfaces(loaded, chamber, unused),
+        "gas_inlets": inlets,
+        "pumps": pumps,
+        "power_ports": ports,
+    }
+    return reactor, kind_by_id, model_by_id
+
+
+def _migrate_step_power_commands(
+    *,
+    step: Any,
+    step_index: int,
+    port_kind_by_id: Mapping[str, str],
+    port_model_by_id: Mapping[str, Mapping[str, Any]],
+    recipe_dir: Path,
+    external_inputs: Mapping[str, Any],
+    used_external: set[str],
+    unused: set[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    commands: dict[str, Any] = {}
+    for raw_port_id, values in step.power_ports.items():
+        port_id = str(raw_port_id)
+        if port_id not in port_kind_by_id:
+            raise MigrationError(
+                f"recipe.steps[{step_index}] references unknown power port {port_id!r}"
+            )
+        prefix = f"recipe.steps[{step_index}].power_ports.{port_id}"
+        migrated = _power_command(
+            values=dict(values or {}),
+            kind=port_kind_by_id[port_id],
+            base_dir=recipe_dir,
+            external_inputs=external_inputs,
+            used_external=used_external,
+            prefix=prefix,
+            unused=unused,
+            warnings=warnings,
+        )
+        commands[port_id] = _match_experimental_setpoint_to_model(
+            migrated, port_model_by_id[port_id], prefix
+        )
+    return commands
+
+
+def _migrate_step_surfaces(
+    step: Any, step_index: int, unused: set[str]
+) -> dict[str, Any]:
+    surfaces: dict[str, Any] = {}
+    for surface_id, raw_values in step.surface_overrides.items():
+        values = dict(raw_values or {})
+        prefix = f"recipe.steps[{step_index}].surface_overrides.{surface_id}"
+        _extra_keys(values, {"temperature_K"}, prefix, unused)
+        surfaces[str(surface_id)] = {
+            "temperature_K": _float_or_none(values.get("temperature_K"))
+        }
+    return surfaces
+
+
+def _migrate_recipe_steps(
+    *,
+    recipe: Any,
+    resolved: Any,
+    port_kind_by_id: Mapping[str, str],
+    port_model_by_id: Mapping[str, Mapping[str, Any]],
+    used_external: set[str],
+    unused: set[str],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    previous_end: float | None = None
+    recipe_dir = Path(resolved.recipe_file).parent
+    for index, step in enumerate(recipe.steps):
+        start, end = float(step.t_start_s), float(step.t_end_s)
+        if previous_end is not None and abs(start - previous_end) > max(
+            1.0e-15, 1.0e-12 * max(abs(start), abs(previous_end), 1.0)
+        ):
+            warnings.append(
+                f"recipe.steps[{index}] began at {start:g}s instead of the previous "
+                f"end {previous_end:g}s; v3 makes steps contiguous"
+            )
+        previous_end = end
+        power_commands = _migrate_step_power_commands(
+            step=step,
+            step_index=index,
+            port_kind_by_id=port_kind_by_id,
+            port_model_by_id=port_model_by_id,
+            recipe_dir=recipe_dir,
+            external_inputs=resolved.external_inputs,
+            used_external=used_external,
+            unused=unused,
+            warnings=warnings,
+        )
+        surfaces = _migrate_step_surfaces(step, index, unused)
+        unused.update(
+            f"recipe.steps[{index}].imported_inputs.{key}"
+            for key in step.imported_inputs
+        )
+        steps.append(
+            {
+                "step_id": str(step.step_id),
+                "duration_s": end - start,
+                "commands": {
+                    "gas_inlets": {
+                        str(inlet_id): {
+                            "flow_sccm": {
+                                str(species): float(flow)
+                                for species, flow in values.items()
+                            }
+                        }
+                        for inlet_id, values in step.gas_inlets.items()
+                    },
+                    "power_ports": power_commands,
+                    "surfaces": surfaces,
+                },
+            }
+        )
+    return steps
+
+
+def _migrate_output(
+    run: Any,
+    recipe_steps: Sequence[Mapping[str, Any]],
+    unused: set[str],
+    warnings: list[str],
+) -> tuple[dict[str, Any], float]:
+    formats = run.outputs.formats
+    if not formats.solution_h5:
+        warnings.append("v3 always writes the HDF5 result bundle")
+    if not formats.summary_yaml:
+        warnings.append("v3 always writes summary.yaml")
+    if formats.observables_csv:
+        unused.add("outputs.formats.observables_csv")
+    if run.outputs.plots.enabled:
+        unused.add("outputs.plots")
+    if run.outputs.budgets.enabled:
+        unused.add("outputs.budgets")
+    unused.add("files.output_dir")
+    total_duration = sum(float(item["duration_s"]) for item in recipe_steps)
+    return {}, max(total_duration / 199.0, 1.0e-15)
+
+
+def _legacy_initial_inventory(chamber: Any) -> dict[str, dict[str, float]]:
+    return {
+        str(surface.surface_id): {
+            str(key): float(value) for key, value in surface.initial_inventory.items()
+        }
+        for surface in chamber.surfaces
+        if surface.initial_inventory
+    }
+
+
+def _inventory_reaction(
+    *,
+    loaded: Any,
+    surface_id: str,
+    inventory_id: str,
+    gas_species_ids: set[str],
+) -> Any:
+    matching = [
+        reaction
+        for reaction in loaded.mechanism.surface_reactions
+        if _reaction_matches_inventory(
+            reaction,
+            surface_id=surface_id,
+            inventory_id=inventory_id,
+            gas_species_ids=gas_species_ids,
+        )
+    ]
+    if len(matching) != 1:
+        raise MigrationError(
+            "cannot migrate wall inventory without one unambiguous surface event: "
+            f"{surface_id}.{inventory_id} matched "
+            f"{[item.reaction_id for item in matching]}"
+        )
+    return matching[0]
+
+
+def _reaction_matches_inventory(
+    reaction: Any,
+    *,
+    surface_id: str,
+    inventory_id: str,
+    gas_species_ids: set[str],
+) -> bool:
+    if not reaction.enabled or (
+        reaction.surface_filter and surface_id not in reaction.surface_filter
+    ):
+        return False
+    gas_reactants = [
+        species_id
+        for species_id in reaction.gas_reactants
+        if species_id in gas_species_ids
+    ]
+    return bool(gas_reactants) and f"{gas_reactants[0]}_reservoir" == inventory_id
+
+
+def _migrate_wall_inventory(
+    loaded: Any,
+    initial_inventory: Mapping[str, Mapping[str, float]],
+    warnings: list[str],
+) -> dict[str, Any]:
+    gas_species_ids = {
+        str(species.canonical_id)
+        for species in loaded.mechanism.gas_state_species
+        if str(species.canonical_id) != "e"
+    }
+    event_yields: dict[tuple[str, str], dict[str, float]] = {}
+    for surface_id, inventory_entries in initial_inventory.items():
+        for inventory_id in inventory_entries:
+            reaction = _inventory_reaction(
+                loaded=loaded,
+                surface_id=surface_id,
+                inventory_id=inventory_id,
+                gas_species_ids=gas_species_ids,
+            )
+            key = (str(reaction.reaction_id), surface_id)
+            if key not in event_yields:
+                event_yields[key] = {}
+            event_yields[key][inventory_id] = 1.0
+    warnings.append(
+        "wall inventory event yields were made explicit from the unique v2 "
+        "unit-per-event mapping; review each migrated yield"
+    )
+    return {
+        "initial_by_surface": initial_inventory,
+        "events": [
+            {
+                "reaction_id": reaction_id,
+                "surface_id": surface_id,
+                "inventory_particles_per_event": yields,
+            }
+            for (reaction_id, surface_id), yields in event_yields.items()
+        ],
+    }
+
+
+def _migrate_experimental(
+    *,
+    loaded: Any,
+    run: Any,
+    chamber: Any,
+    unused: set[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    experimental: dict[str, Any] = {}
+    quasi_steady = _experimental_quasi_steady(run, unused)
+    if quasi_steady is not None:
+        experimental["stop_when_quasi_steady"] = quasi_steady
+    has_film_state = any(
+        "film_fragment" in set(getattr(species, "state_tags", ()) or ())
+        for species in loaded.mechanism.surface_species
+    )
+    if run.physics.enable_surface_coverages and has_film_state:
+        experimental["film"] = dict[str, Any]()
+    initial_inventory = _legacy_initial_inventory(chamber)
+    if run.physics.enable_wall_inventory and initial_inventory:
+        experimental["wall_inventory"] = _migrate_wall_inventory(
+            loaded, initial_inventory, warnings
+        )
+    if loaded.mechanism.state_variables or loaded.mechanism.processes:
+        experimental["extensions"] = dict[str, Any]()
+    return experimental
+
+
 def migrate_v2(path: str | Path) -> MigrationResult:
     """Read a schema-v2 case at the migration boundary and convert it to v3."""
 
@@ -1025,195 +1483,24 @@ def migrate_v2(path: str | Path) -> MigrationResult:
         raise MigrationError("v2 physics.gas_heating_fraction must be between 0 and 1")
     models = _electron_models(loaded, unused, warnings)
 
-    reactor: dict[str, Any] = {
-        "chamber_id": str(chamber.chamber_id),
-        "description": str(chamber.description),
-        "zones": [],
-        "edges": [],
-        "surfaces": [],
-        "gas_inlets": [],
-        "pumps": [],
-        "power_ports": [],
-    }
-    for index, zone in enumerate(chamber.zones):
-        if str(zone.role) != "process":
-            unused.add(f"reactor.zones[{index}].role")
-        reactor["zones"].append(
-            {
-                "zone_id": str(zone.zone_id),
-                "description": str(zone.description),
-                "volume_m3": float(zone.volume_m3),
-                "pressure_Pa": float(zone.pressure_Pa),
-                "gas_temperature_K": float(zone.gas_temperature_K),
-                "initial_densities_m3": _initial_zone_densities(loaded, zone, warnings),
-                "initial_mean_energy_eV": (
-                    3.0
-                    if models["electron_closure"]["kind"] == "electron_energy"
-                    else None
-                ),
-            }
-        )
-    for index, edge in enumerate(chamber.edges):
-        if edge.notes:
-            unused.add(f"reactor.edges[{index}].notes")
-        reactor["edges"].append(
-            {
-                "edge_id": str(edge.edge_id),
-                "from_zone": str(edge.from_zone),
-                "to_zone": str(edge.to_zone),
-                "conductance_m3_s": float(edge.conductance_m3_s),
-            }
-        )
-    free_site_ids = {
-        str(species.canonical_id)
-        for species in getattr(loaded.mechanism, "surface_species", [])
-        if "site" in set(getattr(species, "state_tags", set()) or set())
-    }
-    film_fragment_ids = {
-        str(species.canonical_id)
-        for species in getattr(loaded.mechanism, "surface_species", [])
-        if "film_fragment" in set(getattr(species, "state_tags", set()) or set())
-    }
-    for index, surface in enumerate(chamber.surfaces):
-        unused.add(f"reactor.surfaces[{index}].kind")
-        unused.add(f"reactor.surfaces[{index}].material")
-        coverages: dict[str, float] = {}
-        for key, value in surface.initial_coverages.items():
-            if str(key) in free_site_ids or str(key) in film_fragment_ids:
-                unused.add(f"reactor.surfaces[{index}].initial_coverages.{key}")
-                continue
-            coverages[str(key)] = float(value)
-        reactor["surfaces"].append(
-            {
-                "surface_id": str(surface.surface_id),
-                "zone_id": str(surface.zone_id),
-                "area_m2": float(surface.area_m2),
-                "temperature_K": float(surface.temperature_K),
-                "site_density_m2": float(surface.site_density_m2),
-                "initial_coverages": coverages,
-                "wall_transport": _wall_transport(
-                    surface.models,
-                    f"reactor.surfaces[{index}].models",
-                    unused,
-                ),
-            }
-        )
-    for inlet in chamber.gas_inlets:
-        reactor["gas_inlets"].append(
-            {
-                "inlet_id": str(inlet.inlet_id),
-                "zone_id": str(inlet.zone_id),
-                "flow_sccm": {
-                    str(key): float(value) for key, value in inlet.flow_sccm.items()
-                },
-                "temperature_K": float(inlet.temperature_K),
-            }
-        )
-    for pump in chamber.pumps:
-        reactor["pumps"].append(
-            {
-                "pump_id": str(pump.pump_id),
-                "zone_id": str(pump.zone_id),
-                "speed_m3_s": float(pump.speed_m3_s),
-            }
-        )
+    reactor, port_kind_by_id, port_model_by_id = _migrate_reactor(
+        loaded=loaded,
+        models=models,
+        gas_fraction=gas_fraction,
+        used_external=used_external,
+        unused=unused,
+        warnings=warnings,
+    )
 
-    legacy_base_dir = Path(resolved.base_dir)
-    port_kind_by_id: dict[str, str] = {}
-    port_model_by_id: dict[str, Mapping[str, Any]] = {}
-    for index, port in enumerate(chamber.power_ports):
-        prefix = f"reactor.power_ports[{index}]"
-        model = _port_model(
-            port=port,
-            backend=str(run.physics.electrical_backend),
-            recipe=recipe,
-            legacy_base_dir=legacy_base_dir,
-            external_inputs=resolved.external_inputs,
-            used_external=used_external,
-            unused=unused,
-            prefix=prefix,
-            gas_fraction=gas_fraction,
-        )
-        port_kind_by_id[str(port.port_id)] = str(model["kind"])
-        port_model_by_id[str(port.port_id)] = model
-        reactor["power_ports"].append(
-            {
-                "port_id": str(port.port_id),
-                "zone_id": str(port.zone_id),
-                "coupling_target": str(port.coupling_target),
-                "model": model,
-            }
-        )
-
-    recipe_steps: list[dict[str, Any]] = []
-    previous_end: float | None = None
-    recipe_dir = Path(resolved.recipe_file).parent
-    for index, step in enumerate(recipe.steps):
-        start = float(step.t_start_s)
-        end = float(step.t_end_s)
-        if previous_end is not None and abs(start - previous_end) > max(
-            1.0e-15, 1.0e-12 * max(abs(start), abs(previous_end), 1.0)
-        ):
-            warnings.append(
-                f"recipe.steps[{index}] began at {start:g}s instead of the previous "
-                f"end {previous_end:g}s; v3 makes steps contiguous"
-            )
-        previous_end = end
-        power_commands: dict[str, Any] = {}
-        for port_id, values in step.power_ports.items():
-            port_id = str(port_id)
-            if port_id not in port_kind_by_id:
-                raise MigrationError(
-                    f"recipe.steps[{index}] references unknown power port {port_id!r}"
-                )
-            migrated_command = _power_command(
-                values=dict(values or {}),
-                kind=port_kind_by_id[port_id],
-                base_dir=recipe_dir,
-                external_inputs=resolved.external_inputs,
-                used_external=used_external,
-                prefix=f"recipe.steps[{index}].power_ports.{port_id}",
-                unused=unused,
-                warnings=warnings,
-            )
-            power_commands[port_id] = _match_experimental_setpoint_to_model(
-                migrated_command,
-                port_model_by_id[port_id],
-                f"recipe.steps[{index}].power_ports.{port_id}",
-            )
-
-        surfaces: dict[str, Any] = {}
-        for surface_id, values in step.surface_overrides.items():
-            values = dict(values or {})
-            prefix = f"recipe.steps[{index}].surface_overrides.{surface_id}"
-            _extra_keys(values, {"temperature_K"}, prefix, unused)
-            surfaces[str(surface_id)] = {
-                "temperature_K": _float_or_none(values.get("temperature_K"))
-            }
-        if step.imported_inputs:
-            unused.update(
-                f"recipe.steps[{index}].imported_inputs.{key}"
-                for key in step.imported_inputs
-            )
-        recipe_steps.append(
-            {
-                "step_id": str(step.step_id),
-                "duration_s": end - start,
-                "commands": {
-                    "gas_inlets": {
-                        str(inlet_id): {
-                            "flow_sccm": {
-                                str(species): float(flow)
-                                for species, flow in values.items()
-                            }
-                        }
-                        for inlet_id, values in step.gas_inlets.items()
-                    },
-                    "power_ports": power_commands,
-                    "surfaces": surfaces,
-                },
-            }
-        )
+    recipe_steps = _migrate_recipe_steps(
+        recipe=recipe,
+        resolved=resolved,
+        port_kind_by_id=port_kind_by_id,
+        port_model_by_id=port_model_by_id,
+        used_external=used_external,
+        unused=unused,
+        warnings=warnings,
+    )
 
     for key in resolved.external_inputs:
         if key not in used_external:
@@ -1224,92 +1511,14 @@ def migrate_v2(path: str | Path) -> MigrationResult:
     ):
         unused.add("physics.gas_heating_fraction")
 
-    formats = run.outputs.formats
-    plots = run.outputs.plots
-    if not formats.solution_h5:
-        warnings.append("v3 always writes the HDF5 result bundle")
-    if not formats.summary_yaml:
-        warnings.append("v3 always writes summary.yaml")
-    if formats.observables_csv:
-        unused.add("outputs.formats.observables_csv")
-    if plots.enabled:
-        unused.add("outputs.plots")
-    if run.outputs.budgets.enabled:
-        unused.add("outputs.budgets")
-    unused.add("files.output_dir")
-    output: dict[str, Any] = {}
-    total_duration = sum(item["duration_s"] for item in recipe_steps)
-    sample_interval_s = max(float(total_duration) / 199.0, 1.0e-15)
-    experimental: dict[str, Any] = {}
-    quasi_steady = _experimental_quasi_steady(run, unused)
-    if quasi_steady is not None:
-        experimental["stop_when_quasi_steady"] = quasi_steady
-    has_film_state = any(
-        "film_fragment" in set(getattr(species, "state_tags", ()) or ())
-        for species in loaded.mechanism.surface_species
+    output, sample_interval_s = _migrate_output(run, recipe_steps, unused, warnings)
+    experimental = _migrate_experimental(
+        loaded=loaded,
+        run=run,
+        chamber=chamber,
+        unused=unused,
+        warnings=warnings,
     )
-    if run.physics.enable_surface_coverages and has_film_state:
-        experimental["film"] = {}
-    initial_inventory = {
-        str(surface.surface_id): {
-            str(key): float(value) for key, value in surface.initial_inventory.items()
-        }
-        for surface in chamber.surfaces
-        if surface.initial_inventory
-    }
-    if run.physics.enable_wall_inventory and initial_inventory:
-        gas_species_ids = {
-            str(species.canonical_id)
-            for species in loaded.mechanism.gas_state_species
-            if str(species.canonical_id) != "e"
-        }
-        event_yields: dict[tuple[str, str], dict[str, float]] = {}
-        for surface_id, inventory_entries in initial_inventory.items():
-            for inventory_id in inventory_entries:
-                matching_reactions: list[Any] = []
-                for reaction in loaded.mechanism.surface_reactions:
-                    if not reaction.enabled or (
-                        reaction.surface_filter
-                        and surface_id not in reaction.surface_filter
-                    ):
-                        continue
-                    gas_reactants = [
-                        species_id
-                        for species_id in reaction.gas_reactants
-                        if species_id in gas_species_ids
-                    ]
-                    if (
-                        gas_reactants
-                        and f"{gas_reactants[0]}_reservoir" == inventory_id
-                    ):
-                        matching_reactions.append(reaction)
-                if len(matching_reactions) != 1:
-                    raise MigrationError(
-                        "cannot migrate wall inventory without one unambiguous "
-                        f"surface event: {surface_id}.{inventory_id} matched "
-                        f"{[item.reaction_id for item in matching_reactions]}"
-                    )
-                reaction = matching_reactions[0]
-                event_yields.setdefault((str(reaction.reaction_id), surface_id), {})[
-                    inventory_id
-                ] = 1.0
-        experimental["wall_inventory"] = {
-            "initial_by_surface": initial_inventory,
-            "events": [
-                {
-                    "reaction_id": reaction_id,
-                    "surface_id": surface_id,
-                    "inventory_particles_per_event": yields,
-                }
-                for (reaction_id, surface_id), yields in event_yields.items()
-            ],
-        }
-        warnings.append(
-            "wall inventory event yields were made explicit from the unique v2 "
-            "unit-per-event mapping; review each migrated yield"
-        )
-    if loaded.mechanism.state_variables or loaded.mechanism.processes:
-        experimental["extensions"] = {}
     data = {
         "schema_version": 3,
         "case": {

@@ -39,6 +39,22 @@ def _write_rows(path: Path, columns: list[str], rows: list[dict[str, Any]]) -> N
         writer.writerows(rows)
 
 
+def _number(value: Any, default: float = 0.0) -> float:
+    return default if value is None else float(value)
+
+
+def _element_signature(value: str) -> tuple[tuple[str, str], ...]:
+    entries: list[tuple[str, str]] = []
+    for part in value.split(";"):
+        if not part:
+            continue
+        pieces = part.split(":", 1)
+        if len(pieces) != 2:
+            raise MigrationError(f"invalid element entry {part!r}")
+        entries.append((pieces[0], pieces[1]))
+    return tuple(sorted(entries))
+
+
 def _enabled(value: str) -> bool:
     normalized = value.strip().lower()
     if normalized not in {"true", "false", "1", "0", "yes", "no"}:
@@ -127,30 +143,30 @@ def _convert_rate_model(
     if backend == "arrhenius":
         return {
             "kind": "arrhenius",
-            "A": float(raw.get("A", 0.0)),
-            "beta": float(raw.get("beta", 0.0)),
-            "activation_eV": float(raw.get("Ea_eV", 0.0)),
+            "A": _number(raw.get("A")),
+            "beta": _number(raw.get("beta")),
+            "activation_eV": _number(raw.get("Ea_eV")),
         }
     if backend == "constant":
-        return {"kind": "constant", "value": float(raw.get("value", 0.0))}
+        return {"kind": "constant", "value": _number(raw.get("value"))}
     if backend == "first_order_loss":
         return {
             "kind": "first_order",
-            "rate_s_inv": float(raw.get("rate_s_inv", raw.get("value", 0.0))),
+            "rate_s_inv": _number(raw.get("rate_s_inv", raw.get("value"))),
         }
     if backend in {"te_power_law", "electron_temperature_power_law"}:
-        factor = float(raw.get("electron_temperature_factor", 2.0 / 3.0))
+        factor = _number(raw.get("electron_temperature_factor"), 2.0 / 3.0)
         if abs(factor - 2.0 / 3.0) > 1.0e-12:
             raise MigrationError(
                 f"rate model {model_id} uses a noncanonical electron temperature factor"
             )
         return {
             "kind": "experimental.electron_temperature_power_law",
-            "A": float(raw.get("A", raw.get("value", 0.0))),
-            "reference_temperature_K": float(
-                raw.get("Tref_K", raw.get("reference_temperature_K", 1.0))
+            "A": _number(raw.get("A", raw.get("value"))),
+            "reference_temperature_K": _number(
+                raw.get("Tref_K", raw.get("reference_temperature_K")), 1.0
             ),
-            "exponent": float(raw.get("alpha", raw.get("exponent", 0.0))),
+            "exponent": _number(raw.get("alpha", raw.get("exponent"))),
         }
     if backend == "sticking":
         return {
@@ -361,13 +377,7 @@ def convert_v2_chemistry(
             and int(float(row.get("charge") or 0)) == 0
             and row.get("elements")
         ):
-            signature = tuple(
-                sorted(
-                    tuple(part.split(":", 1))
-                    for part in row["elements"].split(";")
-                    if part
-                )
-            )
+            signature = _element_signature(row["elements"])
             neutral_by_signature.setdefault(signature, []).append(row["canonical_id"])
     explicit_boundary = {
         str(ion): str(equation).strip()
@@ -377,13 +387,7 @@ def convert_v2_chemistry(
     for row in species_rows:
         if row["phase"] != "gas" or int(float(row.get("charge") or 0)) <= 0:
             continue
-        signature = tuple(
-            sorted(
-                tuple(part.split(":", 1))
-                for part in row.get("elements", "").split(";")
-                if part
-            )
-        )
+        signature = _element_signature(row.get("elements", ""))
         candidates = neutral_by_signature.get(signature, [])
         if row["canonical_id"] in explicit_boundary:
             product_side = explicit_boundary[row["canonical_id"]]

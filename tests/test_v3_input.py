@@ -416,6 +416,16 @@ def test_v2_migration_produces_valid_standalone_v3_yaml(tmp_path: Path) -> None:
     assert reloaded.models.electrons.kind == "maxwellian"
 
 
+def test_v2_migration_refactor_is_deterministic() -> None:
+    source = V2_CONFIGS / "case_smoke.yaml"
+
+    first = migrate_v2(source)
+    second = migrate_v2(source)
+
+    assert first.case.model_dump(mode="python") == second.case.model_dump(mode="python")
+    assert first.report == second.report
+
+
 @pytest.mark.parametrize(
     (
         "source_name",

@@ -83,8 +83,11 @@ class ProcessContext:
 
 
 class StateProcess(Protocol):
-    target_state: str
-    owners: Sequence[str]
+    @property
+    def target_state(self) -> str: ...
+
+    @property
+    def owners(self) -> Sequence[str]: ...
 
     def rate(
         self, *, owner: str, current_value: float, context: ProcessContext

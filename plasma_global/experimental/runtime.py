@@ -54,7 +54,9 @@ def _selected_owners(
         raise ValueError(f"{where} {scope} scope cannot select {rejected_key}")
     available = zone_ids if scope == "zone" else surface_ids
     raw = values.get(selection_key)
-    selected = available if raw in (None, ()) else tuple(str(item) for item in raw)
+    selected = (
+        available if raw is None or raw == () else tuple(str(item) for item in raw)
+    )
     unknown = set(selected) - set(available)
     if unknown:
         raise ValueError(f"{where} selects unknown owners {sorted(unknown)}")

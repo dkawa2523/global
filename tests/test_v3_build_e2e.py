@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -139,7 +140,7 @@ def test_compile_case_revalidates_and_detaches_the_case_snapshot() -> None:
     invalid = load_case(FIXTURE)
     densities = invalid.reactor.zones[0].initial_densities_m3
     assert densities is not None
-    densities["Ar"] = "not-a-density"  # type: ignore[assignment]
+    cast(dict[str, Any], densities)["Ar"] = "not-a-density"
     with pytest.raises(CaseValidationError, match="changes made after validation"):
         compile_case(invalid)
 
