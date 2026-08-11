@@ -34,7 +34,7 @@ class MigrationResult:
 
     @property
     def data(self) -> dict[str, Any]:
-        """Return a standalone v3 mapping suitable for YAML serialization."""
+        """Return the migrated v3 mapping suitable for YAML serialization."""
 
         return self.case.model_dump(mode="python", exclude_none=True)
 
@@ -163,6 +163,102 @@ def _extra_keys(
     unused.update(f"{prefix}.{key}" for key in values if key not in known)
 
 
+_PRESCRIBED_POWER_KEYS = ("absorbed_power_W", "power_W", "value_W", "value")
+_DC_VOLTAGE_KEYS = ("source_voltage_V", "voltage_V", "value_V", "value")
+_DC_STEP_KEYS = {
+    *_DC_VOLTAGE_KEYS,
+    "ballast_resistance_ohm",
+    "series_resistance_ohm",
+    "gap_m",
+    "electrode_gap_m",
+    "electrode_area_m2",
+    "area_m2",
+    "power_absorption_fraction",
+    "electron_mobility_m2_V_s",
+}
+_DC_STATIC_KEYS = set(_DC_STEP_KEYS)
+_EXTERNAL_TABLE_STEP_KEYS = {
+    "file",
+    "file_key",
+    "power_scale",
+    "voltage_scale",
+    "current_scale",
+    "time_offset_s",
+    "interpolation",
+    "hold",
+    "bounds_policy",
+    "gap_m",
+    "total_density_m3",
+    "plasma_potential_V",
+}
+_EXTERNAL_TABLE_STATIC_KEYS = _EXTERNAL_TABLE_STEP_KEYS - {"time_offset_s"}
+_EXPERIMENTAL_STEP_KEYS = {
+    "frequency_Hz",
+    "carrier_frequency_Hz",
+    "absorbed_power_W",
+    "power_W",
+    "value_W",
+    "voltage_rms_V",
+    "voltage_V",
+    "value_V",
+    "value",
+}
+_EXPERIMENTAL_STATIC_KEYS = _EXPERIMENTAL_STEP_KEYS - {"value"} | {
+    "control_mode",
+    "mode",
+}
+_RF_ENVELOPE_COMMAND_KEYS = {
+    "role",
+    "coupling_efficiency",
+    "reduced_field_Td",
+    "effective_impedance_ohm",
+    "base_reduced_field_Td",
+    "reduced_field_per_sqrt_W_Td",
+    "reduced_field_per_sqrt_W",
+    "self_bias_fraction",
+    "plasma_potential_offset_V",
+    "plasma_potential_per_sqrt_W",
+}
+_RF_ENVELOPE_STATIC_KEYS = _EXPERIMENTAL_STATIC_KEYS | _RF_ENVELOPE_COMMAND_KEYS
+_DELIVERED_POWER_KEYS = {
+    "frequency_Hz",
+    "carrier_frequency_Hz",
+    "delivered_power_W",
+    "power_W",
+    "value_W",
+    "value",
+}
+
+
+def _normalized_bounds_policy(value: object) -> str:
+    return "hold" if str(value).lower() in {"edge", "clip", "hold"} else "error"
+
+
+def _reconcile_experimental_setpoint(
+    command: dict[str, Any],
+    *,
+    selected: str,
+    incompatible: str,
+    prefix: str,
+    control: str,
+) -> dict[str, Any]:
+    if incompatible not in command:
+        return command
+    value = float(command[incompatible])
+    if selected in command:
+        if value == 0.0:
+            command.pop(incompatible)
+        return command
+    if value != 0.0:
+        raise MigrationError(
+            f"{prefix} provides {incompatible}={value:g}, but its reactor model "
+            f"uses {control!r} control"
+        )
+    command.pop(incompatible)
+    command[selected] = 0.0
+    return command
+
+
 def _match_experimental_setpoint_to_model(
     command: dict[str, Any], model: Mapping[str, Any], prefix: str
 ) -> dict[str, Any]:
@@ -179,17 +275,256 @@ def _match_experimental_setpoint_to_model(
         if control == "voltage"
         else ("absorbed_power_W", "voltage_rms_V")
     )
-    if selected in command or incompatible not in command:
-        return command
-    value = float(command[incompatible])
-    if value != 0.0:
+    return _reconcile_experimental_setpoint(
+        command,
+        selected=selected,
+        incompatible=incompatible,
+        prefix=prefix,
+        control=control,
+    )
+
+
+def _prescribed_power_model(
+    static: Mapping[str, Any], *, kind: str, gas_fraction: float
+) -> tuple[dict[str, Any], set[str]]:
+    model: dict[str, Any] = {
+        "kind": kind,
+        "electron_fraction": 1.0 - gas_fraction,
+        "gas_fraction": gas_fraction,
+    }
+    power = _first(static, _PRESCRIBED_POWER_KEYS)
+    if power is not None:
+        model["default_absorbed_power_W"] = float(power)
+    return model, set(_PRESCRIBED_POWER_KEYS)
+
+
+def _dc_series_model(
+    static: Mapping[str, Any],
+    commands: list[dict[str, Any]],
+    *,
+    kind: str,
+    prefix: str,
+) -> tuple[dict[str, Any], set[str]]:
+    ballast = _from_static_or_commands(
+        static, commands, ("ballast_resistance_ohm", "series_resistance_ohm")
+    )
+    gap = _from_static_or_commands(static, commands, ("gap_m", "electrode_gap_m"))
+    area = _from_static_or_commands(static, commands, ("electrode_area_m2", "area_m2"))
+    if ballast is None or gap is None or area is None:
         raise MigrationError(
-            f"{prefix} provides {incompatible}={value:g}, but its reactor model "
-            f"uses {control!r} control"
+            f"{prefix}: dc_series requires ballast resistance, gap, and electrode area"
         )
-    command.pop(incompatible)
-    command[selected] = 0.0
-    return command
+    model: dict[str, Any] = {
+        "kind": kind,
+        "ballast_resistance_ohm": float(ballast),
+        "gap_m": float(gap),
+        "electrode_area_m2": float(area),
+        "power_absorption_fraction": float(
+            _from_static_or_commands(
+                static, commands, ("power_absorption_fraction",), 1.0
+            )
+        ),
+    }
+    voltage = _first(static, _DC_VOLTAGE_KEYS)
+    mobility = _from_static_or_commands(static, commands, ("electron_mobility_m2_V_s",))
+    if voltage is not None:
+        model["source_voltage_V"] = float(voltage)
+    if mobility is not None:
+        model["electron_mobility_m2_V_s"] = float(mobility)
+    return model, set(_DC_STATIC_KEYS)
+
+
+def _resolve_external_model_file(
+    static: Mapping[str, Any],
+    commands: list[dict[str, Any]],
+    *,
+    base_dir: Path,
+    external_inputs: Mapping[str, str | None],
+    used_external: set[str],
+    prefix: str,
+) -> Path:
+    table = _external_file(
+        static,
+        base_dir=base_dir,
+        external_inputs=external_inputs,
+        used_external=used_external,
+    )
+    if table is not None:
+        return table
+    for command in commands:
+        table = _external_file(
+            command,
+            base_dir=base_dir,
+            external_inputs=external_inputs,
+            used_external=used_external,
+        )
+        if table is not None:
+            return table
+    fallback = external_inputs.get("circuit_result_csv")
+    if fallback:
+        used_external.add("circuit_result_csv")
+        return Path(fallback).resolve(strict=False)
+    raise MigrationError(f"{prefix}: external_table has no input file")
+
+
+def _external_table_model(
+    static: Mapping[str, Any],
+    commands: list[dict[str, Any]],
+    *,
+    kind: str,
+    base_dir: Path,
+    external_inputs: Mapping[str, str | None],
+    used_external: set[str],
+    prefix: str,
+) -> tuple[dict[str, Any], set[str]]:
+    model: dict[str, Any] = {
+        "kind": kind,
+        "file": _resolve_external_model_file(
+            static,
+            commands,
+            base_dir=base_dir,
+            external_inputs=external_inputs,
+            used_external=used_external,
+            prefix=prefix,
+        ),
+        "interpolation": str(static.get("interpolation", "linear")).lower(),
+        "bounds_policy": _normalized_bounds_policy(
+            static.get("bounds_policy", static.get("hold", "error"))
+        ),
+        "power_scale": float(static.get("power_scale", 1.0)),
+        "voltage_scale": float(static.get("voltage_scale", 1.0)),
+        "current_scale": float(static.get("current_scale", 1.0)),
+        "plasma_potential_V": float(static.get("plasma_potential_V", 0.0)),
+    }
+    for key in ("gap_m", "total_density_m3"):
+        if static.get(key) is not None:
+            model[key] = float(static[key])
+    return model, set(_EXTERNAL_TABLE_STATIC_KEYS)
+
+
+def _static_or_representative(
+    static: Mapping[str, Any],
+    representative: Mapping[str, Any],
+    names: tuple[str, ...],
+    default: Any,
+) -> Any:
+    value = _first(static, names)
+    return _first(representative, names, default) if value is None else value
+
+
+def _experimental_default_setpoints(static: Mapping[str, Any]) -> dict[str, float]:
+    defaults: dict[str, float] = {}
+    power = _first(static, ("absorbed_power_W", "power_W", "value_W"))
+    voltage = _first(static, ("voltage_rms_V", "voltage_V", "value_V"))
+    if power is not None:
+        defaults["default_absorbed_power_W"] = float(power)
+    if voltage is not None:
+        defaults["default_voltage_rms_V"] = float(voltage)
+    return defaults
+
+
+def _rf_envelope_model(
+    static: Mapping[str, Any],
+    commands: list[dict[str, Any]],
+    *,
+    kind: str,
+    legacy_port_kind: object,
+) -> tuple[dict[str, Any], set[str]]:
+    representative = _representative_power_command(commands)
+
+    def setting(names: tuple[str, ...], default: Any) -> Any:
+        return _static_or_representative(static, representative, names, default)
+
+    mode = str(setting(("control_mode", "mode"), "absorbed_power"))
+    model: dict[str, Any] = {
+        "kind": kind,
+        "role": _normalized_rf_role(setting(("role",), legacy_port_kind)),
+        "frequency_Hz": float(
+            setting(("frequency_Hz", "carrier_frequency_Hz"), 13.56e6)
+        ),
+        "control": "voltage" if "voltage" in mode.lower() else "absorbed_power",
+        "effective_impedance_ohm": float(setting(("effective_impedance_ohm",), 50.0)),
+        "coupling_efficiency": float(setting(("coupling_efficiency",), 1.0)),
+        "base_reduced_field_Td": float(
+            setting(("base_reduced_field_Td", "reduced_field_Td"), 0.0)
+        ),
+        "reduced_field_per_sqrt_W_Td": float(
+            setting(
+                ("reduced_field_per_sqrt_W_Td", "reduced_field_per_sqrt_W"),
+                0.0,
+            )
+        ),
+        "self_bias_fraction": float(setting(("self_bias_fraction",), 0.35)),
+        "plasma_potential_offset_V": float(
+            setting(("plasma_potential_offset_V",), 0.0)
+        ),
+        "plasma_potential_per_sqrt_W": float(
+            setting(("plasma_potential_per_sqrt_W",), 0.0)
+        ),
+    }
+    model.update(_experimental_default_setpoints(static))
+    return model, set(_RF_ENVELOPE_STATIC_KEYS)
+
+
+def _ccp_model(
+    static: Mapping[str, Any],
+    commands: list[dict[str, Any]],
+    *,
+    kind: str,
+) -> tuple[dict[str, Any], set[str]]:
+    representative = _representative_power_command(commands)
+    representative_mode = None
+    if _power_command_magnitude(representative) > 0.0:
+        representative_mode = _first(representative, ("control_mode", "mode"))
+    mode = str(
+        representative_mode
+        if representative_mode is not None
+        else _first(static, ("control_mode", "mode"), "absorbed_power")
+    )
+    model: dict[str, Any] = {
+        "kind": kind,
+        "frequency_Hz": float(
+            _first(
+                static,
+                ("frequency_Hz", "carrier_frequency_Hz"),
+                _first(
+                    representative,
+                    ("frequency_Hz", "carrier_frequency_Hz"),
+                    2.0e6,
+                ),
+            )
+        ),
+        "control": "voltage" if "voltage" in mode.lower() else "absorbed_power",
+    }
+    model.update(_experimental_default_setpoints(static))
+    return model, set(_EXPERIMENTAL_STATIC_KEYS)
+
+
+def _delivered_power_model(
+    static: Mapping[str, Any],
+    commands: list[dict[str, Any]],
+    *,
+    kind: str,
+) -> tuple[dict[str, Any], set[str]]:
+    representative = _representative_power_command(commands)
+    model: dict[str, Any] = {
+        "kind": kind,
+        "frequency_Hz": float(
+            _first(
+                static,
+                ("frequency_Hz", "carrier_frequency_Hz"),
+                _first(
+                    representative,
+                    ("frequency_Hz", "carrier_frequency_Hz"),
+                    13.56e6,
+                ),
+            )
+        ),
+    }
+    power = _first(static, ("delivered_power_W", "power_W", "value_W", "value"))
+    if power is not None:
+        model["default_delivered_power_W"] = float(power)
+    return model, set(_DELIVERED_POWER_KEYS)
 
 
 def _port_model(
@@ -209,267 +544,53 @@ def _port_model(
     commands = _commands_for_port(recipe, str(port.port_id))
 
     if kind == "prescribed_power":
-        known = {
-            "absorbed_power_W",
-            "power_W",
-            "value_W",
-            "value",
-        }
-        model: dict[str, Any] = {
-            "kind": kind,
-            "electron_fraction": 1.0 - gas_fraction,
-            "gas_fraction": gas_fraction,
-        }
-        power = _first(static, ("absorbed_power_W", "power_W", "value_W", "value"))
-        if power is not None:
-            model["default_absorbed_power_W"] = float(power)
+        model, known = _prescribed_power_model(
+            static, kind=kind, gas_fraction=gas_fraction
+        )
     elif kind == "dc_series":
-        known = {
-            "source_voltage_V",
-            "voltage_V",
-            "value_V",
-            "value",
-            "ballast_resistance_ohm",
-            "series_resistance_ohm",
-            "gap_m",
-            "electrode_gap_m",
-            "electrode_area_m2",
-            "area_m2",
-            "power_absorption_fraction",
-            "electron_mobility_m2_V_s",
-        }
-        ballast = _from_static_or_commands(
-            static, commands, ("ballast_resistance_ohm", "series_resistance_ohm")
-        )
-        gap = _from_static_or_commands(static, commands, ("gap_m", "electrode_gap_m"))
-        area = _from_static_or_commands(
-            static, commands, ("electrode_area_m2", "area_m2")
-        )
-        if ballast is None or gap is None or area is None:
-            raise MigrationError(
-                f"{prefix}: dc_series requires ballast resistance, gap, and electrode area"
-            )
-        model = {
-            "kind": kind,
-            "ballast_resistance_ohm": float(ballast),
-            "gap_m": float(gap),
-            "electrode_area_m2": float(area),
-            "power_absorption_fraction": float(
-                _from_static_or_commands(
-                    static, commands, ("power_absorption_fraction",), 1.0
-                )
-            ),
-        }
-        voltage = _first(static, ("source_voltage_V", "voltage_V", "value_V", "value"))
-        mobility = _from_static_or_commands(
-            static, commands, ("electron_mobility_m2_V_s",)
-        )
-        if voltage is not None:
-            model["source_voltage_V"] = float(voltage)
-        if mobility is not None:
-            model["electron_mobility_m2_V_s"] = float(mobility)
-    elif kind == "external_table":
-        known = {
-            "file",
-            "file_key",
-            "interpolation",
-            "hold",
-            "power_scale",
-            "voltage_scale",
-            "current_scale",
-            "gap_m",
-            "total_density_m3",
-            "plasma_potential_V",
-            "bounds_policy",
-        }
-        table = _external_file(
+        model, known = _dc_series_model(
             static,
+            commands,
+            kind=kind,
+            prefix=prefix,
+        )
+    elif kind == "external_table":
+        model, known = _external_table_model(
+            static,
+            commands,
+            kind=kind,
             base_dir=legacy_base_dir,
             external_inputs=external_inputs,
             used_external=used_external,
+            prefix=prefix,
         )
-        if table is None:
-            for command in commands:
-                table = _external_file(
-                    command,
-                    base_dir=legacy_base_dir,
-                    external_inputs=external_inputs,
-                    used_external=used_external,
-                )
-                if table is not None:
-                    break
-        if table is None and external_inputs.get("circuit_result_csv"):
-            used_external.add("circuit_result_csv")
-            table = Path(str(external_inputs["circuit_result_csv"])).resolve(
-                strict=False
-            )
-        if table is None:
-            raise MigrationError(f"{prefix}: external_table has no input file")
-        model = {
-            "kind": kind,
-            "file": table,
-            "interpolation": str(static.get("interpolation", "linear")).lower(),
-            "bounds_policy": (
-                "hold"
-                if str(static.get("bounds_policy", static.get("hold", "error"))).lower()
-                in {"edge", "clip", "hold"}
-                else "error"
-            ),
-            "power_scale": float(static.get("power_scale", 1.0)),
-            "voltage_scale": float(static.get("voltage_scale", 1.0)),
-            "current_scale": float(static.get("current_scale", 1.0)),
-            "plasma_potential_V": float(static.get("plasma_potential_V", 0.0)),
-        }
-        for key in ("gap_m", "total_density_m3"):
-            if static.get(key) is not None:
-                model[key] = float(static[key])
     elif kind == "experimental.rf_envelope":
-        representative = _representative_power_command(commands)
-
-        def rf_setting(names: tuple[str, ...], default: Any) -> Any:
-            value = _first(static, names)
-            return _first(representative, names, default) if value is None else value
-
-        known = {
-            "role",
-            "frequency_Hz",
-            "carrier_frequency_Hz",
-            "control_mode",
-            "mode",
-            "absorbed_power_W",
-            "power_W",
-            "value_W",
-            "voltage_rms_V",
-            "voltage_V",
-            "value_V",
-            "effective_impedance_ohm",
-            "coupling_efficiency",
-            "base_reduced_field_Td",
-            "reduced_field_Td",
-            "reduced_field_per_sqrt_W_Td",
-            "reduced_field_per_sqrt_W",
-            "self_bias_fraction",
-            "plasma_potential_offset_V",
-            "plasma_potential_per_sqrt_W",
-        }
-        mode = str(rf_setting(("control_mode", "mode"), "absorbed_power"))
-        control = "voltage" if "voltage" in mode.lower() else "absorbed_power"
-        model = {
-            "kind": kind,
-            "role": _normalized_rf_role(rf_setting(("role",), port.kind)),
-            "frequency_Hz": float(
-                rf_setting(("frequency_Hz", "carrier_frequency_Hz"), 13.56e6)
-            ),
-            "control": control,
-            "effective_impedance_ohm": float(
-                rf_setting(("effective_impedance_ohm",), 50.0)
-            ),
-            "coupling_efficiency": float(rf_setting(("coupling_efficiency",), 1.0)),
-            "base_reduced_field_Td": float(
-                rf_setting(("base_reduced_field_Td", "reduced_field_Td"), 0.0)
-            ),
-            "reduced_field_per_sqrt_W_Td": float(
-                rf_setting(
-                    ("reduced_field_per_sqrt_W_Td", "reduced_field_per_sqrt_W"),
-                    0.0,
-                )
-            ),
-            "self_bias_fraction": float(rf_setting(("self_bias_fraction",), 0.35)),
-            "plasma_potential_offset_V": float(
-                rf_setting(("plasma_potential_offset_V",), 0.0)
-            ),
-            "plasma_potential_per_sqrt_W": float(
-                rf_setting(("plasma_potential_per_sqrt_W",), 0.0)
-            ),
-        }
-        power = _first(static, ("absorbed_power_W", "power_W", "value_W"))
-        voltage = _first(static, ("voltage_rms_V", "voltage_V", "value_V"))
-        if power is not None:
-            model["default_absorbed_power_W"] = float(power)
-        if voltage is not None:
-            model["default_voltage_rms_V"] = float(voltage)
+        model, known = _rf_envelope_model(
+            static,
+            commands,
+            kind=kind,
+            legacy_port_kind=port.kind,
+        )
     elif kind == "experimental.ccp":
-        representative = _representative_power_command(commands)
-        known = {
-            "frequency_Hz",
-            "carrier_frequency_Hz",
-            "control_mode",
-            "mode",
-            "absorbed_power_W",
-            "power_W",
-            "value_W",
-            "voltage_rms_V",
-            "voltage_V",
-            "value_V",
-        }
-        representative_mode = (
-            _first(representative, ("control_mode", "mode"))
-            if _power_command_magnitude(representative) > 0.0
-            else None
-        )
-        mode = str(
-            representative_mode
-            if representative_mode is not None
-            else _first(static, ("control_mode", "mode"), "absorbed_power")
-        )
-        model = {
-            "kind": kind,
-            "frequency_Hz": float(
-                _first(
-                    static,
-                    ("frequency_Hz", "carrier_frequency_Hz"),
-                    _first(
-                        representative,
-                        ("frequency_Hz", "carrier_frequency_Hz"),
-                        2.0e6,
-                    ),
-                )
-            ),
-            "control": "voltage" if "voltage" in mode.lower() else "absorbed_power",
-        }
-        power = _first(static, ("absorbed_power_W", "power_W", "value_W"))
-        voltage = _first(static, ("voltage_rms_V", "voltage_V", "value_V"))
-        if power is not None:
-            model["default_absorbed_power_W"] = float(power)
-        if voltage is not None:
-            model["default_voltage_rms_V"] = float(voltage)
+        model, known = _ccp_model(static, commands, kind=kind)
     else:
-        representative = _representative_power_command(commands)
-        known = {
-            "frequency_Hz",
-            "carrier_frequency_Hz",
-            "delivered_power_W",
-            "power_W",
-            "value_W",
-            "value",
-        }
-        model = {
-            "kind": kind,
-            "frequency_Hz": float(
-                _first(
-                    static,
-                    ("frequency_Hz", "carrier_frequency_Hz"),
-                    _first(
-                        representative,
-                        ("frequency_Hz", "carrier_frequency_Hz"),
-                        13.56e6,
-                    ),
-                )
-            ),
-        }
-        power = _first(static, ("delivered_power_W", "power_W", "value_W", "value"))
-        if power is not None:
-            model["default_delivered_power_W"] = float(power)
+        model, known = _delivered_power_model(static, commands, kind=kind)
 
     _extra_keys(static, known, f"{prefix}.parameters", unused)
     return model
+
+
+def _legacy_waveform_name(raw_value: object) -> str:
+    if isinstance(raw_value, bool):
+        return "continuous" if raw_value else "off"
+    return str(raw_value).strip().lower()
 
 
 def _waveform(
     values: Mapping[str, Any], prefix: str, unused: set[str], warnings: list[str]
 ) -> tuple[dict[str, Any], bool, set[str]]:
     consumed = {"waveform"}
-    raw = str(values.get("waveform", "cw")).strip().lower()
+    raw = _legacy_waveform_name(values.get("waveform", "cw"))
     if raw in {"cw", "continuous", "none"}:
         return {"kind": "continuous"}, False, consumed
     if raw == "off":
@@ -490,6 +611,155 @@ def _waveform(
     return {"kind": "continuous"}, False, consumed
 
 
+def _numeric_setpoint(value: Any, *, off: bool) -> float | None:
+    if off:
+        return 0.0
+    return None if value is None else float(value)
+
+
+def _prescribed_power_command(
+    raw: Mapping[str, Any],
+    *,
+    waveform: Mapping[str, Any],
+    is_off: bool,
+) -> tuple[dict[str, Any], set[str]]:
+    command: dict[str, Any] = {
+        "kind": "prescribed_power",
+        "waveform": dict(waveform),
+    }
+    power = _numeric_setpoint(_first(raw, _PRESCRIBED_POWER_KEYS), off=is_off)
+    if power is not None:
+        command["absorbed_power_W"] = power
+    return command, set(_PRESCRIBED_POWER_KEYS)
+
+
+def _dc_series_command(
+    raw: Mapping[str, Any],
+    *,
+    waveform: Mapping[str, Any],
+    is_off: bool,
+    prefix: str,
+    unused: set[str],
+    warnings: list[str],
+) -> tuple[dict[str, Any], set[str]]:
+    command: dict[str, Any] = {"kind": "dc_series"}
+    consumed = set(_DC_STEP_KEYS)
+    voltage = _first(raw, _DC_VOLTAGE_KEYS)
+    nested = raw.get("voltage")
+    if isinstance(nested, Mapping):
+        consumed.add("voltage")
+        voltage = _first(
+            nested,
+            ("high_V", "on_V", *_DC_VOLTAGE_KEYS),
+            voltage,
+        )
+        command["off_voltage_V"] = float(_first(nested, ("low_V", "off_V"), 0.0))
+        nested_waveform = dict(nested)
+        if "frequency_Hz" in nested_waveform and "repetition_Hz" not in nested_waveform:
+            nested_waveform["repetition_Hz"] = nested_waveform["frequency_Hz"]
+        waveform, nested_off, _ = _waveform(
+            nested_waveform, f"{prefix}.voltage", unused, warnings
+        )
+        is_off = is_off or nested_off
+    voltage = _numeric_setpoint(voltage, off=is_off)
+    if voltage is not None:
+        command["source_voltage_V"] = voltage
+    command["waveform"] = dict(waveform)
+    return command, consumed
+
+
+def _external_table_command(
+    raw: Mapping[str, Any],
+    *,
+    base_dir: Path,
+    external_inputs: Mapping[str, str | None],
+    used_external: set[str],
+) -> tuple[dict[str, Any], set[str]]:
+    command: dict[str, Any] = {"kind": "external_table"}
+    file = _external_file(
+        raw,
+        base_dir=base_dir,
+        external_inputs=external_inputs,
+        used_external=used_external,
+    )
+    if file is not None:
+        command["file"] = file
+    for key in (
+        "power_scale",
+        "voltage_scale",
+        "current_scale",
+        "time_offset_s",
+        "gap_m",
+        "total_density_m3",
+        "plasma_potential_V",
+    ):
+        if raw.get(key) is not None:
+            command[key] = float(raw[key])
+    if raw.get("interpolation") is not None:
+        command["interpolation"] = str(raw["interpolation"]).lower()
+    legacy_bounds = raw.get("bounds_policy", raw.get("hold"))
+    if legacy_bounds is not None:
+        command["bounds_policy"] = _normalized_bounds_policy(legacy_bounds)
+    return command, set(_EXTERNAL_TABLE_STEP_KEYS)
+
+
+def _experimental_power_command(
+    raw: Mapping[str, Any],
+    *,
+    kind: str,
+    control: str,
+    waveform: Mapping[str, Any],
+    is_off: bool,
+) -> tuple[dict[str, Any], set[str]]:
+    command: dict[str, Any] = {"kind": kind, "waveform": dict(waveform)}
+    power = _first(raw, ("absorbed_power_W", "power_W", "value_W"))
+    voltage = _first(raw, ("voltage_rms_V", "voltage_V", "value_V"))
+    if power is None and voltage is None and raw.get("value") is not None:
+        if control == "voltage":
+            voltage = raw["value"]
+        else:
+            power = raw["value"]
+    power = _numeric_setpoint(power, off=is_off and control == "absorbed_power")
+    voltage = _numeric_setpoint(voltage, off=is_off and control == "voltage")
+    if power is not None:
+        command["absorbed_power_W"] = power
+    if voltage is not None:
+        command["voltage_rms_V"] = voltage
+    consumed = set(_EXPERIMENTAL_STEP_KEYS)
+    if kind == "experimental.rf_envelope":
+        consumed.update(_RF_ENVELOPE_COMMAND_KEYS)
+    return command, consumed
+
+
+def _delivered_power_command(
+    raw: Mapping[str, Any],
+    *,
+    kind: str,
+    waveform: Mapping[str, Any],
+    is_off: bool,
+) -> tuple[dict[str, Any], set[str]]:
+    command: dict[str, Any] = {"kind": kind, "waveform": dict(waveform)}
+    power = _numeric_setpoint(
+        _first(raw, ("delivered_power_W", "power_W", "value_W", "value")),
+        off=is_off,
+    )
+    if power is not None:
+        command["delivered_power_W"] = power
+    return command, set(_DELIVERED_POWER_KEYS)
+
+
+def _command_waveform(
+    kind: str,
+    values: Mapping[str, Any],
+    prefix: str,
+    unused: set[str],
+    warnings: list[str],
+) -> tuple[dict[str, Any], bool, set[str]]:
+    if kind == "external_table":
+        return {}, False, set()
+    return _waveform(values, prefix, unused, warnings)
+
+
 def _power_command(
     *,
     values: Mapping[str, Any],
@@ -502,184 +772,49 @@ def _power_command(
     warnings: list[str],
 ) -> dict[str, Any]:
     raw = dict(values)
-    waveform, is_off, waveform_keys = _waveform(raw, prefix, unused, warnings)
+    waveform, is_off, waveform_keys = _command_waveform(
+        kind, raw, prefix, unused, warnings
+    )
     consumed = set(waveform_keys) | {"mode", "control_mode", "zone_id"}
-    command: dict[str, Any] = {"kind": kind}
-
     if "zone_id" in raw:
         unused.add(f"{prefix}.zone_id")
 
     mode = str(_first(raw, ("control_mode", "mode"), "absorbed_power"))
     control = "voltage" if "voltage" in mode.lower() else "absorbed_power"
-
     if kind == "prescribed_power":
-        keys = ("absorbed_power_W", "power_W", "value_W", "value")
-        power = _first(raw, keys)
-        consumed.update(keys)
-        if power is not None or is_off:
-            command["absorbed_power_W"] = 0.0 if is_off else float(power)
-        command["waveform"] = waveform
+        command, kind_keys = _prescribed_power_command(
+            raw, waveform=waveform, is_off=is_off
+        )
     elif kind == "dc_series":
-        keys = ("source_voltage_V", "voltage_V", "value_V", "value")
-        voltage = _first(raw, keys)
-        consumed.update(keys)
-        nested = raw.get("voltage")
-        if isinstance(nested, Mapping):
-            consumed.add("voltage")
-            voltage = _first(
-                nested,
-                ("high_V", "on_V", "source_voltage_V", "voltage_V", "value_V", "value"),
-                voltage,
-            )
-            command["off_voltage_V"] = float(_first(nested, ("low_V", "off_V"), 0.0))
-            nested_waveform = dict(nested)
-            if (
-                "frequency_Hz" in nested_waveform
-                and "repetition_Hz" not in nested_waveform
-            ):
-                nested_waveform["repetition_Hz"] = nested_waveform["frequency_Hz"]
-            waveform, nested_off, _ = _waveform(
-                nested_waveform, f"{prefix}.voltage", unused, warnings
-            )
-            is_off = is_off or nested_off
-        if voltage is not None or is_off:
-            command["source_voltage_V"] = 0.0 if is_off else float(voltage)
-        static_aliases = (
-            (
-                "ballast_resistance_ohm",
-                "series_resistance_ohm",
-            ),
-            ("gap_m", "electrode_gap_m"),
-            ("electrode_area_m2", "area_m2"),
-            ("power_absorption_fraction",),
-            ("electron_mobility_m2_V_s",),
+        command, kind_keys = _dc_series_command(
+            raw,
+            waveform=waveform,
+            is_off=is_off,
+            prefix=prefix,
+            unused=unused,
+            warnings=warnings,
         )
-        for names in static_aliases:
-            consumed.update(names)
-        command["waveform"] = waveform
     elif kind == "external_table":
-        consumed.update(
-            {
-                "file",
-                "file_key",
-                "power_scale",
-                "voltage_scale",
-                "current_scale",
-                "time_offset_s",
-                "interpolation",
-                "hold",
-                "bounds_policy",
-                "gap_m",
-                "total_density_m3",
-                "plasma_potential_V",
-            }
-        )
-        file = _external_file(
+        command, kind_keys = _external_table_command(
             raw,
             base_dir=base_dir,
             external_inputs=external_inputs,
             used_external=used_external,
         )
-        if file is not None:
-            command["file"] = file
-        for key in (
-            "power_scale",
-            "voltage_scale",
-            "current_scale",
-            "time_offset_s",
-            "gap_m",
-            "total_density_m3",
-            "plasma_potential_V",
-        ):
-            if raw.get(key) is not None:
-                command[key] = float(raw[key])
-        if raw.get("interpolation") is not None:
-            command["interpolation"] = str(raw["interpolation"]).lower()
-        legacy_bounds = raw.get("bounds_policy", raw.get("hold"))
-        if legacy_bounds is not None:
-            command["bounds_policy"] = (
-                "hold"
-                if str(legacy_bounds).lower() in {"edge", "clip", "hold"}
-                else "error"
-            )
-    elif kind == "experimental.rf_envelope":
-        consumed.update(
-            {
-                "role",
-                "frequency_Hz",
-                "carrier_frequency_Hz",
-                "absorbed_power_W",
-                "power_W",
-                "value_W",
-                "voltage_rms_V",
-                "voltage_V",
-                "value_V",
-                "value",
-                "coupling_efficiency",
-                "reduced_field_Td",
-                "effective_impedance_ohm",
-                "base_reduced_field_Td",
-                "reduced_field_per_sqrt_W_Td",
-                "reduced_field_per_sqrt_W",
-                "self_bias_fraction",
-                "plasma_potential_offset_V",
-                "plasma_potential_per_sqrt_W",
-            }
+    elif kind in {"experimental.rf_envelope", "experimental.ccp"}:
+        command, kind_keys = _experimental_power_command(
+            raw,
+            kind=kind,
+            control=control,
+            waveform=waveform,
+            is_off=is_off,
         )
-        power = _first(raw, ("absorbed_power_W", "power_W", "value_W"))
-        voltage = _first(raw, ("voltage_rms_V", "voltage_V", "value_V"))
-        if power is None and voltage is None and raw.get("value") is not None:
-            if control == "voltage":
-                voltage = raw["value"]
-            else:
-                power = raw["value"]
-        if power is not None or (is_off and control == "absorbed_power"):
-            command["absorbed_power_W"] = 0.0 if is_off else float(power)
-        if voltage is not None or (is_off and control == "voltage"):
-            command["voltage_rms_V"] = 0.0 if is_off else float(voltage)
-        command["waveform"] = waveform
-    elif kind == "experimental.ccp":
-        consumed.update(
-            {
-                "frequency_Hz",
-                "carrier_frequency_Hz",
-                "absorbed_power_W",
-                "power_W",
-                "value_W",
-                "voltage_rms_V",
-                "voltage_V",
-                "value_V",
-                "value",
-            }
-        )
-        power = _first(raw, ("absorbed_power_W", "power_W", "value_W"))
-        voltage = _first(raw, ("voltage_rms_V", "voltage_V", "value_V"))
-        if power is None and voltage is None and raw.get("value") is not None:
-            if control == "voltage":
-                voltage = raw["value"]
-            else:
-                power = raw["value"]
-        if power is not None or (is_off and control == "absorbed_power"):
-            command["absorbed_power_W"] = 0.0 if is_off else float(power)
-        if voltage is not None or (is_off and control == "voltage"):
-            command["voltage_rms_V"] = 0.0 if is_off else float(voltage)
-        command["waveform"] = waveform
     else:
-        consumed.update(
-            {
-                "frequency_Hz",
-                "carrier_frequency_Hz",
-                "delivered_power_W",
-                "power_W",
-                "value_W",
-                "value",
-            }
+        command, kind_keys = _delivered_power_command(
+            raw, kind=kind, waveform=waveform, is_off=is_off
         )
-        power = _first(raw, ("delivered_power_W", "power_W", "value_W", "value"))
-        if power is not None or is_off:
-            command["delivered_power_W"] = 0.0 if is_off else float(power)
-        command["waveform"] = waveform
 
+    consumed.update(kind_keys)
     _extra_keys(raw, consumed, prefix, unused)
     return command
 
@@ -907,91 +1042,128 @@ def _wall_transport(
     return transport
 
 
-def _initial_zone_densities(
-    loaded: Any, zone: Any, warnings: list[str]
-) -> dict[str, float]:
-    gas_species = list(getattr(loaded.mechanism, "gas_state_species", []) or [])
-    legacy_ion_seed_m3 = 1.0e13
-    concrete = {
+_LEGACY_ION_SEED_M3 = 1.0e13
+_BOLTZMANN_J_K = 1.380649e-23
+
+
+def _positive_ion_ids(gas_species: Sequence[Any]) -> list[str]:
+    return [
+        str(species.canonical_id)
+        for species in gas_species
+        if int(getattr(species, "charge", 0)) > 0
+    ]
+
+
+def _species_seed_template(gas_species: Sequence[Any]) -> dict[str, float]:
+    positive_ions = set(_positive_ion_ids(gas_species))
+    return {
         str(species.canonical_id): (
-            legacy_ion_seed_m3 if int(getattr(species, "charge", 0)) > 0 else 0.0
+            _LEGACY_ION_SEED_M3 if str(species.canonical_id) in positive_ions else 0.0
         )
         for species in gas_species
     }
+
+
+def _warn_seeded_ions(
+    zone_id: object, ion_ids: Sequence[str], warnings: list[str]
+) -> None:
+    if ion_ids:
+        warnings.append(
+            f"zone {zone_id!r} positive-ion seeds were made explicit at "
+            f"{_LEGACY_ION_SEED_M3:g} m^-3 for {list(ion_ids)}"
+        )
+
+
+def _explicit_zone_densities(
+    zone: Any,
+    gas_species: Sequence[Any],
+    seeded: Mapping[str, float],
+    warnings: list[str],
+) -> dict[str, float] | None:
     explicit = {
         str(species): float(density)
         for species, density in (zone.initial_densities_m3 or {}).items()
     }
-    if explicit and any(value > 0.0 for value in explicit.values()):
-        concrete.update(explicit)
-        defaulted_ions = [
-            str(species.canonical_id)
-            for species in gas_species
-            if int(getattr(species, "charge", 0)) > 0
-            and str(species.canonical_id) not in explicit
-        ]
-        if defaulted_ions:
-            warnings.append(
-                f"zone {zone.zone_id!r} positive-ion seeds were made explicit at "
-                f"{legacy_ion_seed_m3:g} m^-3 for {defaulted_ions}"
-            )
-        return concrete
+    if not explicit or not any(value > 0.0 for value in explicit.values()):
+        return None
+    densities = dict(seeded)
+    densities.update(explicit)
+    defaulted_ions = [
+        species_id
+        for species_id in _positive_ion_ids(gas_species)
+        if species_id not in explicit
+    ]
+    _warn_seeded_ions(zone.zone_id, defaulted_ions, warnings)
+    return densities
 
+
+def _first_step_flows(loaded: Any, zone_id: object) -> dict[str, float]:
     first_step = loaded.recipe.steps[0]
     flows: dict[str, float] = {}
     for inlet_id, species_flows in first_step.gas_inlets.items():
         inlet = loaded.chamber.inlet_by_id.get(inlet_id)
-        if inlet is None or inlet.zone_id != zone.zone_id:
+        if inlet is None or inlet.zone_id != zone_id:
             continue
         for species, flow in species_flows.items():
             flows[str(species)] = flows.get(str(species), 0.0) + float(flow)
-    if not flows:
-        for species_flows in first_step.gas_inlets.values():
-            for species, flow in species_flows.items():
-                flows[str(species)] = flows.get(str(species), 0.0) + float(flow)
+    if flows:
+        return flows
+    for species_flows in first_step.gas_inlets.values():
+        for species, flow in species_flows.items():
+            flows[str(species)] = flows.get(str(species), 0.0) + float(flow)
+    return flows
 
+
+def _initial_neutral_flows(
+    loaded: Any, zone: Any, gas_species: Sequence[Any]
+) -> dict[str, float]:
     neutral_ids = [
         str(species.canonical_id)
         for species in gas_species
         if int(getattr(species, "charge", 0)) == 0
     ]
     flows = {
-        species: max(flow, 0.0)
-        for species, flow in flows.items()
+        species: flow
+        for species, flow in _first_step_flows(loaded, zone.zone_id).items()
         if species in neutral_ids and flow > 0.0
     }
-    if not flows:
-        if not neutral_ids:
-            raise MigrationError(
-                f"zone {zone.zone_id!r} has no initial density and chemistry has no "
-                "neutral gas species"
-            )
-        flows = {neutral_ids[0]: 1.0}
+    if flows:
+        return flows
+    if not neutral_ids:
+        raise MigrationError(
+            f"zone {zone.zone_id!r} has no initial density and chemistry has no "
+            "neutral gas species"
+        )
+    return {neutral_ids[0]: 1.0}
 
-    k_b = 1.380649e-23
+
+def _ideal_gas_densities(zone: Any, flows: Mapping[str, float]) -> dict[str, float]:
     total_density = float(zone.pressure_Pa) / (
-        k_b * max(float(zone.gas_temperature_K), 1.0)
+        _BOLTZMANN_J_K * max(float(zone.gas_temperature_K), 1.0)
     )
     flow_total = sum(flows.values())
-    derived = {
+    return {
         species: total_density * flow / flow_total for species, flow in flows.items()
     }
-    concrete.update(derived)
-    seeded_ions = [
-        str(species.canonical_id)
-        for species in gas_species
-        if int(getattr(species, "charge", 0)) > 0
-    ]
-    if seeded_ions:
-        warnings.append(
-            f"zone {zone.zone_id!r} positive-ion seeds were made explicit at "
-            f"{legacy_ion_seed_m3:g} m^-3 for {seeded_ions}"
-        )
+
+
+def _initial_zone_densities(
+    loaded: Any, zone: Any, warnings: list[str]
+) -> dict[str, float]:
+    gas_species = list(getattr(loaded.mechanism, "gas_state_species", []) or [])
+    seeded = _species_seed_template(gas_species)
+    explicit = _explicit_zone_densities(zone, gas_species, seeded, warnings)
+    if explicit is not None:
+        return explicit
+
+    flows = _initial_neutral_flows(loaded, zone, gas_species)
+    seeded.update(_ideal_gas_densities(zone, flows))
+    _warn_seeded_ions(zone.zone_id, _positive_ion_ids(gas_species), warnings)
     warnings.append(
         f"zone {zone.zone_id!r} initial_densities_m3 was derived from pressure, "
         "temperature, and the first recipe gas composition"
     )
-    return concrete
+    return seeded
 
 
 def _migrate_reactor_zones(
@@ -1133,9 +1305,8 @@ def _migrate_power_ports(
     gas_fraction: float,
     used_external: set[str],
     unused: set[str],
-) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, Mapping[str, Any]]]:
+) -> tuple[list[dict[str, Any]], dict[str, Mapping[str, Any]]]:
     ports: list[dict[str, Any]] = []
-    kind_by_id: dict[str, str] = {}
     model_by_id: dict[str, Mapping[str, Any]] = {}
     for index, port in enumerate(chamber.power_ports):
         model = _port_model(
@@ -1150,7 +1321,6 @@ def _migrate_power_ports(
             gas_fraction=gas_fraction,
         )
         port_id = str(port.port_id)
-        kind_by_id[port_id] = str(model["kind"])
         model_by_id[port_id] = model
         ports.append(
             {
@@ -1160,7 +1330,7 @@ def _migrate_power_ports(
                 "model": model,
             }
         )
-    return ports, kind_by_id, model_by_id
+    return ports, model_by_id
 
 
 def _migrate_reactor(
@@ -1171,10 +1341,10 @@ def _migrate_reactor(
     used_external: set[str],
     unused: set[str],
     warnings: list[str],
-) -> tuple[dict[str, Any], dict[str, str], dict[str, Mapping[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Mapping[str, Any]]]:
     chamber = loaded.chamber
     inlets, pumps = _migrate_reactor_flow_devices(chamber)
-    ports, kind_by_id, model_by_id = _migrate_power_ports(
+    ports, model_by_id = _migrate_power_ports(
         chamber=chamber,
         run=loaded.run_config,
         recipe=loaded.recipe,
@@ -1193,14 +1363,13 @@ def _migrate_reactor(
         "pumps": pumps,
         "power_ports": ports,
     }
-    return reactor, kind_by_id, model_by_id
+    return reactor, model_by_id
 
 
 def _migrate_step_power_commands(
     *,
     step: Any,
     step_index: int,
-    port_kind_by_id: Mapping[str, str],
     port_model_by_id: Mapping[str, Mapping[str, Any]],
     recipe_dir: Path,
     external_inputs: Mapping[str, Any],
@@ -1211,14 +1380,15 @@ def _migrate_step_power_commands(
     commands: dict[str, Any] = {}
     for raw_port_id, values in step.power_ports.items():
         port_id = str(raw_port_id)
-        if port_id not in port_kind_by_id:
+        if port_id not in port_model_by_id:
             raise MigrationError(
                 f"recipe.steps[{step_index}] references unknown power port {port_id!r}"
             )
+        port_model = port_model_by_id[port_id]
         prefix = f"recipe.steps[{step_index}].power_ports.{port_id}"
         migrated = _power_command(
             values=dict(values or {}),
-            kind=port_kind_by_id[port_id],
+            kind=str(port_model["kind"]),
             base_dir=recipe_dir,
             external_inputs=external_inputs,
             used_external=used_external,
@@ -1227,7 +1397,7 @@ def _migrate_step_power_commands(
             warnings=warnings,
         )
         commands[port_id] = _match_experimental_setpoint_to_model(
-            migrated, port_model_by_id[port_id], prefix
+            migrated, port_model, prefix
         )
     return commands
 
@@ -1250,7 +1420,6 @@ def _migrate_recipe_steps(
     *,
     recipe: Any,
     resolved: Any,
-    port_kind_by_id: Mapping[str, str],
     port_model_by_id: Mapping[str, Mapping[str, Any]],
     used_external: set[str],
     unused: set[str],
@@ -1272,7 +1441,6 @@ def _migrate_recipe_steps(
         power_commands = _migrate_step_power_commands(
             step=step,
             step_index=index,
-            port_kind_by_id=port_kind_by_id,
             port_model_by_id=port_model_by_id,
             recipe_dir=recipe_dir,
             external_inputs=resolved.external_inputs,
@@ -1474,16 +1642,14 @@ def migrate_v2(path: str | Path) -> MigrationResult:
         "outputs.formats.solution_h5",
         "outputs.formats.summary_yaml",
     }
-    warnings: list[str] = [
-        "v3 always records effective input and resolved-path provenance",
-    ]
+    warnings: list[str] = []
     used_external: set[str] = set()
     gas_fraction = float(run.physics.gas_heating_fraction)
     if not 0.0 <= gas_fraction <= 1.0:
         raise MigrationError("v2 physics.gas_heating_fraction must be between 0 and 1")
     models = _electron_models(loaded, unused, warnings)
 
-    reactor, port_kind_by_id, port_model_by_id = _migrate_reactor(
+    reactor, port_model_by_id = _migrate_reactor(
         loaded=loaded,
         models=models,
         gas_fraction=gas_fraction,
@@ -1495,7 +1661,6 @@ def migrate_v2(path: str | Path) -> MigrationResult:
     recipe_steps = _migrate_recipe_steps(
         recipe=recipe,
         resolved=resolved,
-        port_kind_by_id=port_kind_by_id,
         port_model_by_id=port_model_by_id,
         used_external=used_external,
         unused=unused,
@@ -1575,7 +1740,7 @@ def _yaml_value(value: Any, *, relative_to: Path | None = None) -> Any:
 
 
 def write_v3_case(result: MigrationResult, destination: str | Path) -> Path:
-    """Write a migrated, self-contained v3 YAML document."""
+    """Write migrated v3 YAML without copying referenced assets."""
 
     target = Path(destination).resolve(strict=False)
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -215,8 +215,8 @@ def _delegate_nightly_to_wsl() -> None:
     if not linux_root:
         _die("WSL could not translate the repository path")
     wsl_environment = (
-        "UV_CACHE_DIR=/tmp/plasma-global-uv-cache "
-        "UV_PROJECT_ENVIRONMENT=/tmp/plasma-global-quality-venv"
+        'UV_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/plasma-global/uv" '
+        'UV_PROJECT_ENVIRONMENT="${XDG_CACHE_HOME:-$HOME/.cache}/plasma-global/venv"'
     )
     command = (
         f"cd {shlex.quote(linux_root)} && "

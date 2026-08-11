@@ -1717,9 +1717,9 @@
       "severity": "warn"
     },
     {
-      "line": 822,
+      "line": 957,
       "column": 35,
-      "stop_line": 822,
+      "stop_line": 957,
       "stop_column": 54,
       "path": "plasma_global/input/migrate_v2.py",
       "code": -2,
@@ -1897,9 +1897,9 @@
       "severity": "warn"
     },
     {
-      "line": 576,
+      "line": 614,
       "column": 26,
-      "stop_line": 576,
+      "stop_line": 614,
       "stop_column": 33,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1909,9 +1909,9 @@
       "severity": "warn"
     },
     {
-      "line": 581,
+      "line": 619,
       "column": 24,
-      "stop_line": 581,
+      "stop_line": 619,
       "stop_column": 38,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1921,9 +1921,9 @@
       "severity": "warn"
     },
     {
-      "line": 586,
+      "line": 624,
       "column": 30,
-      "stop_line": 586,
+      "stop_line": 624,
       "stop_column": 44,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1933,9 +1933,9 @@
       "severity": "warn"
     },
     {
-      "line": 594,
+      "line": 632,
       "column": 57,
-      "stop_line": 594,
+      "stop_line": 632,
       "stop_column": 71,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1945,9 +1945,9 @@
       "severity": "warn"
     },
     {
-      "line": 599,
+      "line": 637,
       "column": 20,
-      "stop_line": 599,
+      "stop_line": 637,
       "stop_column": 34,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1957,9 +1957,9 @@
       "severity": "warn"
     },
     {
-      "line": 622,
+      "line": 660,
       "column": 43,
-      "stop_line": 622,
+      "stop_line": 660,
       "stop_column": 57,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1969,9 +1969,9 @@
       "severity": "warn"
     },
     {
-      "line": 629,
+      "line": 667,
       "column": 43,
-      "stop_line": 629,
+      "stop_line": 667,
       "stop_column": 57,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1981,9 +1981,9 @@
       "severity": "warn"
     },
     {
-      "line": 650,
+      "line": 688,
       "column": 39,
-      "stop_line": 650,
+      "stop_line": 688,
       "stop_column": 53,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -1993,9 +1993,9 @@
       "severity": "warn"
     },
     {
-      "line": 669,
+      "line": 707,
       "column": 28,
-      "stop_line": 669,
+      "stop_line": 707,
       "stop_column": 42,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -2005,9 +2005,9 @@
       "severity": "warn"
     },
     {
-      "line": 670,
+      "line": 708,
       "column": 28,
-      "stop_line": 670,
+      "stop_line": 708,
       "stop_column": 42,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -2017,177 +2017,9 @@
       "severity": "warn"
     },
     {
-      "line": 718,
-      "column": 46,
-      "stop_line": 718,
-      "stop_column": 63,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `str()` call; argument is already of type `str`",
-      "concise_description": "Unnecessary `str()` call; argument is already of type `str`",
-      "severity": "warn"
-    },
-    {
-      "line": 721,
-      "column": 50,
-      "stop_line": 721,
-      "stop_column": 88,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 722,
-      "column": 49,
-      "stop_line": 722,
-      "stop_column": 86,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 755,
-      "column": 46,
-      "stop_line": 755,
-      "stop_column": 76,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 756,
-      "column": 37,
-      "stop_line": 756,
-      "stop_column": 68,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 758,
-      "column": 46,
-      "stop_line": 758,
-      "stop_column": 59,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 765,
-      "column": 46,
-      "stop_line": 765,
-      "stop_column": 76,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 769,
-      "column": 46,
-      "stop_line": 769,
-      "stop_column": 84,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 770,
-      "column": 45,
-      "stop_line": 770,
-      "stop_column": 82,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 780,
+      "line": 774,
       "column": 41,
-      "stop_line": 780,
-      "stop_column": 55,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `str()` call; argument is already of type `str`",
-      "concise_description": "Unnecessary `str()` call; argument is already of type `str`",
-      "severity": "warn"
-    },
-    {
-      "line": 782,
-      "column": 45,
-      "stop_line": 782,
-      "stop_column": 59,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `str()` call; argument is already of type `str`",
-      "concise_description": "Unnecessary `str()` call; argument is already of type `str`",
-      "severity": "warn"
-    },
-    {
-      "line": 789,
-      "column": 44,
-      "stop_line": 789,
-      "stop_column": 74,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 793,
-      "column": 26,
-      "stop_line": 793,
-      "stop_column": 51,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 827,
-      "column": 38,
-      "stop_line": 827,
-      "stop_column": 50,
-      "path": "plasma_global/models/power.py",
-      "code": -2,
-      "name": "unnecessary-type-conversion",
-      "description": "Unnecessary `float()` call; argument is already of type `float`",
-      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
-      "severity": "warn"
-    },
-    {
-      "line": 832,
-      "column": 61,
-      "stop_line": 832,
+      "stop_line": 774,
       "stop_column": 73,
       "path": "plasma_global/models/power.py",
       "code": -2,
@@ -2197,10 +2029,10 @@
       "severity": "warn"
     },
     {
-      "line": 845,
-      "column": 34,
-      "stop_line": 845,
-      "stop_column": 46,
+      "line": 777,
+      "column": 41,
+      "stop_line": 777,
+      "stop_column": 57,
       "path": "plasma_global/models/power.py",
       "code": -2,
       "name": "unnecessary-type-conversion",
@@ -2209,10 +2041,10 @@
       "severity": "warn"
     },
     {
-      "line": 851,
-      "column": 30,
-      "stop_line": 851,
-      "stop_column": 42,
+      "line": 784,
+      "column": 41,
+      "stop_line": 784,
+      "stop_column": 83,
       "path": "plasma_global/models/power.py",
       "code": -2,
       "name": "unnecessary-type-conversion",
@@ -2221,10 +2053,10 @@
       "severity": "warn"
     },
     {
-      "line": 854,
-      "column": 24,
-      "stop_line": 854,
-      "stop_column": 38,
+      "line": 813,
+      "column": 37,
+      "stop_line": 813,
+      "stop_column": 51,
       "path": "plasma_global/models/power.py",
       "code": -2,
       "name": "unnecessary-type-conversion",
@@ -2233,10 +2065,10 @@
       "severity": "warn"
     },
     {
-      "line": 863,
-      "column": 40,
-      "stop_line": 863,
-      "stop_column": 70,
+      "line": 957,
+      "column": 39,
+      "stop_line": 957,
+      "stop_column": 68,
       "path": "plasma_global/models/power.py",
       "code": -2,
       "name": "unnecessary-type-conversion",
@@ -2245,10 +2077,10 @@
       "severity": "warn"
     },
     {
-      "line": 869,
-      "column": 49,
-      "stop_line": 869,
-      "stop_column": 56,
+      "line": 1033,
+      "column": 26,
+      "stop_line": 1033,
+      "stop_column": 38,
       "path": "plasma_global/models/power.py",
       "code": -2,
       "name": "unnecessary-type-conversion",
@@ -2257,10 +2089,22 @@
       "severity": "warn"
     },
     {
-      "line": 871,
-      "column": 49,
-      "stop_line": 871,
-      "stop_column": 83,
+      "line": 1085,
+      "column": 41,
+      "stop_line": 1085,
+      "stop_column": 78,
+      "path": "plasma_global/models/power.py",
+      "code": -2,
+      "name": "unnecessary-type-conversion",
+      "description": "Unnecessary `float()` call; argument is already of type `float`",
+      "concise_description": "Unnecessary `float()` call; argument is already of type `float`",
+      "severity": "warn"
+    },
+    {
+      "line": 1087,
+      "column": 44,
+      "stop_line": 1087,
+      "stop_column": 74,
       "path": "plasma_global/models/power.py",
       "code": -2,
       "name": "unnecessary-type-conversion",

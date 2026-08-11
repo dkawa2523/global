@@ -88,7 +88,11 @@ def _tracked_files() -> list[str]:
         "quality/pyrefly-baseline.json",
     }
     return [
-        path for path in _git("ls-files").splitlines() if path and path not in excluded
+        path
+        for path in _git(
+            "ls-files", "--cached", "--others", "--exclude-standard"
+        ).splitlines()
+        if path and path not in excluded
     ]
 
 

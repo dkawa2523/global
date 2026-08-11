@@ -87,31 +87,25 @@ class ZoneConfig(StrictModel):
 
     @model_validator(mode="after")
     def has_initial_composition(self) -> Self:
-        has_densities = self.initial_densities_m3 is not None
-        has_fractions = self.initial_mole_fractions is not None
-        if has_densities == has_fractions:
+        densities = self.initial_densities_m3
+        fractions = self.initial_mole_fractions
+        if (densities is None) == (fractions is None):
             raise ValueError(
                 "set exactly one of initial_densities_m3 or initial_mole_fractions"
             )
-        if has_densities:
-            assert self.initial_densities_m3 is not None
+        if densities is not None:
             if self.initial_seed_densities_m3:
                 raise ValueError(
                     "initial_seed_densities_m3 is only valid with initial_mole_fractions"
                 )
-            if not self.initial_densities_m3 or not any(
-                value > 0.0 for value in self.initial_densities_m3.values()
-            ):
+            if not densities or not any(value > 0.0 for value in densities.values()):
                 raise ValueError("initial_densities_m3 must contain a positive density")
-        else:
-            assert self.initial_mole_fractions is not None
-            if not self.initial_mole_fractions or not any(
-                value > 0.0 for value in self.initial_mole_fractions.values()
-            ):
+        elif fractions is not None:
+            if not fractions or not any(value > 0.0 for value in fractions.values()):
                 raise ValueError(
                     "initial_mole_fractions must contain a positive fraction"
                 )
-            total = sum(self.initial_mole_fractions.values())
+            total = sum(fractions.values())
             if not math.isclose(total, 1.0, rel_tol=0.0, abs_tol=1.0e-12):
                 raise ValueError(
                     f"initial_mole_fractions must sum to one, got {total:g}"
@@ -745,23 +739,18 @@ class CaseSpec(StrictModel):
     _source_path: Path | None = PrivateAttr(default=None)
     _included_files: tuple[Path, ...] = PrivateAttr(default=())
 
-    @model_validator(mode="after")
-    def valid_commands(self) -> Self:
-        zone_ids = {item.zone_id for item in self.reactor.zones}
+    def _validate_recipe_commands(self) -> None:
         inlet_ids = {item.inlet_id for item in self.reactor.gas_inlets}
         ports = {item.port_id: item for item in self.reactor.power_ports}
-        port_ids = set(ports)
         surface_ids = {item.surface_id for item in self.reactor.surfaces}
         for step in self.recipe.steps:
             commands = step.commands
-            unknown_inlets = set(commands.gas_inlets) - inlet_ids
-            unknown_ports = set(commands.power_ports) - port_ids
-            unknown_surfaces = set(commands.surfaces) - surface_ids
-            for label, unknown in (
-                ("gas inlet", unknown_inlets),
-                ("power port", unknown_ports),
-                ("surface", unknown_surfaces),
+            for label, references, available in (
+                ("gas inlet", set(commands.gas_inlets), inlet_ids),
+                ("power port", set(commands.power_ports), set(ports)),
+                ("surface", set(commands.surfaces), surface_ids),
             ):
+                unknown = references - available
                 if unknown:
                     values = ", ".join(sorted(unknown))
                     raise ValueError(
@@ -769,23 +758,17 @@ class CaseSpec(StrictModel):
                         f"{values}"
                     )
             for port_id, command in commands.power_ports.items():
-                port = ports.get(port_id)
-                if port is not None and not _power_command_matches_model(
-                    port.model, command
-                ):
+                port = ports[port_id]
+                if not _power_command_matches_model(port.model, command):
                     raise ValueError(
                         f"recipe step {step.step_id!r} command kind "
                         f"{command.kind!r} does not match power port {port_id!r} "
                         f"model kind {port.model.kind!r}"
                     )
 
-        closure_model = self.models.electron_closure
-        if isinstance(closure_model, ElectronEnergyClosure):
-            closure = "electron_energy"
-        elif isinstance(closure_model, LocalFieldClosure):
-            closure = "local_field"
-        else:
-            assert_never(closure_model)
+    def _validate_initial_electron_state(
+        self, closure: Literal["electron_energy", "local_field"]
+    ) -> None:
         for zone in self.reactor.zones:
             if closure == "electron_energy" and zone.initial_mean_energy_eV is None:
                 raise ValueError(
@@ -798,6 +781,9 @@ class CaseSpec(StrictModel):
                     "with the local_field closure"
                 )
 
+    def _validate_electron_model(
+        self, closure: Literal["electron_energy", "local_field"]
+    ) -> None:
         electron_model = self.models.electrons
         if isinstance(electron_model, MaxwellianElectronModel):
             if closure != "electron_energy":
@@ -822,6 +808,7 @@ class CaseSpec(StrictModel):
         else:
             assert_never(electron_model)
 
+    def _validate_gas_energy_references(self, zone_ids: set[str]) -> None:
         gas_energy = self.models.gas_energy
         if isinstance(gas_energy, EvolvedGasEnergy):
             unknown = set(gas_energy.wall_energy_relaxation_s_inv_by_zone) - zone_ids
@@ -834,37 +821,41 @@ class CaseSpec(StrictModel):
         elif not isinstance(gas_energy, FixedGasEnergy):
             assert_never(gas_energy)
 
-        if self.experimental is not None:
-            wall_inventory = self.experimental.wall_inventory
-            if wall_inventory is not None:
-                unknown = set(wall_inventory.initial_by_surface) - surface_ids
-                if unknown:
-                    values = ", ".join(sorted(unknown))
-                    raise ValueError(
-                        "experimental.wall_inventory.initial_by_surface references "
-                        f"unknown surfaces: {values}"
-                    )
-                unknown_event_surfaces = {
-                    event.surface_id for event in wall_inventory.events
-                } - surface_ids
-                if unknown_event_surfaces:
-                    raise ValueError(
-                        "experimental.wall_inventory.events references unknown "
-                        f"surfaces: {', '.join(sorted(unknown_event_surfaces))}"
-                    )
-                undeclared_inventory = {
-                    (event.surface_id, inventory_id)
-                    for event in wall_inventory.events
-                    for inventory_id in event.inventory_particles_per_event
-                    if inventory_id
-                    not in wall_inventory.initial_by_surface.get(event.surface_id, {})
-                }
-                if undeclared_inventory:
-                    raise ValueError(
-                        "experimental.wall_inventory.events writes undeclared "
-                        f"inventory states: {sorted(undeclared_inventory)}"
-                    )
+    def _validate_wall_inventory_references(self, surface_ids: set[str]) -> None:
+        wall_inventory = (
+            None if self.experimental is None else self.experimental.wall_inventory
+        )
+        if wall_inventory is None:
+            return
+        unknown = set(wall_inventory.initial_by_surface) - surface_ids
+        if unknown:
+            values = ", ".join(sorted(unknown))
+            raise ValueError(
+                "experimental.wall_inventory.initial_by_surface references "
+                f"unknown surfaces: {values}"
+            )
+        unknown_event_surfaces = {
+            event.surface_id for event in wall_inventory.events
+        } - surface_ids
+        if unknown_event_surfaces:
+            raise ValueError(
+                "experimental.wall_inventory.events references unknown "
+                f"surfaces: {', '.join(sorted(unknown_event_surfaces))}"
+            )
+        undeclared_inventory = {
+            (event.surface_id, inventory_id)
+            for event in wall_inventory.events
+            for inventory_id in event.inventory_particles_per_event
+            if inventory_id
+            not in wall_inventory.initial_by_surface.get(event.surface_id, {})
+        }
+        if undeclared_inventory:
+            raise ValueError(
+                "experimental.wall_inventory.events writes undeclared "
+                f"inventory states: {sorted(undeclared_inventory)}"
+            )
 
+    def _validate_save_times(self) -> None:
         save_at = self.solver.save_at_s
         if save_at is not None and (
             save_at[0] < self.recipe.start_time_s
@@ -873,6 +864,20 @@ class CaseSpec(StrictModel):
             raise ValueError(
                 "solver.save_at_s must lie within the recipe time interval"
             )
+
+    @model_validator(mode="after")
+    def valid_commands(self) -> Self:
+        zone_ids = {item.zone_id for item in self.reactor.zones}
+        surface_ids = {item.surface_id for item in self.reactor.surfaces}
+        closure: Literal["electron_energy", "local_field"] = (
+            self.models.electron_closure.kind
+        )
+        self._validate_recipe_commands()
+        self._validate_initial_electron_state(closure)
+        self._validate_electron_model(closure)
+        self._validate_gas_energy_references(zone_ids)
+        self._validate_wall_inventory_references(surface_ids)
+        self._validate_save_times()
         return self
 
     @property

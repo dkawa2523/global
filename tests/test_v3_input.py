@@ -264,6 +264,51 @@ def test_command_kind_must_match_its_port_model() -> None:
         CaseSpec.model_validate(data)
 
 
+@pytest.mark.parametrize(
+    ("command_group", "payload", "message"),
+    [
+        ("gas_inlets", {"missing": {"flow_sccm": {"Ar": 1.0}}}, "gas inlet"),
+        (
+            "power_ports",
+            {
+                "missing": {
+                    "kind": "prescribed_power",
+                    "absorbed_power_W": 1.0,
+                }
+            },
+            "power port",
+        ),
+        ("surfaces", {"missing": {"temperature_K": 300.0}}, "surface"),
+    ],
+)
+def test_recipe_commands_reject_unknown_reactor_references(
+    command_group: str, payload: dict[str, object], message: str
+) -> None:
+    data = _case()
+    data["recipe"]["steps"][0]["commands"][command_group] = payload
+
+    with pytest.raises(ValueError, match=f"unknown {message}"):
+        CaseSpec.model_validate(data)
+
+
+def test_case_cross_references_validate_closure_and_save_range() -> None:
+    missing_energy = _case()
+    missing_energy["reactor"]["zones"][0]["initial_mean_energy_eV"] = None
+    with pytest.raises(ValueError, match="requires initial_mean_energy_eV"):
+        CaseSpec.model_validate(missing_energy)
+
+    local_field_with_energy = _case()
+    local_field_with_energy["models"]["electron_closure"] = {"kind": "local_field"}
+    with pytest.raises(ValueError, match="incompatible with the local_field"):
+        CaseSpec.model_validate(local_field_with_energy)
+
+    outside_recipe = _case()
+    del outside_recipe["solver"]["sample_interval_s"]
+    outside_recipe["solver"]["save_at_s"] = [0.0, 0.002]
+    with pytest.raises(ValueError, match="within the recipe time interval"):
+        CaseSpec.model_validate(outside_recipe)
+
+
 def test_initial_state_closure_and_sampling_are_explicit() -> None:
     missing_density = _case()
     missing_density["reactor"]["zones"][0]["initial_densities_m3"] = {}
@@ -424,6 +469,134 @@ def test_v2_migration_refactor_is_deterministic() -> None:
 
     assert first.case.model_dump(mode="python") == second.case.model_dump(mode="python")
     assert first.report == second.report
+
+
+def test_v2_initial_density_migration_preserves_explicit_and_derived_paths() -> None:
+    derived = migrate_v2(V2_CONFIGS / "case_smoke.yaml")
+    densities_by_zone = {
+        zone.zone_id: zone.initial_densities_m3 for zone in derived.case.reactor.zones
+    }
+    for densities in densities_by_zone.values():
+        assert densities["Ar_plus"] == 1.0e13
+        assert densities["O_minus"] == 0.0
+        assert densities["Ar"] / densities["CF4"] == pytest.approx(5.0)
+        assert densities["CF4"] / densities["O2"] == pytest.approx(10.0)
+    density_warnings = [
+        warning
+        for warning in derived.report.warnings
+        if "positive-ion seeds" in warning or "initial_densities_m3" in warning
+    ]
+    assert len(density_warnings) == 4
+
+    explicit = migrate_v2(V2_CONFIGS / "case_crane_two_reaction_argon.yaml")
+    assert explicit.case.reactor.zones[0].initial_densities_m3 == {
+        "Ar": 2.5e25,
+        "Ar_plus": 1.0e6,
+    }
+    assert not any(
+        "positive-ion seeds" in warning for warning in explicit.report.warnings
+    )
+
+
+def test_v2_power_command_migration_preserves_control_specific_setpoints() -> None:
+    result = migrate_v2(V2_CONFIGS / "case_rf_envelope_calibration.yaml")
+
+    models = {
+        port.port_id: port.model.model_dump(mode="python", exclude_none=True)
+        for port in result.case.reactor.power_ports
+    }
+    assert models == {
+        "source_rf": {
+            "kind": "experimental.rf_envelope",
+            "role": "source",
+            "frequency_Hz": 13.56e6,
+            "control": "absorbed_power",
+            "effective_impedance_ohm": 50.0,
+            "coupling_efficiency": 0.65,
+            "base_reduced_field_Td": 25.0,
+            "reduced_field_per_sqrt_W_Td": 0.8,
+            "self_bias_fraction": 0.35,
+            "plasma_potential_offset_V": 0.0,
+            "plasma_potential_per_sqrt_W": 0.0,
+        },
+        "wafer_bias": {
+            "kind": "experimental.rf_envelope",
+            "role": "bias",
+            "frequency_Hz": 2.0e6,
+            "control": "voltage",
+            "effective_impedance_ohm": 200.0,
+            "coupling_efficiency": 0.2,
+            "base_reduced_field_Td": 0.0,
+            "reduced_field_per_sqrt_W_Td": 0.0,
+            "self_bias_fraction": 0.35,
+            "plasma_potential_offset_V": 0.0,
+            "plasma_potential_per_sqrt_W": 0.0,
+        },
+    }
+    commands = [
+        step.model_dump(mode="python", exclude_none=True)["commands"]["power_ports"]
+        for step in result.case.recipe.steps
+    ]
+    assert commands == [
+        {
+            "source_rf": {
+                "kind": "experimental.rf_envelope",
+                "absorbed_power_W": 500.0,
+                "waveform": {"kind": "continuous"},
+            },
+            "wafer_bias": {
+                "kind": "experimental.rf_envelope",
+                "voltage_rms_V": 50.0,
+                "waveform": {"kind": "continuous"},
+            },
+        },
+        {
+            "source_rf": {
+                "kind": "experimental.rf_envelope",
+                "absorbed_power_W": 1500.0,
+                "waveform": {"kind": "continuous"},
+            },
+            "wafer_bias": {
+                "kind": "experimental.rf_envelope",
+                "voltage_rms_V": 120.0,
+                "waveform": {"kind": "continuous"},
+            },
+        },
+        {
+            "source_rf": {
+                "kind": "experimental.rf_envelope",
+                "absorbed_power_W": 0.0,
+                "waveform": {"kind": "continuous"},
+            },
+            "wafer_bias": {
+                "kind": "experimental.rf_envelope",
+                "voltage_rms_V": 0.0,
+                "waveform": {"kind": "continuous"},
+            },
+        },
+    ]
+    assert not any("waveform='false'" in warning for warning in result.report.warnings)
+
+
+def test_v2_dc_command_migration_keeps_static_circuit_data_on_the_port() -> None:
+    result = migrate_v2(V2_CONFIGS / "case_zdplaskin_example2.yaml")
+
+    port = result.case.reactor.power_ports[0]
+    command = result.case.recipe.steps[0].commands.power_ports["dc_series_drive"]
+    assert port.model.model_dump(mode="python", exclude_none=True) == {
+        "kind": "dc_series",
+        "ballast_resistance_ohm": 100_000.0,
+        "gap_m": 0.004,
+        "electrode_area_m2": 5.0265482457e-05,
+        "source_voltage_V": 1000.0,
+        "power_absorption_fraction": 1.0,
+        "electron_mobility_m2_V_s": 0.45,
+    }
+    assert command.model_dump(mode="python", exclude_none=True) == {
+        "kind": "dc_series",
+        "off_voltage_V": 0.0,
+        "waveform": {"kind": "continuous"},
+    }
 
 
 @pytest.mark.parametrize(

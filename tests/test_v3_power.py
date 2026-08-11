@@ -99,6 +99,48 @@ def test_prescribed_power_coordinator_does_not_require_mobility() -> None:
     assert result.iterations_by_zone["plasma"] == 1
 
 
+def test_coordinator_keeps_zone_aggregation_and_off_commands_independent() -> None:
+    coordinator = PowerCoordinator(
+        (
+            PrescribedPowerPort(
+                "source", "source_zone", electron_fraction=0.75, gas_fraction=0.25
+            ),
+            PrescribedPowerPort("bias", "process_zone", electron_fraction=1.0),
+        ),
+        ("source_zone", "process_zone"),
+    )
+
+    result = coordinator.evaluate(
+        time_s=0.0,
+        commands={
+            "source": CompiledPowerCommand(kind="power", power_W=40.0),
+            "bias": CompiledPowerCommand(kind="off"),
+        },
+        electron_density_m3_by_zone={"source_zone": 1.0e15, "process_zone": 2.0e15},
+        neutral_density_m3_by_zone={"source_zone": 1.0e20, "process_zone": 2.0e20},
+        mean_energy_eV_by_zone={"source_zone": 3.0, "process_zone": 6.0},
+        prescribed_electron_power_W_by_zone={
+            "source_zone": 2.0,
+            "process_zone": 3.0,
+        },
+        prescribed_reduced_field_Td_by_zone={"process_zone": 12.0},
+    )
+
+    assert dict(result.electron_power_W_by_zone) == {
+        "source_zone": 32.0,
+        "process_zone": 3.0,
+    }
+    assert dict(result.gas_power_W_by_zone) == {
+        "source_zone": 10.0,
+        "process_zone": 0.0,
+    }
+    assert dict(result.reduced_field_Td_by_zone) == {"process_zone": 12.0}
+    assert dict(result.iterations_by_zone) == {"source_zone": 1, "process_zone": 1}
+    assert result.power_state_by_zone["source_zone"].electron_temperature_eV == 2.0
+    assert result.power_state_by_zone["process_zone"].electron_temperature_eV == 4.0
+    assert result.port_results["bias"].electron_power_W == 0.0
+
+
 def test_dc_series_obeys_voltage_and_power_balance() -> None:
     port = DCSeriesPort(
         "dc",
@@ -113,6 +155,29 @@ def test_dc_series_obeys_voltage_and_power_balance() -> None:
     voltage = result.observables["plasma_voltage_V"]
     assert result.electron_power_W == pytest.approx(current * voltage)
     assert result.reduced_field_Td is not None and result.reduced_field_Td > 0.0
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"configured_mobility_m2_V_s": float("nan")},
+        {"configured_mobility_m2_V_s": float("inf")},
+        {"default_voltage_V": float("nan")},
+        {"default_voltage_V": float("inf")},
+    ],
+)
+def test_dc_series_rejects_nonfinite_optional_parameters(
+    overrides: dict[str, float],
+) -> None:
+    with pytest.raises(CaseValidationError, match="finite"):
+        DCSeriesPort(
+            "dc",
+            "plasma",
+            ballast_resistance_ohm=1.0e5,
+            gap_m=4.0e-3,
+            electrode_area_m2=5.0e-5,
+            **overrides,
+        )
 
 
 def test_dc_series_solves_local_field_on_prepared_mobility_axis() -> None:
