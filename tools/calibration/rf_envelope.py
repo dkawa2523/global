@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, SupportsFloat
 
 import yaml
 
@@ -28,10 +29,14 @@ class RFEnvelopeCalibrationInput:
     dc_self_bias_V: float | None = None
 
 
+def _python_float(value: SupportsFloat) -> float:
+    return float(value)
+
+
 def _positive(value: float | None) -> float | None:
     if value is None:
         return None
-    value = float(value)
+    value = _python_float(value)
     return value if value > 0.0 else None
 
 
@@ -40,69 +45,92 @@ def _net_commanded_power(inp: RFEnvelopeCalibrationInput) -> float | None:
     if commanded is not None:
         return commanded
     if inp.forward_power_W is not None:
-        reflected = max(float(inp.reflected_power_W or 0.0), 0.0)
-        return max(float(inp.forward_power_W) - reflected, 0.0)
+        reflected = max(_python_float(inp.reflected_power_W or 0.0), 0.0)
+        return max(_python_float(inp.forward_power_W) - reflected, 0.0)
     return None
+
+
+def _power_coefficients(inp: RFEnvelopeCalibrationInput) -> dict[str, float]:
+    commanded = _net_commanded_power(inp)
+    coefficients: dict[str, float] = {}
+    if inp.frequency_Hz is not None:
+        coefficients["frequency_Hz"] = _python_float(inp.frequency_Hz)
+    if commanded is not None:
+        coefficients["commanded_power_W"] = commanded
+
+    absorbed = _positive(inp.absorbed_power_W)
+    if absorbed is not None:
+        coefficients["absorbed_power_W"] = absorbed
+    if commanded is not None and commanded > 0.0 and absorbed is not None:
+        coefficients["coupling_efficiency"] = max(absorbed / commanded, 0.0)
+    return coefficients
+
+
+def _voltage_coefficients(inp: RFEnvelopeCalibrationInput) -> dict[str, float]:
+    coefficients: dict[str, float] = {}
+    voltage = _positive(inp.voltage_rms_V)
+    current = _positive(inp.current_rms_A)
+    delivered = _positive(inp.delivered_power_W)
+    if voltage is not None:
+        coefficients["voltage_rms_V"] = voltage
+        if current is not None:
+            coefficients["effective_impedance_ohm"] = voltage / current
+            coefficients["current_rms_A"] = current
+        elif delivered is not None:
+            coefficients["effective_impedance_ohm"] = voltage * voltage / delivered
+        if inp.dc_self_bias_V is not None:
+            dc_self_bias_V = _python_float(inp.dc_self_bias_V)
+            coefficients["self_bias_fraction"] = abs(dc_self_bias_V) / (
+                math.sqrt(2.0) * voltage
+            )
+            coefficients["dc_self_bias_V"] = dc_self_bias_V
+    return coefficients
+
+
+def _calibration_warnings(
+    inp: RFEnvelopeCalibrationInput, coefficients: Mapping[str, Any]
+) -> list[str]:
+    warnings: list[str] = []
+    if "coupling_efficiency" not in coefficients:
+        warnings.append(
+            "coupling_efficiency was not estimated; provide commanded and "
+            + "absorbed power."
+        )
+    elif coefficients["coupling_efficiency"] > 1.0:
+        warnings.append(
+            "coupling_efficiency is greater than 1; check commanded/absorbed "
+            + "power definitions."
+        )
+    if (
+        "voltage_rms_V" in coefficients
+        and "effective_impedance_ohm" not in coefficients
+    ):
+        warnings.append(
+            "effective_impedance_ohm was not estimated; provide RMS current or "
+            + "delivered power."
+        )
+    role = inp.role.lower()
+    if (
+        ("bias" in role or "lf" in role)
+        and "voltage_rms_V" in coefficients
+        and "self_bias_fraction" not in coefficients
+    ):
+        warnings.append(
+            "self_bias_fraction was not estimated; provide measured DC self-bias."
+        )
+    return warnings
 
 
 def estimate_rf_envelope_coefficients(
     inp: RFEnvelopeCalibrationInput,
 ) -> dict[str, Any]:
-    commanded = _net_commanded_power(inp)
-    out: dict[str, Any] = {
-        "role": inp.role,
-    }
-    if inp.frequency_Hz is not None:
-        out["frequency_Hz"] = float(inp.frequency_Hz)
-    if commanded is not None:
-        out["commanded_power_W"] = commanded
-
-    absorbed = _positive(inp.absorbed_power_W)
-    if absorbed is not None:
-        out["absorbed_power_W"] = absorbed
-    if commanded is not None and commanded > 0.0 and absorbed is not None:
-        out["coupling_efficiency"] = max(absorbed / commanded, 0.0)
-
-    voltage = _positive(inp.voltage_rms_V)
-    current = _positive(inp.current_rms_A)
-    delivered = _positive(inp.delivered_power_W)
-    if voltage is not None:
-        out["voltage_rms_V"] = voltage
-        if current is not None:
-            out["effective_impedance_ohm"] = voltage / current
-            out["current_rms_A"] = current
-        elif delivered is not None:
-            out["effective_impedance_ohm"] = voltage * voltage / delivered
-        if inp.dc_self_bias_V is not None:
-            out["self_bias_fraction"] = abs(float(inp.dc_self_bias_V)) / (
-                math.sqrt(2.0) * voltage
-            )
-            out["dc_self_bias_V"] = float(inp.dc_self_bias_V)
-
-    warnings: list[str] = []
-    if "coupling_efficiency" not in out:
-        warnings.append(
-            "coupling_efficiency was not estimated; provide commanded and absorbed power."
-        )
-    elif out["coupling_efficiency"] > 1.0:
-        warnings.append(
-            "coupling_efficiency is greater than 1; check commanded/absorbed power definitions."
-        )
-    if voltage is not None and "effective_impedance_ohm" not in out:
-        warnings.append(
-            "effective_impedance_ohm was not estimated; provide RMS current or delivered power."
-        )
-    if (
-        ("bias" in inp.role.lower() or "lf" in inp.role.lower())
-        and voltage is not None
-        and "self_bias_fraction" not in out
-    ):
-        warnings.append(
-            "self_bias_fraction was not estimated; provide measured DC self-bias."
-        )
+    coefficients: dict[str, Any] = {"role": inp.role}
+    coefficients.update(_power_coefficients(inp))
+    coefficients.update(_voltage_coefficients(inp))
+    warnings = _calibration_warnings(inp, coefficients)
     if warnings:
-        out["warnings"] = warnings
-    return out
+        coefficients["warnings"] = warnings
+    return coefficients
 
 
 def canonical_fragments(coefficients: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -159,7 +187,10 @@ def canonical_fragments(coefficients: dict[str, Any]) -> dict[str, dict[str, Any
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Estimate rf_envelope calibration coefficients from measured RF quantities."
+        description=(
+            "Estimate rf_envelope calibration coefficients from measured RF "
+            + "quantities."
+        )
     )
     parser.add_argument(
         "--role", required=True, help="Port role, for example hf_source or lf_bias."

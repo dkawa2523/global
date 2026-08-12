@@ -22,6 +22,27 @@ def _readonly(value: object, shape: tuple[int, ...], name: str) -> np.ndarray:
     return result
 
 
+def _energy_transport_rhs(
+    value: np.ndarray | None,
+    *,
+    n_zones: int,
+    pump_frequency_s_inv: np.ndarray,
+    inlet_J_m3_s: np.ndarray | None,
+    name: str,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    if value is None:
+        return None, None
+    energy = np.asarray(value, dtype=float)
+    if energy.shape != (n_zones,):
+        raise ValueError(f"{name} array has wrong shape")
+    if not np.all(np.isfinite(energy)):
+        raise ValueError(f"{name} array must contain finite values")
+    rhs = -pump_frequency_s_inv * energy
+    if inlet_J_m3_s is not None:
+        rhs = inlet_J_m3_s + rhs
+    return energy, rhs
+
+
 @dataclass(frozen=True, slots=True)
 class SegmentTransport:
     """Forcing that is constant within one compiled recipe segment."""
@@ -143,30 +164,26 @@ class CompiledTransport:
         density_rhs = np.array(forcing.particle_source_m3_s, copy=True)
         density_rhs -= self.pump_frequency_s_inv[:, None] * density
 
-        electron: np.ndarray | None = None
-        electron_rhs = None
-        if electron_energy_J_m3 is not None:
-            electron = np.asarray(electron_energy_J_m3, dtype=float)
-            if electron.shape != (self.n_zones,):
-                raise ValueError("electron-energy array has wrong shape")
-            if not np.all(np.isfinite(electron)):
-                raise ValueError("electron-energy array must contain finite values")
-            electron_rhs = -self.pump_frequency_s_inv * electron
-
-        heavy: np.ndarray | None = None
-        heavy_rhs = None
-        if heavy_energy_J_m3 is not None:
-            heavy = np.asarray(heavy_energy_J_m3, dtype=float)
-            if heavy.shape != (self.n_zones,):
-                raise ValueError("heavy-energy array has wrong shape")
-            if not np.all(np.isfinite(heavy)):
-                raise ValueError("heavy-energy array must contain finite values")
-            heavy_rhs = (
-                forcing.inlet_heavy_energy_J_m3_s - self.pump_frequency_s_inv * heavy
-            )
+        electron, electron_rhs = _energy_transport_rhs(
+            electron_energy_J_m3,
+            n_zones=self.n_zones,
+            pump_frequency_s_inv=self.pump_frequency_s_inv,
+            inlet_J_m3_s=None,
+            name="electron-energy",
+        )
+        heavy, heavy_rhs = _energy_transport_rhs(
+            heavy_energy_J_m3,
+            n_zones=self.n_zones,
+            pump_frequency_s_inv=self.pump_frequency_s_inv,
+            inlet_J_m3_s=forcing.inlet_heavy_energy_J_m3_s,
+            name="heavy-energy",
+        )
 
         for source, target, conductance in zip(
-            self.edge_from, self.edge_to, self.edge_conductance_m3_s
+            self.edge_from,
+            self.edge_to,
+            self.edge_conductance_m3_s,
+            strict=True,
         ):
             source_frequency = conductance / self.volumes_m3[source]
             target_frequency = conductance / self.volumes_m3[target]

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import Any, Protocol, SupportsFloat
 
 import numpy as np
 
@@ -16,6 +16,14 @@ from plasma_global.errors import CaseValidationError, ModelDomainError
 BOLTZMANN_J_K = 1.380649e-23
 E_CHARGE = 1.602176634e-19
 _EMPTY_RATES: Mapping[str, float] = MappingProxyType({})
+
+
+def _normalize_id(value: object) -> str:
+    return str(value)
+
+
+def _python_float(value: SupportsFloat) -> float:
+    return float(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +44,8 @@ class SurfaceGeometry:
                 "surface area, site density, and temperature must be positive"
             )
         coverages = {
-            str(name): float(value) for name, value in self.initial_coverages.items()
+            _normalize_id(name): _python_float(value)
+            for name, value in self.initial_coverages.items()
         }
         if any(not math.isfinite(value) or value < 0.0 for value in coverages.values()):
             raise CaseValidationError(
@@ -168,9 +177,8 @@ class _ThermalRate:
         surface_temperature_K: float,
     ) -> float:
         del gas, gas_temperature_K, ion_fluxes, ion_energy_eV
-        return float(
-            self.prefactor_m2_s
-            * math.exp(-self.activation_temperature_K / surface_temperature_K)
+        return self.prefactor_m2_s * math.exp(
+            -self.activation_temperature_K / surface_temperature_K
         )
 
 
@@ -188,6 +196,31 @@ class _Kernel:
     area_over_volume_m_inv: float
     inverse_site_density_m2: float
     gas_heating_J_m3_per_event_m2: float
+
+
+def _coverage_multiplier(
+    kernel: _Kernel, state: np.ndarray, free_coverage: float
+) -> float:
+    mass_action = 1.0
+    for coverage_power in kernel.surface_mass_action:
+        mass_action *= coverage_power.evaluate(state, free_coverage)
+        if mass_action == 0.0:
+            break
+    coverage_factor = (
+        1.0
+        if kernel.coverage_factor is None
+        else kernel.coverage_factor.evaluate(state, free_coverage)
+    )
+    return mass_action * coverage_factor
+
+
+@dataclass(frozen=True, slots=True)
+class _RateContext:
+    gas_densities_m3: np.ndarray
+    gas_temperature_K: np.ndarray
+    ion_flux_m2_s: Mapping[tuple[str, str], float]
+    ion_energy_eV_by_surface: np.ndarray
+    temperature_K_by_surface: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,7 +295,7 @@ class CompiledSurfaceModel:
             item for item in self.chemistry.species if item.phase == "surface"
         ]
         for species in surface_species:
-            occupancy[species.id] = float(species.elements.get("site", 1.0))
+            occupancy[species.id] = _python_float(species.elements.get("site", 1.0))
         for surface in self.surfaces:
             applicable = [
                 item
@@ -272,12 +305,14 @@ class CompiledSurfaceModel:
             free_candidates = [item for item in applicable if "site" in item.state_tags]
             if len(free_candidates) != 1:
                 raise CaseValidationError(
-                    f"surface {surface.surface_id!r} requires exactly one free-site species"
+                    f"surface {surface.surface_id!r} requires exactly one "
+                    "free-site species"
                 )
             free_id = free_candidates[0].id
             if free_id in surface.initial_coverages:
                 raise CaseValidationError(
-                    f"surface {surface.surface_id!r} must not initialize algebraic free site {free_id!r}"
+                    f"surface {surface.surface_id!r} must not initialize algebraic "
+                    f"free site {free_id!r}"
                 )
             free[surface.surface_id] = free_id
             for species in applicable:
@@ -290,7 +325,8 @@ class CompiledSurfaceModel:
             }
             if unknown:
                 raise CaseValidationError(
-                    f"surface {surface.surface_id!r} initializes unknown/nonindependent coverages {sorted(unknown)}"
+                    f"surface {surface.surface_id!r} initializes "
+                    f"unknown/nonindependent coverages {sorted(unknown)}"
                 )
             occupied = sum(
                 occupancy[species_id] * surface.initial_coverages.get(species_id, 0.0)
@@ -330,93 +366,137 @@ class CompiledSurfaceModel:
     def _compile_kernels(self) -> tuple[_Kernel, ...]:
         kernels: list[_Kernel] = []
         for reaction in self.chemistry.surface_reactions:
-            if reaction.rate_model not in self.chemistry.rate_models:
+            rate_model_id = reaction.rate_model
+            if rate_model_id is None or rate_model_id not in self.chemistry.rate_models:
                 raise CaseValidationError(
                     f"surface reaction {reaction.id} has unknown rate model"
                 )
-            target_ids = reaction.surfaces or tuple(
-                surface.surface_id for surface in self.surfaces
+            model = self.chemistry.rate_models[rate_model_id]
+            kernels.extend(
+                self._compile_kernel(reaction, model, surface_index, surface)
+                for surface_index, surface in self._reaction_surfaces(reaction)
             )
-            for surface_id in target_ids:
-                if surface_id not in self._surface_index:
-                    raise CaseValidationError(
-                        f"surface reaction {reaction.id} selects unknown surface {surface_id!r}"
-                    )
-                surface_index = self._surface_index[surface_id]
-                surface = self.surfaces[surface_index]
-                model = self.chemistry.rate_models[str(reaction.rate_model)]
-                if reaction.zones and surface.zone_id not in reaction.zones:
-                    continue
-                gas_reactants: list[tuple[int, float, str]] = []
-                surface_reactants: list[tuple[str, float]] = []
-                gas_delta: list[tuple[int, float]] = []
-                coverage_delta: list[tuple[int, float]] = []
-                for species_id, order in reaction.reactants.items():
-                    species = self._species[species_id]
-                    if species.phase == "gas":
-                        gas_reactants.append(
-                            (self._gas_index[species_id], float(order), species_id)
-                        )
-                    else:
-                        self._coverage_power(surface_id, species_id, float(order))
-                        surface_reactants.append((species_id, float(order)))
-                coverage_factor, skip_species = self._compile_coverage_factor(
-                    model, surface_id
-                )
-                mass_action = tuple(
-                    self._coverage_power(surface_id, species_id, order)
-                    for species_id, order in surface_reactants
-                    if species_id != skip_species
-                )
-                numeric_rate = self._compile_numeric_rate(model, surface, gas_reactants)
-                for species_id in set(reaction.reactants) | set(reaction.products):
-                    delta = float(
-                        reaction.products.get(species_id, 0.0)
-                        - reaction.reactants.get(species_id, 0.0)
-                    )
-                    if delta == 0.0:
-                        continue
-                    species = self._species[species_id]
-                    if species.phase == "gas":
-                        # The wall-transport ledger already removes an incident
-                        # ion. An ion-assisted event consumes that shared flux,
-                        # so subtracting the ion here would count it twice.
-                        if (
-                            model.kind == "ion_assisted"
-                            and species.charge > 0
-                            and delta < 0.0
-                        ):
-                            continue
-                        gas_delta.append((self._gas_index[species_id], delta))
-                    else:
-                        index = self.layout.state_index.get((surface_id, species_id))
-                        if index is not None:
-                            coverage_delta.append((index, delta))
-                kernels.append(
-                    _Kernel(
-                        reaction=reaction,
-                        surface_index=surface_index,
-                        zone_index=self._zone_index[surface.zone_id],
-                        rate_id=f"{reaction.id}@{surface.surface_id}",
-                        rate_kernel=numeric_rate,
-                        coverage_factor=coverage_factor,
-                        surface_mass_action=mass_action,
-                        gas_delta=tuple(gas_delta),
-                        coverage_delta=tuple(coverage_delta),
-                        area_over_volume_m_inv=(
-                            surface.area_m2
-                            / self.zone_volumes_m3[self._zone_index[surface.zone_id]]
-                        ),
-                        inverse_site_density_m2=1.0 / surface.site_density_m2,
-                        gas_heating_J_m3_per_event_m2=(
-                            surface.area_m2
-                            / self.zone_volumes_m3[self._zone_index[surface.zone_id]]
-                            * reaction.gas_heating_eV
-                            * E_CHARGE
-                        ),
-                    )
-                )
         return tuple(kernels)
+
+    def _reaction_surfaces(
+        self, reaction: ReactionData
+    ) -> Iterator[tuple[int, SurfaceGeometry]]:
+        target_ids = reaction.surfaces or tuple(
+            surface.surface_id for surface in self.surfaces
+        )
+        for surface_id in target_ids:
+            if surface_id not in self._surface_index:
+                raise CaseValidationError(
+                    f"surface reaction {reaction.id} selects unknown surface "
+                    f"{surface_id!r}"
+                )
+            surface_index = self._surface_index[surface_id]
+            surface = self.surfaces[surface_index]
+            if reaction.zones and surface.zone_id not in reaction.zones:
+                continue
+            yield surface_index, surface
+
+    def _compile_rate_terms(
+        self,
+        reaction: ReactionData,
+        model: RateModelData,
+        surface: SurfaceGeometry,
+    ) -> tuple[
+        _NumericRateKernel,
+        _CoveragePower | None,
+        tuple[_CoveragePower, ...],
+    ]:
+        gas_reactants: list[tuple[int, float, str]] = []
+        surface_reactants: list[tuple[str, _CoveragePower]] = []
+        for species_id, order in reaction.reactants.items():
+            species = self._species[species_id]
+            if species.phase == "gas":
+                gas_reactants.append(
+                    (self._gas_index[species_id], _python_float(order), species_id)
+                )
+            else:
+                surface_reactants.append(
+                    (
+                        species_id,
+                        self._coverage_power(
+                            surface.surface_id, species_id, _python_float(order)
+                        ),
+                    )
+                )
+        coverage_factor, skip_species = self._compile_coverage_factor(
+            model, surface.surface_id
+        )
+        mass_action = tuple(
+            coverage_power
+            for species_id, coverage_power in surface_reactants
+            if species_id != skip_species
+        )
+        return (
+            self._compile_numeric_rate(model, surface, gas_reactants),
+            coverage_factor,
+            mass_action,
+        )
+
+    def _compile_stoichiometry(
+        self,
+        reaction: ReactionData,
+        model: RateModelData,
+        surface_id: str,
+    ) -> tuple[tuple[tuple[int, float], ...], tuple[tuple[int, float], ...]]:
+        gas_delta: list[tuple[int, float]] = []
+        coverage_delta: list[tuple[int, float]] = []
+        for species_id in set(reaction.reactants) | set(reaction.products):
+            delta = _python_float(
+                reaction.products.get(species_id, 0.0)
+                - reaction.reactants.get(species_id, 0.0)
+            )
+            if delta == 0.0:
+                continue
+            species = self._species[species_id]
+            if species.phase == "gas":
+                # The wall-transport ledger already removes an incident ion.
+                # An ion-assisted event consumes that shared flux, so the
+                # surface kernel must not subtract it a second time.
+                if model.kind == "ion_assisted" and species.charge > 0 and delta < 0.0:
+                    continue
+                gas_delta.append((self._gas_index[species_id], delta))
+            else:
+                index = self.layout.state_index.get((surface_id, species_id))
+                if index is not None:
+                    coverage_delta.append((index, delta))
+        return tuple(gas_delta), tuple(coverage_delta)
+
+    def _compile_kernel(
+        self,
+        reaction: ReactionData,
+        model: RateModelData,
+        surface_index: int,
+        surface: SurfaceGeometry,
+    ) -> _Kernel:
+        numeric_rate, coverage_factor, mass_action = self._compile_rate_terms(
+            reaction, model, surface
+        )
+        gas_delta, coverage_delta = self._compile_stoichiometry(
+            reaction, model, surface.surface_id
+        )
+        zone_index = self._zone_index[surface.zone_id]
+        area_over_volume = surface.area_m2 / self.zone_volumes_m3[zone_index]
+        return _Kernel(
+            reaction=reaction,
+            surface_index=surface_index,
+            zone_index=zone_index,
+            rate_id=f"{reaction.id}@{surface.surface_id}",
+            rate_kernel=numeric_rate,
+            coverage_factor=coverage_factor,
+            surface_mass_action=mass_action,
+            gas_delta=gas_delta,
+            coverage_delta=coverage_delta,
+            area_over_volume_m_inv=area_over_volume,
+            inverse_site_density_m2=1.0 / surface.site_density_m2,
+            gas_heating_J_m3_per_event_m2=(
+                area_over_volume * reaction.gas_heating_eV * E_CHARGE
+            ),
+        )
 
     def _coverage_power(
         self, surface_id: str, species_id: str, exponent: float
@@ -451,7 +531,8 @@ class CompiledSurfaceModel:
             species_key = "species"
         else:
             raise CaseValidationError(
-                f"surface rate model {model.id!r} has unsupported coverage kind {kind!r}"
+                f"surface rate model {model.id!r} has unsupported coverage kind "
+                f"{kind!r}"
             )
         try:
             species_id = str(config[species_key])
@@ -562,27 +643,22 @@ class CompiledSurfaceModel:
     def _free_coverages(self, state: np.ndarray) -> np.ndarray:
         values = np.empty(len(self.surfaces), dtype=float)
         for surface_index, (indices, occupancies) in enumerate(
-            zip(self._free_state_indices, self._free_state_occupancies)
+            zip(self._free_state_indices, self._free_state_occupancies, strict=True)
         ):
             values[surface_index] = 1.0 - float(occupancies @ state[indices])
         return values
 
-    def evaluate(
+    def _validated_evaluation_arrays(
         self,
         coverage_state: np.ndarray,
         gas_densities_m3: np.ndarray,
         gas_temperature_K: np.ndarray,
-        *,
-        ion_flux_m2_s: Mapping[tuple[str, str], float] | None = None,
-        ion_energy_eV: Mapping[str, float] | None = None,
-        surface_temperature_K: Mapping[str, float] | None = None,
-        domain_atol: np.ndarray | None = None,
-        collect_rates: bool = True,
-    ) -> SurfaceEvaluation:
-        coverage_state = np.asarray(coverage_state, dtype=float)
+        domain_atol: np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        coverage = np.asarray(coverage_state, dtype=float)
         gas = np.asarray(gas_densities_m3, dtype=float)
         temperatures = np.asarray(gas_temperature_K, dtype=float)
-        if coverage_state.shape != (len(self.layout.labels),):
+        if coverage.shape != (len(self.layout.labels),):
             raise ValueError("surface coverage state has the wrong shape")
         if gas.shape != (
             len(self.zone_ids),
@@ -590,15 +666,19 @@ class CompiledSurfaceModel:
         ) or temperatures.shape != (len(self.zone_ids),):
             raise ValueError("surface gas arrays have the wrong shape")
         tolerance = (
-            np.full(coverage_state.shape, self.domain_atol, dtype=float)
+            np.full(coverage.shape, self.domain_atol, dtype=float)
             if domain_atol is None
             else np.asarray(domain_atol, dtype=float)
         )
-        if tolerance.shape != coverage_state.shape or np.any(tolerance < 0.0):
+        if tolerance.shape != coverage.shape or np.any(tolerance < 0.0):
             raise ValueError("surface domain_atol has the wrong shape")
-        threshold = -10.0 * tolerance
-        if np.any(coverage_state < threshold):
+        if np.any(coverage < -10.0 * tolerance):
             raise ModelDomainError("surface coverage left the nonnegative domain")
+        return coverage, gas, temperatures, tolerance
+
+    def _reactive_coverages(
+        self, coverage_state: np.ndarray, tolerance: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         # Round-off negatives are zero only for surface mass action. The ODE
         # state and returned RHS are never projected or renormalized.
         reactive_state = np.where(coverage_state < 0.0, 0.0, coverage_state)
@@ -607,12 +687,19 @@ class CompiledSurfaceModel:
         for surface_index, surface in enumerate(self.surfaces):
             if free_coverages[surface_index] < -free_site_tolerance:
                 raise ModelDomainError(
-                    f"surface {surface.surface_id!r} has negative algebraic free-site coverage"
+                    f"surface {surface.surface_id!r} has negative algebraic "
+                    "free-site coverage"
                 )
-        gas_rhs = np.zeros_like(gas)
-        coverage_rhs = np.zeros_like(coverage_state)
-        gas_heating = np.zeros(len(self.zone_ids), dtype=float)
-        rates: dict[str, float] | None = {} if collect_rates else None
+        return reactive_state, free_coverages
+
+    def _rate_context(
+        self,
+        gas: np.ndarray,
+        gas_temperatures: np.ndarray,
+        ion_flux_m2_s: Mapping[tuple[str, str], float] | None,
+        ion_energy_eV: Mapping[str, float] | None,
+        surface_temperature_K: Mapping[str, float] | None,
+    ) -> _RateContext:
         fluxes = ion_flux_m2_s or {}
         energies = ion_energy_eV or {}
         surface_temperatures = surface_temperature_K or {}
@@ -631,44 +718,93 @@ class CompiledSurfaceModel:
             resolved_surface_temperatures <= 0.0
         ):
             raise ModelDomainError("surface temperature must be finite and positive")
+        return _RateContext(
+            gas_densities_m3=gas,
+            gas_temperature_K=gas_temperatures,
+            ion_flux_m2_s=fluxes,
+            ion_energy_eV_by_surface=ion_energies,
+            temperature_K_by_surface=resolved_surface_temperatures,
+        )
+
+    @staticmethod
+    def _evaluate_kernel(
+        kernel: _Kernel,
+        reactive_state: np.ndarray,
+        free_coverages: np.ndarray,
+        context: _RateContext,
+    ) -> float:
+        surface_index = kernel.surface_index
+        coverage_multiplier = _coverage_multiplier(
+            kernel, reactive_state, float(free_coverages[surface_index])
+        )
+        rate = kernel.rate_kernel.evaluate(
+            context.gas_densities_m3[kernel.zone_index],
+            float(context.gas_temperature_K[kernel.zone_index]),
+            context.ion_flux_m2_s,
+            float(context.ion_energy_eV_by_surface[surface_index]),
+            float(context.temperature_K_by_surface[surface_index]),
+        )
+        rate *= coverage_multiplier
+        if not math.isfinite(rate) or rate < 0.0:
+            raise ModelDomainError(
+                f"surface reaction {kernel.reaction.id!r} returned invalid rate "
+                f"{rate!r}"
+            )
+        return rate
+
+    @staticmethod
+    def _accumulate_kernel(
+        kernel: _Kernel,
+        rate: float,
+        gas_rhs: np.ndarray,
+        coverage_rhs: np.ndarray,
+        gas_heating: np.ndarray,
+    ) -> None:
+        gas_heating[kernel.zone_index] += kernel.gas_heating_J_m3_per_event_m2 * rate
+        for index, delta in kernel.gas_delta:
+            gas_rhs[kernel.zone_index, index] += (
+                kernel.area_over_volume_m_inv * delta * rate
+            )
+        for index, delta in kernel.coverage_delta:
+            coverage_rhs[index] += delta * rate * kernel.inverse_site_density_m2
+
+    def evaluate(
+        self,
+        coverage_state: np.ndarray,
+        gas_densities_m3: np.ndarray,
+        gas_temperature_K: np.ndarray,
+        *,
+        ion_flux_m2_s: Mapping[tuple[str, str], float] | None = None,
+        ion_energy_eV: Mapping[str, float] | None = None,
+        surface_temperature_K: Mapping[str, float] | None = None,
+        domain_atol: np.ndarray | None = None,
+        collect_rates: bool = True,
+    ) -> SurfaceEvaluation:
+        coverage, gas, temperatures, tolerance = self._validated_evaluation_arrays(
+            coverage_state,
+            gas_densities_m3,
+            gas_temperature_K,
+            domain_atol,
+        )
+        reactive_state, free_coverages = self._reactive_coverages(coverage, tolerance)
+        context = self._rate_context(
+            gas,
+            temperatures,
+            ion_flux_m2_s,
+            ion_energy_eV,
+            surface_temperature_K,
+        )
+        gas_rhs = np.zeros_like(gas)
+        coverage_rhs = np.zeros_like(coverage)
+        gas_heating = np.zeros(len(self.zone_ids), dtype=float)
+        rates: dict[str, float] | None = {} if collect_rates else None
         for kernel in self._kernels:
-            surface_factor = 1.0
-            for coverage_power in kernel.surface_mass_action:
-                surface_factor *= coverage_power.evaluate(
-                    reactive_state, float(free_coverages[kernel.surface_index])
-                )
-                if surface_factor == 0.0:
-                    break
-            coverage_factor = (
-                1.0
-                if kernel.coverage_factor is None
-                else kernel.coverage_factor.evaluate(
-                    reactive_state, float(free_coverages[kernel.surface_index])
-                )
+            rate = self._evaluate_kernel(
+                kernel, reactive_state, free_coverages, context
             )
-            rate = kernel.rate_kernel.evaluate(
-                gas[kernel.zone_index],
-                float(temperatures[kernel.zone_index]),
-                fluxes,
-                float(ion_energies[kernel.surface_index]),
-                float(resolved_surface_temperatures[kernel.surface_index]),
-            )
-            rate *= coverage_factor * surface_factor
-            if not math.isfinite(rate) or rate < 0.0:
-                raise ModelDomainError(
-                    f"surface reaction {kernel.reaction.id!r} returned invalid rate {rate!r}"
-                )
             if rates is not None:
                 rates[kernel.rate_id] = rate
-            gas_heating[kernel.zone_index] += (
-                kernel.gas_heating_J_m3_per_event_m2 * rate
-            )
-            for index, delta in kernel.gas_delta:
-                gas_rhs[kernel.zone_index, index] += (
-                    kernel.area_over_volume_m_inv * delta * rate
-                )
-            for index, delta in kernel.coverage_delta:
-                coverage_rhs[index] += delta * rate * kernel.inverse_site_density_m2
+            self._accumulate_kernel(kernel, rate, gas_rhs, coverage_rhs, gas_heating)
         return SurfaceEvaluation(
             gas_rhs,
             coverage_rhs,

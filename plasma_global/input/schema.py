@@ -283,11 +283,7 @@ class ReactorConfig(StrictModel):
     pumps: list[PumpConfig] = Field(default_factory=list)
     power_ports: list[PowerPortConfig] = Field(default_factory=list)
 
-    @model_validator(mode="after")
-    def valid_topology(self) -> Self:
-        if not self.zones:
-            raise ValueError("reactor.zones must contain at least one zone")
-
+    def _validate_unique_ids(self) -> None:
         for items, attribute, label in (
             (self.zones, "zone_id", "zone_id"),
             (self.edges, "edge_id", "edge_id"),
@@ -298,8 +294,7 @@ class ReactorConfig(StrictModel):
         ):
             _require_unique(items, attribute, label)
 
-        zone_ids = {zone.zone_id for zone in self.zones}
-        surface_ids = {surface.surface_id for surface in self.surfaces}
+    def _validate_zone_references(self, zone_ids: set[str]) -> None:
         for edge in self.edges:
             for field_name, zone_id in (
                 ("from_zone", edge.from_zone),
@@ -307,7 +302,8 @@ class ReactorConfig(StrictModel):
             ):
                 if zone_id not in zone_ids:
                     raise ValueError(
-                        f"edge {edge.edge_id!r} {field_name} references unknown zone {zone_id!r}"
+                        f"edge {edge.edge_id!r} {field_name} references unknown "
+                        f"zone {zone_id!r}"
                     )
         for label, entities, id_field in (
             ("surface", self.surfaces, "surface_id"),
@@ -321,6 +317,10 @@ class ReactorConfig(StrictModel):
                         f"{label} {getattr(entity, id_field)!r} "
                         f"references unknown zone {entity.zone_id!r}"
                     )
+
+    def _validate_coupling_targets(
+        self, zone_ids: set[str], surface_ids: set[str]
+    ) -> None:
         valid_targets = zone_ids | surface_ids
         for port in self.power_ports:
             if port.coupling_target and port.coupling_target not in valid_targets:
@@ -328,6 +328,18 @@ class ReactorConfig(StrictModel):
                     f"power port {port.port_id!r} references unknown coupling target "
                     f"{port.coupling_target!r}"
                 )
+
+    @model_validator(mode="after")
+    def valid_topology(self) -> Self:
+        if not self.zones:
+            raise ValueError("reactor.zones must contain at least one zone")
+        self._validate_unique_ids()
+        zone_ids = {zone.zone_id for zone in self.zones}
+        self._validate_zone_references(zone_ids)
+        self._validate_coupling_targets(
+            zone_ids,
+            {surface.surface_id for surface in self.surfaces},
+        )
         return self
 
 

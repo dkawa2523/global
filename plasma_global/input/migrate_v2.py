@@ -819,50 +819,53 @@ def _power_command(
     return command
 
 
-def _electron_models(
-    loaded: Any, unused: set[str], warnings: list[str]
-) -> dict[str, Any]:
-    run = loaded.run_config
-    resolved = loaded.resolved_paths
-    backend = str(run.physics.eedf_backend).strip().lower()
-    if backend == "maxwell":
-        electrons: dict[str, Any] = {"kind": "maxwellian"}
-        closure_kind = "electron_energy"
-    elif backend == "swarm" and str(run.swarm.model_name).lower() == "table":
-        table = run.swarm.table
-        if not table.file:
-            raise MigrationError("v2 swarm table model has no table file")
-        requested_lookup = str(table.lookup or run.swarm.closure or "auto").lower()
-        closure_kind = (
-            "local_field" if requested_lookup == "local_field" else "electron_energy"
+def _table_electron_model(
+    run: Any,
+    resolved: Any,
+    unused: set[str],
+    warnings: list[str],
+) -> tuple[dict[str, Any], str]:
+    table = run.swarm.table
+    if not table.file:
+        raise MigrationError("v2 swarm table model has no table file")
+    requested_lookup = str(table.lookup or run.swarm.closure or "auto").lower()
+    closure_kind = (
+        "local_field" if requested_lookup == "local_field" else "electron_energy"
+    )
+    if table.electron_energy_mode:
+        unused.add("swarm.table.electron_energy_mode")
+        unused.add("swarm.table.energy_relaxation_time_s")
+    if str(table.bounds_policy).lower() != "error":
+        warnings.append(
+            "swarm.table.bounds_policy was changed to 'error' to prevent "
+            "silent extrapolation/clipping"
         )
-        electrons = {
+    return (
+        {
             "kind": "table",
             "file": _path_from(table.file, Path(resolved.chemistry_dir)),
             "lookup": (
                 "local_field" if closure_kind == "local_field" else "mean_energy"
             ),
             "bounds_policy": "error",
-        }
-        if table.electron_energy_mode:
-            unused.add("swarm.table.electron_energy_mode")
-            unused.add("swarm.table.energy_relaxation_time_s")
-        if str(table.bounds_policy).lower() != "error":
-            warnings.append(
-                "swarm.table.bounds_policy was changed to 'error' to prevent "
-                "silent extrapolation/clipping"
-            )
-    elif backend == "swarm" and str(run.swarm.model_name).lower() == "boltzmann_2term":
-        cfg = run.swarm.boltzmann_2term
-        requested_closure = str(run.swarm.closure or "auto").lower()
-        closure_kind = "local_field"
-        if requested_closure not in {"auto", "local_field"}:
-            warnings.append(
-                "boltzmann_2term closure was changed to local_field because the "
-                "v3 approximate model is compile-time prepared and has no "
-                "electron-energy RHS coupling"
-            )
-        electrons = {
+        },
+        closure_kind,
+    )
+
+
+def _approximate_two_term_electron_model(
+    run: Any, warnings: list[str]
+) -> tuple[dict[str, Any], str]:
+    cfg = run.swarm.boltzmann_2term
+    requested_closure = str(run.swarm.closure or "auto").lower()
+    if requested_closure not in {"auto", "local_field"}:
+        warnings.append(
+            "boltzmann_2term closure was changed to local_field because the "
+            "v3 approximate model is compile-time prepared and has no "
+            "electron-energy RHS coupling"
+        )
+    return (
+        {
             "kind": "experimental.approximate_two_term",
             "mixture_key_species": list(run.swarm.mixture_key_species),
             "cache": {
@@ -880,40 +883,73 @@ def _electron_models(
                 "n": int(cfg.reduced_field_grid_Td.n),
             },
             "max_shape_iterations": int(cfg.max_shape_iterations),
-        }
-    else:
-        raise MigrationError(
-            f"unsupported v2 EEDF selection {backend!r}/{run.swarm.model_name!r}"
-        )
+        },
+        "local_field",
+    )
 
+
+def _electron_kinetics_model(
+    run: Any,
+    resolved: Any,
+    unused: set[str],
+    warnings: list[str],
+) -> tuple[dict[str, Any], str]:
+    backend = str(run.physics.eedf_backend).strip().lower()
+    if backend == "maxwell":
+        return {"kind": "maxwellian"}, "electron_energy"
+    model_name = str(run.swarm.model_name).lower()
+    if backend == "swarm" and model_name == "table":
+        return _table_electron_model(run, resolved, unused, warnings)
+    if backend == "swarm" and model_name == "boltzmann_2term":
+        return _approximate_two_term_electron_model(run, warnings)
+    raise MigrationError(
+        f"unsupported v2 EEDF selection {backend!r}/{run.swarm.model_name!r}"
+    )
+
+
+def _electron_density_model(
+    run: Any, resolved: Any, warnings: list[str]
+) -> dict[str, Any]:
     closure = str(run.physics.electron_density_closure).strip().lower()
     if closure == "quasi_neutral":
-        density: dict[str, Any] = {"kind": "quasineutral"}
-    elif closure == "prescribed_profile":
-        cfg = run.swarm.prescribed_electron_profile
-        if cfg.file:
-            file = _path_from(cfg.file, Path(resolved.base_dir))
-        elif cfg.file_key and resolved.external_inputs.get(str(cfg.file_key)):
-            file = Path(str(resolved.external_inputs[str(cfg.file_key)])).resolve(
-                strict=False
-            )
-        else:
-            raise MigrationError("v2 prescribed electron profile has no input file")
-        density = {
-            "kind": "experimental.prescribed_profile",
-            "file": file,
-            "zone_columns": dict(cfg.zone_columns),
-            "interpolation": str(cfg.interpolation).lower(),
-            "hold": "error",
-        }
-        if str(cfg.hold).lower() != "error":
-            warnings.append(
-                "prescribed electron profile hold was changed to 'error' to "
-                "prevent silent endpoint extension"
-            )
-    else:
+        return {"kind": "quasineutral"}
+    if closure != "prescribed_profile":
         raise MigrationError(f"unsupported v2 electron density closure {closure!r}")
 
+    cfg = run.swarm.prescribed_electron_profile
+    if cfg.file:
+        profile_file = _path_from(cfg.file, Path(resolved.base_dir))
+    elif cfg.file_key and resolved.external_inputs.get(str(cfg.file_key)):
+        profile_file = Path(str(resolved.external_inputs[str(cfg.file_key)])).resolve(
+            strict=False
+        )
+    else:
+        raise MigrationError("v2 prescribed electron profile has no input file")
+    if str(cfg.hold).lower() != "error":
+        warnings.append(
+            "prescribed electron profile hold was changed to 'error' to "
+            "prevent silent endpoint extension"
+        )
+    return {
+        "kind": "experimental.prescribed_profile",
+        "file": profile_file,
+        "zone_columns": dict(cfg.zone_columns),
+        "interpolation": str(cfg.interpolation).lower(),
+        "hold": "error",
+    }
+
+
+def _electron_models(
+    loaded: Any, unused: set[str], warnings: list[str]
+) -> dict[str, Any]:
+    run = loaded.run_config
+    electrons, closure_kind = _electron_kinetics_model(
+        run,
+        loaded.resolved_paths,
+        unused,
+        warnings,
+    )
+    density = _electron_density_model(run, loaded.resolved_paths, warnings)
     return {
         "electrons": electrons,
         "electron_closure": {"kind": closure_kind},
@@ -954,7 +990,7 @@ def _solver(
         "atol": 1.0e-14,
         "first_step_s": _float_or_none(run.numerics.first_step),
         "max_step_s": _float_or_none(run.numerics.max_step),
-        "sample_interval_s": float(sample_interval_s),
+        "sample_interval_s": sample_interval_s,
     }
     return result
 
@@ -1774,37 +1810,35 @@ def write_migration_report(result: MigrationResult, destination: str | Path) -> 
     return target
 
 
-def _stage_case_assets(
-    case: CaseSpec,
-    staging_directory: Path,
-    published_directory: Path,
-) -> tuple[CaseSpec, tuple[str, ...]]:
-    """Bundle runtime file dependencies and replace their paths in a case."""
+class _AssetStager:
+    """Copy or convert each unique runtime asset into a publication bundle."""
 
-    from tools.importers.rate_table import convert_v2_rate_table_h5
+    def __init__(self, staging_directory: Path, published_directory: Path) -> None:
+        self.staging_directory = staging_directory
+        self.published_directory = published_directory
+        self.staged: dict[tuple[Path, str], Path] = {}
+        self.warnings: list[str] = []
 
-    data = case.model_dump(mode="python", exclude_none=True)
-    staged: dict[tuple[Path, str], Path] = {}
-    warnings: list[str] = []
-
-    def stage(value: Any, label: str, *, electron_table: bool = False) -> Path:
+    def stage(self, value: Any, label: str, *, electron_table: bool = False) -> Path:
         source = Path(value).resolve()
         if not source.is_file():
             raise MigrationError(f"{label} does not exist: {source}")
         conversion = "electron_table" if electron_table else "copy"
         key = (source, conversion)
-        if key in staged:
-            return staged[key]
+        if key in self.staged:
+            return self.staged[key]
         suffix = source.suffix or ".dat"
-        filename = f"{len(staged):02d}_{label.replace('.', '_')}{suffix}"
-        temporary_path = staging_directory / filename
-        published_path = (published_directory / filename).resolve()
-        staging_directory.mkdir(parents=True, exist_ok=True)
+        filename = f"{len(self.staged):02d}_{label.replace('.', '_')}{suffix}"
+        temporary_path = self.staging_directory / filename
+        published_path = (self.published_directory / filename).resolve()
+        self.staging_directory.mkdir(parents=True, exist_ok=True)
         try:
             if electron_table:
+                from tools.importers.rate_table import convert_v2_rate_table_h5
+
                 _, dropped = convert_v2_rate_table_h5(source, temporary_path)
                 if dropped:
-                    warnings.append(
+                    self.warnings.append(
                         f"{label}: dropped unused legacy HDF5 datasets: "
                         f"{', '.join(dropped)}"
                     )
@@ -1814,25 +1848,29 @@ def _stage_case_assets(
             raise MigrationError(
                 f"cannot migrate {label} from {source}: {exc}"
             ) from exc
-        staged[key] = published_path
+        self.staged[key] = published_path
         return published_path
 
+
+def _stage_electron_assets(data: dict[str, Any], stager: _AssetStager) -> None:
     models = data["models"]
     electrons = models["electrons"]
     if electrons["kind"] == "table":
-        electrons["file"] = stage(
+        electrons["file"] = stager.stage(
             electrons["file"], "models_electrons", electron_table=True
         )
     electron_density = models["electron_density"]
     if electron_density["kind"] == "experimental.prescribed_profile":
-        electron_density["file"] = stage(
+        electron_density["file"] = stager.stage(
             electron_density["file"], "models_electron_density"
         )
 
+
+def _stage_external_power_assets(data: dict[str, Any], stager: _AssetStager) -> None:
     for port_index, port in enumerate(data["reactor"]["power_ports"]):
         model = port["model"]
         if model["kind"] == "external_table":
-            model["file"] = stage(
+            model["file"] = stager.stage(
                 model["file"], f"power_model_{port_index}_{port['port_id']}"
             )
 
@@ -1840,16 +1878,28 @@ def _stage_case_assets(
         commands = step["commands"]["power_ports"]
         for port_id, command in commands.items():
             if command["kind"] == "external_table" and "file" in command:
-                command["file"] = stage(
+                command["file"] = stager.stage(
                     command["file"],
                     f"power_command_{step_index}_{port_id}",
                 )
 
+
+def _stage_case_assets(
+    case: CaseSpec,
+    staging_directory: Path,
+    published_directory: Path,
+) -> tuple[CaseSpec, tuple[str, ...]]:
+    """Bundle runtime file dependencies and replace their paths in a case."""
+
+    data = case.model_dump(mode="python", exclude_none=True)
+    stager = _AssetStager(staging_directory, published_directory)
+    _stage_electron_assets(data, stager)
+    _stage_external_power_assets(data, stager)
     try:
         migrated = CaseSpec.model_validate(data)
     except Exception as exc:
         raise MigrationError(f"bundled v3 case failed validation: {exc}") from exc
-    return migrated, tuple(warnings)
+    return migrated, tuple(stager.warnings)
 
 
 def migrate_v2_to_yaml(

@@ -10,11 +10,25 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import numpy as np
 
 from plasma_global.errors import CaseValidationError, ModelDomainError
+
+_ALLOWED_COLUMNS = frozenset(
+    {
+        "time_s",
+        "electron_power_W",
+        "gas_power_W",
+        "absorbed_power_W",
+        "voltage_V",
+        "current_A",
+        "reduced_field_Td",
+    }
+)
+_DIRECT_POWER_COLUMNS = frozenset({"electron_power_W", "absorbed_power_W"})
+_CsvRow = dict[str | None, str | list[str] | None]
 
 
 def _readonly(values: object) -> np.ndarray:
@@ -34,15 +48,12 @@ class ExternalTableData:
     current_A: np.ndarray | None
 
 
-def load_external_table(path: str | Path) -> ExternalTableData:
-    """Read one strict circuit/power CSV into immutable numeric arrays."""
-
-    source = Path(path).resolve()
+def _read_csv(source: Path) -> tuple[tuple[str, ...], list[_CsvRow]]:
     try:
         with source.open("r", encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream, strict=True)
             columns = tuple(reader.fieldnames or ())
-            rows = list(reader)
+            rows = cast(list[_CsvRow], list(reader))
     except OSError as exc:
         raise CaseValidationError(
             f"cannot read external power table {source}: {exc}"
@@ -51,27 +62,21 @@ def load_external_table(path: str | Path) -> ExternalTableData:
         raise CaseValidationError(
             f"external power table {source} is malformed CSV: {exc}"
         ) from exc
+    return columns, rows
 
+
+def _validate_column_schema(source: Path, columns: tuple[str, ...]) -> str | None:
     if len(set(columns)) != len(columns):
         raise CaseValidationError(
             f"external power table {source} has duplicate columns"
         )
-    allowed = {
-        "time_s",
-        "electron_power_W",
-        "gas_power_W",
-        "absorbed_power_W",
-        "voltage_V",
-        "current_A",
-        "reduced_field_Td",
-    }
-    if unknown := sorted(set(columns) - allowed):
+    if unknown := sorted(set(columns) - _ALLOWED_COLUMNS):
         raise CaseValidationError(
             f"external power table {source} has unknown columns: {', '.join(unknown)}"
         )
     if "time_s" not in columns:
         raise CaseValidationError(f"external power table {source} is missing time_s")
-    direct_columns = {"electron_power_W", "absorbed_power_W"} & set(columns)
+    direct_columns = _DIRECT_POWER_COLUMNS & set(columns)
     if len(direct_columns) > 1:
         raise CaseValidationError(
             f"external power table {source} has ambiguous power columns"
@@ -82,6 +87,12 @@ def load_external_table(path: str | Path) -> ExternalTableData:
             f"external power table {source} needs electron_power_W, "
             "absorbed_power_W, or both voltage_V and current_A"
         )
+    return next(iter(direct_columns), None)
+
+
+def _validate_csv_rows(
+    source: Path, columns: tuple[str, ...], rows: list[_CsvRow]
+) -> None:
     if len(rows) < 2:
         raise CaseValidationError(
             f"external power table {source} needs at least two rows"
@@ -102,62 +113,111 @@ def load_external_table(path: str | Path) -> ExternalTableData:
                 f"{', '.join(missing_values)}"
             )
 
-    def column(name: str, *, default: float | None = None) -> np.ndarray | None:
-        if name not in columns:
-            if default is None:
-                return None
-            return np.full(len(rows), default, dtype=float)
-        try:
-            return np.asarray([float(row[name]) for row in rows], dtype=float)
-        except (TypeError, ValueError) as exc:
-            raise CaseValidationError(
-                f"external power table {source} column {name!r} must be numeric"
-            ) from exc
 
-    time = column("time_s")
-    voltage = column("voltage_V")
-    current = column("current_A")
-    direct_name = next(iter(direct_columns), None)
-    if direct_name is not None:
-        electron = column(direct_name)
+def _numeric_column(
+    source: Path,
+    columns: tuple[str, ...],
+    rows: list[_CsvRow],
+    name: str,
+    *,
+    default: float | None = None,
+) -> np.ndarray | None:
+    if name not in columns:
+        return None if default is None else np.full(len(rows), default, dtype=float)
+    try:
+        return np.asarray(
+            [float(cast(str, row[name])) for row in rows],
+            dtype=float,
+        )
+    except (TypeError, ValueError) as exc:
+        raise CaseValidationError(
+            f"external power table {source} column {name!r} must be numeric"
+        ) from exc
+
+
+def _convert_numeric_columns(
+    source: Path,
+    columns: tuple[str, ...],
+    rows: list[_CsvRow],
+    direct_power_column: str | None,
+) -> ExternalTableData:
+    time = cast(np.ndarray, _numeric_column(source, columns, rows, "time_s"))
+    voltage = _numeric_column(source, columns, rows, "voltage_V")
+    current = _numeric_column(source, columns, rows, "current_A")
+    if direct_power_column is not None:
+        electron = cast(
+            np.ndarray,
+            _numeric_column(source, columns, rows, direct_power_column),
+        )
     else:
-        if voltage is None or current is None:
-            raise CaseValidationError(
-                f"external power table {source} needs voltage_V and current_A"
-            )
-        electron = voltage * current
-    gas = column("gas_power_W", default=0.0)
-    field_values = column("reduced_field_Td")
-    assert time is not None and electron is not None and gas is not None
-    arrays = [time, electron, gas]
+        electron = cast(np.ndarray, voltage) * cast(np.ndarray, current)
+    gas = cast(
+        np.ndarray,
+        _numeric_column(source, columns, rows, "gas_power_W", default=0.0),
+    )
+    field_values = _numeric_column(source, columns, rows, "reduced_field_Td")
+    return ExternalTableData(
+        source=source,
+        time_s=time,
+        electron_power_W=electron,
+        gas_power_W=gas,
+        reduced_field_Td=field_values,
+        voltage_V=voltage,
+        current_A=current,
+    )
+
+
+def _validate_numeric_table(table: ExternalTableData) -> None:
+    arrays = [table.time_s, table.electron_power_W, table.gas_power_W]
     arrays.extend(
-        value for value in (field_values, voltage, current) if value is not None
+        value
+        for value in (table.reduced_field_Td, table.voltage_V, table.current_A)
+        if value is not None
     )
     if any(not np.all(np.isfinite(value)) for value in arrays):
         raise CaseValidationError(
-            f"external power table {source} contains non-finite values"
+            f"external power table {table.source} contains non-finite values"
         )
-    if np.any(np.diff(time) <= 0.0):
+    if np.any(np.diff(table.time_s) <= 0.0):
         raise CaseValidationError(
-            f"external power table {source} time_s must be strictly increasing"
+            f"external power table {table.source} time_s must be strictly increasing"
         )
-    if np.any(electron < 0.0) or np.any(gas < 0.0):
+    if np.any(table.electron_power_W < 0.0) or np.any(table.gas_power_W < 0.0):
         raise CaseValidationError(
-            f"external power table {source} contains negative power"
+            f"external power table {table.source} contains negative power"
         )
-    if field_values is not None and np.any(field_values < 0.0):
+    if table.reduced_field_Td is not None and np.any(table.reduced_field_Td < 0.0):
         raise CaseValidationError(
-            f"external power table {source} contains negative reduced field"
+            f"external power table {table.source} contains negative reduced field"
         )
+
+
+def _readonly_table(table: ExternalTableData) -> ExternalTableData:
     return ExternalTableData(
-        source=source,
-        time_s=_readonly(time),
-        electron_power_W=_readonly(electron),
-        gas_power_W=_readonly(gas),
-        reduced_field_Td=None if field_values is None else _readonly(field_values),
-        voltage_V=None if voltage is None else _readonly(voltage),
-        current_A=None if current is None else _readonly(current),
+        source=table.source,
+        time_s=_readonly(table.time_s),
+        electron_power_W=_readonly(table.electron_power_W),
+        gas_power_W=_readonly(table.gas_power_W),
+        reduced_field_Td=(
+            None
+            if table.reduced_field_Td is None
+            else _readonly(table.reduced_field_Td)
+        ),
+        voltage_V=None if table.voltage_V is None else _readonly(table.voltage_V),
+        current_A=None if table.current_A is None else _readonly(table.current_A),
     )
+
+
+def load_external_table(path: str | Path) -> ExternalTableData:
+    """Read one strict circuit/power CSV into immutable numeric arrays."""
+
+    source = Path(path).resolve()
+    columns, rows = _read_csv(source)
+    direct_power_column = _validate_column_schema(source, columns)
+    _validate_csv_rows(source, columns, rows)
+    table = _convert_numeric_columns(source, columns, rows, direct_power_column)
+    _validate_numeric_table(table)
+    return _readonly_table(table)
 
 
 class ExternalTableStore:
@@ -199,7 +259,7 @@ class ExternalTableBinding:
 
         if self.interpolation != "previous":
             raise ValueError("bind_previous requires previous interpolation")
-        query = float(time_s) - self.time_offset_s
+        query = time_s - self.time_offset_s
         lower = float(self.data.time_s[0])
         upper = float(self.data.time_s[-1])
         if query < lower or query > upper:
@@ -229,7 +289,7 @@ class ExternalTableBinding:
         )
 
     def _at(self, values: np.ndarray, time_s: float) -> float:
-        query = float(time_s) - self.time_offset_s
+        query = time_s - self.time_offset_s
         lower = float(self.data.time_s[0])
         upper = float(self.data.time_s[-1])
         if query < lower or query > upper:

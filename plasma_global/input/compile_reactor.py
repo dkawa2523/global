@@ -95,8 +95,7 @@ def compile_initial_densities(
                     "inconsistent with sum(initial_densities_m3)*kB*T="
                     f"{pressure_from_state:g}"
                 )
-        else:
-            assert zone.initial_mole_fractions is not None
+        elif zone.initial_mole_fractions is not None:
             fractions = {
                 species_id: float(value)
                 for species_id, value in zone.initial_mole_fractions.items()
@@ -138,6 +137,10 @@ def compile_initial_densities(
                 for species_id, fraction in fractions.items()
             }
             densities.update(seeds)
+        else:
+            raise CaseValidationError(
+                f"zone {zone.zone_id!r} needs densities or mole fractions"
+            )
         positive_charge_density = sum(
             chemistry.charges[species_index[species_id]] * density
             for species_id, density in densities.items()

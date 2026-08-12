@@ -7,11 +7,124 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 import h5py
 import numpy as np
 
 from plasma_global.errors import CaseValidationError, ModelDomainError
+
+
+@dataclass(frozen=True, slots=True)
+class _ElectronTableArrays:
+    mean_energy_eV: np.ndarray
+    mobility_m2_V_s: np.ndarray
+    effective_field_Td: np.ndarray
+    rate_tables: dict[str, np.ndarray]
+
+
+def _read_rate_tables(
+    group: Any,
+    *,
+    source: Path,
+    required_rate_ids: tuple[str, ...],
+    optional_rate_ids: tuple[str, ...],
+) -> dict[str, np.ndarray]:
+    missing = sorted(set(required_rate_ids) - set(group))
+    if missing:
+        raise CaseValidationError(
+            f"electron table {source} is missing rate coefficients: "
+            f"{', '.join(missing)}"
+        )
+    selected = tuple(
+        dict.fromkeys(
+            (
+                *required_rate_ids,
+                *(name for name in optional_rate_ids if name in group),
+            )
+        )
+    ) or tuple(str(name) for name in group)
+    return {name: np.asarray(group[name][:], dtype=float) for name in selected}
+
+
+def _read_electron_table(
+    source: Path,
+    *,
+    required_rate_ids: tuple[str, ...],
+    optional_rate_ids: tuple[str, ...],
+) -> _ElectronTableArrays:
+    with h5py.File(source, "r") as handle:
+        required = {"mean_energy_eV", "mobility_m2_V_s", "effective_field_Td"}
+        unknown = sorted(set(handle) - {*required, "rate_coefficients"})
+        if unknown:
+            raise CaseValidationError(
+                f"electron table {source} has unknown datasets: {', '.join(unknown)}"
+            )
+        missing = sorted(name for name in required if name not in handle)
+        if missing:
+            raise CaseValidationError(
+                f"electron table {source} is missing: {', '.join(missing)}"
+            )
+        if "rate_coefficients" not in handle:
+            raise CaseValidationError(
+                f"electron table {source} is missing rate_coefficients"
+            )
+        return _ElectronTableArrays(
+            mean_energy_eV=np.asarray(handle["mean_energy_eV"][:], dtype=float),
+            mobility_m2_V_s=np.asarray(handle["mobility_m2_V_s"][:], dtype=float),
+            effective_field_Td=np.asarray(handle["effective_field_Td"][:], dtype=float),
+            rate_tables=_read_rate_tables(
+                handle["rate_coefficients"],
+                source=source,
+                required_rate_ids=required_rate_ids,
+                optional_rate_ids=optional_rate_ids,
+            ),
+        )
+
+
+def _table_arrays(
+    data: _ElectronTableArrays, axis: np.ndarray
+) -> dict[str, np.ndarray]:
+    return {
+        "axis": axis,
+        "mean_energy_eV": data.mean_energy_eV,
+        "mobility_m2_V_s": data.mobility_m2_V_s,
+        "effective_field_Td": data.effective_field_Td,
+        **{f"rate:{name}": values for name, values in data.rate_tables.items()},
+    }
+
+
+def _validate_table_array_contract(
+    source: Path, arrays: Mapping[str, np.ndarray], axis: np.ndarray
+) -> None:
+    size = axis.size
+    if size < 2 or any(
+        values.ndim != 1 or values.size != size for values in arrays.values()
+    ):
+        raise CaseValidationError(
+            f"electron table {source} datasets must be equal 1-D arrays with at "
+            "least two points"
+        )
+    if any(not np.all(np.isfinite(values)) for values in arrays.values()):
+        raise CaseValidationError(f"electron table {source} contains non-finite values")
+    if np.any(np.diff(axis) <= 0.0):
+        raise CaseValidationError(
+            f"electron table {source} lookup axis must be strictly increasing "
+            "and unique"
+        )
+
+
+def _validate_table_values(source: Path, data: _ElectronTableArrays) -> None:
+    if (
+        np.any(data.mean_energy_eV < 0.0)
+        or np.any(data.mobility_m2_V_s <= 0.0)
+        or np.any(data.effective_field_Td < 0.0)
+    ):
+        raise CaseValidationError(
+            f"electron table {source} contains invalid transport values"
+        )
+    if any(np.any(values < 0.0) for values in data.rate_tables.values()):
+        raise CaseValidationError(f"electron table {source} contains negative rates")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,83 +179,17 @@ class TabulatedElectronKinetics:
             raise CaseValidationError("table bounds must be error or clip")
         if not source.is_file():
             raise CaseValidationError(f"electron table does not exist: {source}")
-        with h5py.File(source, "r") as handle:
-            required_datasets = {
-                "mean_energy_eV",
-                "mobility_m2_V_s",
-                "effective_field_Td",
-            }
-            allowed_entries = {*required_datasets, "rate_coefficients"}
-            unknown = sorted(set(handle) - allowed_entries)
-            if unknown:
-                raise CaseValidationError(
-                    f"electron table {source} has unknown datasets: "
-                    f"{', '.join(unknown)}"
-                )
-            missing = sorted(name for name in required_datasets if name not in handle)
-            if missing:
-                raise CaseValidationError(
-                    f"electron table {source} is missing: {', '.join(missing)}"
-                )
-            mean_energy = np.asarray(handle["mean_energy_eV"][:], dtype=float)
-            mobility = np.asarray(handle["mobility_m2_V_s"][:], dtype=float)
-            field_values = np.asarray(handle["effective_field_Td"][:], dtype=float)
-            if "rate_coefficients" not in handle:
-                raise CaseValidationError(
-                    f"electron table {source} is missing rate_coefficients"
-                )
-            group = handle["rate_coefficients"]
-            missing_rates = sorted(set(required_rate_ids) - set(group))
-            if missing_rates:
-                raise CaseValidationError(
-                    f"electron table {source} is missing rate coefficients: {', '.join(missing_rates)}"
-                )
-            selected = tuple(
-                dict.fromkeys(
-                    (
-                        *required_rate_ids,
-                        *(name for name in optional_rate_ids if name in group),
-                    )
-                )
-            ) or tuple(str(name) for name in group)
-            rate_tables = {
-                name: np.asarray(group[name][:], dtype=float) for name in selected
-            }
-        axis = mean_energy if lookup == "mean_energy" else field_values
-        arrays = {
-            "axis": axis,
-            "mean_energy_eV": mean_energy,
-            "mobility_m2_V_s": mobility,
-            "effective_field_Td": field_values,
-            **{f"rate:{name}": values for name, values in rate_tables.items()},
-        }
-        size = axis.size
-        if size < 2 or any(
-            values.ndim != 1 or values.size != size for values in arrays.values()
-        ):
-            raise CaseValidationError(
-                f"electron table {source} datasets must be equal 1-D arrays with at least two points"
-            )
-        if any(not np.all(np.isfinite(values)) for values in arrays.values()):
-            raise CaseValidationError(
-                f"electron table {source} contains non-finite values"
-            )
-        if np.any(np.diff(axis) <= 0.0):
-            raise CaseValidationError(
-                f"electron table {source} lookup axis must be strictly increasing and unique"
-            )
-        if (
-            np.any(mean_energy < 0.0)
-            or np.any(mobility <= 0.0)
-            or np.any(field_values < 0.0)
-        ):
-            raise CaseValidationError(
-                f"electron table {source} contains invalid transport values"
-            )
-        if any(np.any(values < 0.0) for values in rate_tables.values()):
-            raise CaseValidationError(
-                f"electron table {source} contains negative rates"
-            )
+        data = _read_electron_table(
+            source,
+            required_rate_ids=required_rate_ids,
+            optional_rate_ids=optional_rate_ids,
+        )
+        axis = (
+            data.mean_energy_eV if lookup == "mean_energy" else data.effective_field_Td
+        )
+        arrays = _table_arrays(data, axis)
+        _validate_table_array_contract(source, arrays, axis)
+        _validate_table_values(source, data)
         for values in arrays.values():
             values.setflags(write=False)
         return cls(
@@ -150,20 +197,21 @@ class TabulatedElectronKinetics:
             lookup=lookup,
             bounds=bounds,
             axis=axis,
-            mean_energy_eV=mean_energy,
-            mobility_m2_V_s=mobility,
-            effective_field_Td=field_values,
-            rate_tables=MappingProxyType(rate_tables),
+            mean_energy_eV=data.mean_energy_eV,
+            mobility_m2_V_s=data.mobility_m2_V_s,
+            effective_field_Td=data.effective_field_Td,
+            rate_tables=MappingProxyType(data.rate_tables),
         )
 
     def _query(self, value: float) -> float:
-        query = float(value)
+        query = value
         if not math.isfinite(query):
             raise ModelDomainError("electron table lookup value must be finite")
         if query < self.axis[0] or query > self.axis[-1]:
             if self.bounds == "error":
                 raise ModelDomainError(
-                    f"electron table lookup {query:g} is outside [{self.axis[0]:g}, {self.axis[-1]:g}]"
+                    f"electron table lookup {query:g} is outside "
+                    f"[{self.axis[0]:g}, {self.axis[-1]:g}]"
                 )
             query = float(np.clip(query, self.axis[0], self.axis[-1]))
         return query

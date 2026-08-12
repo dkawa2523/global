@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 from plasma_global.build import compile_case
 from plasma_global.chemistry.data import load_chemistry
@@ -180,7 +181,7 @@ def test_distinct_initial_neutral_mixtures_get_distinct_immutable_tables(
     assert not same_a.rate_tables["xs_momentum"].flags.writeable
     assert different.mobility_m2_V_s == pytest.approx(2.0 * same_a.mobility_m2_V_s)
 
-    with pytest.raises(CaseValidationError, match="cache.max_entries"):
+    with pytest.raises(CaseValidationError, match=r"cache\.max_entries"):
         prepare_approximate_two_term_kinetics(
             chemistry,
             {"a": {"Ar": 2.0e20}, "b": {"Ar": 1.0e20}},
@@ -193,6 +194,37 @@ def test_distinct_initial_neutral_mixtures_get_distinct_immutable_tables(
         )
 
 
+def test_preparation_normalizes_numpy_scalars_and_plain_provenance(
+    tmp_path: Path,
+) -> None:
+    chemistry = load_chemistry(_write_chemistry(tmp_path / "chemistry"))
+
+    prepared = prepare_approximate_two_term_kinetics(
+        chemistry,
+        {"plasma": {"Ar": np.float32(1.0e20)}},
+        mixture_key_species=("Ar",),
+        cache_max_entries=np.int64(2),
+        fraction_decimals=np.int64(4),
+        energy_min_eV=np.float32(1.0e-3),
+        energy_max_eV=np.float32(10.0),
+        energy_points=np.int64(32),
+        field_min_Td=np.float32(1.0),
+        field_max_Td=np.float32(10.0),
+        field_points=np.int64(2),
+        max_iterations=np.int64(2),
+    )
+
+    document = yaml.safe_load(yaml.safe_dump(dict(prepared.provenance)))
+    assert set(prepared.by_zone) == {"plasma"}
+    assert document["energy_grid_eV"] == {
+        "minimum": pytest.approx(1.0e-3),
+        "maximum": pytest.approx(10.0),
+        "count": 32,
+    }
+    assert document["reduced_field_grid_Td"]["count"] == 2
+    assert isinstance(document["zones"]["plasma"]["target_densities_m3"]["Ar"], float)
+
+
 def test_approximate_two_term_schema_rejects_electron_energy_closure(
     tmp_path: Path,
 ) -> None:
@@ -201,7 +233,7 @@ def test_approximate_two_term_schema_rejects_electron_energy_closure(
     data["models"]["electron_closure"] = {"kind": "electron_energy"}
     data["reactor"]["zones"][0]["initial_mean_energy_eV"] = 3.0
 
-    with pytest.raises(ValueError, match="require.*local_field"):
+    with pytest.raises(ValueError, match=r"require.*local_field"):
         CaseSpec.model_validate(data)
 
 

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 
 import numpy as np
 
-from plasma_global.core.compiled import CompiledGlobalModel
+from plasma_global.core.compiled import CompiledGlobalModel, ModelEvaluation
+from plasma_global.core.domain import RecipeSegment
 from plasma_global.errors import CaseValidationError
+from plasma_global.models.electrons import ElectronState
 
 
 def available_observables(model: CompiledGlobalModel) -> tuple[str, ...]:
@@ -86,6 +88,119 @@ def derive_observables(
     return observables
 
 
+def _segment_for_saved_time(
+    model: CompiledGlobalModel, time_s: float, start_index: int
+) -> tuple[RecipeSegment, int]:
+    index = start_index
+    while index + 1 < len(model.segments) and time_s > model.segments[index].end_s:
+        index += 1
+    segment = model.segments[index]
+    if time_s < segment.start_s or time_s > segment.end_s:
+        raise ValueError(f"saved time {time_s:g} is outside compiled recipe segments")
+    return segment, index
+
+
+def _zone_observable_values(
+    model: CompiledGlobalModel,
+    evaluated: ModelEvaluation,
+    zone_id: str,
+    electrons: ElectronState,
+    state: np.ndarray,
+    *,
+    needs_power_ledger: bool,
+    volume_m3: float,
+) -> tuple[dict[str, float], float]:
+    density = state[model.layout.density_slices[zone_id]]
+    charge_scale = max(
+        electrons.density_m3
+        + float(np.dot(np.abs(model.charges), np.maximum(density, 0.0))),
+        1.0,
+    )
+    normalized_residual = (
+        abs(evaluated.charge_residual_m3_by_zone[zone_id]) / charge_scale
+    )
+    values = {
+        f"electron_density_m3[{zone_id}]": electrons.density_m3,
+        f"mean_energy_eV[{zone_id}]": electrons.mean_energy_eV,
+        f"electron_temperature_eV[{zone_id}]": electrons.temperature_eV,
+        f"reduced_field_Td[{zone_id}]": (
+            np.nan if electrons.reduced_field_Td is None else electrons.reduced_field_Td
+        ),
+        f"gas_temperature_K[{zone_id}]": evaluated.gas_temperature_K_by_zone[zone_id],
+        f"charge_residual_m3[{zone_id}]": (
+            evaluated.charge_residual_m3_by_zone[zone_id]
+        ),
+    }
+    if needs_power_ledger:
+        ledger = evaluated.ledger_by_zone[zone_id]
+        values[f"absorbed_power_W[{zone_id}]"] = (
+            ledger.absorbed_power_J_m3_s + ledger.gas_power_J_m3_s
+        ) * volume_m3
+    return values, normalized_residual
+
+
+def _surface_observable_values(
+    model: CompiledGlobalModel,
+    state: np.ndarray,
+    selected: Collection[str],
+) -> dict[str, float]:
+    surface_model = model.surface_model
+    if surface_model is None:
+        return {}
+    coverage_state = state[model.layout.surface_coverage_slice]
+    values: dict[str, float] = {}
+    for surface in surface_model.surfaces:
+        free_species = surface_model.layout.free_species_by_surface[surface.surface_id]
+        name = f"coverage[{surface.surface_id},{free_species}]"
+        if name in selected:
+            values[name] = surface_model.coverage(
+                coverage_state, surface.surface_id, free_species
+            )
+    return values
+
+
+def _saved_point_observables(
+    model: CompiledGlobalModel,
+    time_s: float,
+    state: np.ndarray,
+    segment_index: int,
+    *,
+    needs_power_ledger: bool,
+    volume_by_zone: Mapping[str, float],
+    selected: Collection[str],
+) -> tuple[dict[str, float], float, int]:
+    segment, segment_index = _segment_for_saved_time(model, time_s, segment_index)
+    evaluated = model.evaluate(
+        time_s, state, segment, collect_ledger=needs_power_ledger
+    )
+    observable_values: dict[str, float] = {}
+    maximum_charge_residual = 0.0
+    for zone_id, electrons in evaluated.electron_states.items():
+        zone_values, normalized_residual = _zone_observable_values(
+            model,
+            evaluated,
+            zone_id,
+            electrons,
+            state,
+            needs_power_ledger=needs_power_ledger,
+            volume_m3=volume_by_zone[zone_id],
+        )
+        observable_values.update(zone_values)
+        maximum_charge_residual = max(maximum_charge_residual, normalized_residual)
+    observable_values.update(_surface_observable_values(model, state, selected))
+    return observable_values, maximum_charge_residual, segment_index
+
+
+def _requires_postprocessing(
+    model: CompiledGlobalModel, selected: tuple[str, ...]
+) -> bool:
+    if selected or model.electron_density_provider is not None:
+        return True
+    return any(
+        segment.prescribed_electron_density_m3_by_zone for segment in model.segments
+    )
+
+
 def derive_observables_and_diagnostics(
     model: CompiledGlobalModel,
     time_s: np.ndarray,
@@ -95,11 +210,8 @@ def derive_observables_and_diagnostics(
     """Create selected series and normal diagnostics in one saved-point pass."""
 
     selected = validate_observable_selection(model, names)
-    uses_prescribed_electrons = model.electron_density_provider is not None or any(
-        segment.prescribed_electron_density_m3_by_zone for segment in model.segments
-    )
     diagnostics = {"charge_closure_normalized": 0.0}
-    if not selected and not uses_prescribed_electrons:
+    if not _requires_postprocessing(model, selected):
         # Quasineutrality is algebraic, so its residual is identically zero.  Do
         # not rerun the complete physical model after integration to prove it.
         return {}, diagnostics
@@ -112,66 +224,24 @@ def derive_observables_and_diagnostics(
 
     output = {name: np.empty(times.size, dtype=float) for name in selected}
     needs_power_ledger = any(name.startswith("absorbed_power_W[") for name in selected)
-    zone_by_id = {zone.zone_id: zone for zone in model.zones}
+    volume_by_zone = {zone.zone_id: zone.volume_m3 for zone in model.zones}
     segment_index = 0
-    for time_index, (time, values) in enumerate(zip(times, states)):
-        while (
-            segment_index + 1 < len(model.segments)
-            and time > model.segments[segment_index].end_s
-        ):
-            segment_index += 1
-        segment = model.segments[segment_index]
-        if time < segment.start_s or time > segment.end_s:
-            raise ValueError(f"saved time {time:g} is outside compiled recipe segments")
-        evaluated = model.evaluate(
-            float(time), values, segment, collect_ledger=needs_power_ledger
+    for time_index, (time, state_values) in enumerate(zip(times, states, strict=True)):
+        values_by_name, normalized_residual, segment_index = _saved_point_observables(
+            model,
+            float(time),
+            state_values,
+            segment_index,
+            needs_power_ledger=needs_power_ledger,
+            volume_by_zone=volume_by_zone,
+            selected=output,
         )
-        for zone_id, electrons in evaluated.electron_states.items():
-            density = values[model.layout.density_slices[zone_id]]
-            charge_scale = max(
-                electrons.density_m3
-                + float(np.dot(np.abs(model.charges), np.maximum(density, 0.0))),
-                1.0,
-            )
-            diagnostics["charge_closure_normalized"] = max(
-                diagnostics["charge_closure_normalized"],
-                abs(evaluated.charge_residual_m3_by_zone[zone_id]) / charge_scale,
-            )
-            values_by_name = {
-                f"electron_density_m3[{zone_id}]": electrons.density_m3,
-                f"mean_energy_eV[{zone_id}]": electrons.mean_energy_eV,
-                f"electron_temperature_eV[{zone_id}]": electrons.temperature_eV,
-                f"reduced_field_Td[{zone_id}]": (
-                    np.nan
-                    if electrons.reduced_field_Td is None
-                    else electrons.reduced_field_Td
-                ),
-                f"gas_temperature_K[{zone_id}]": (
-                    evaluated.gas_temperature_K_by_zone[zone_id]
-                ),
-                f"charge_residual_m3[{zone_id}]": (
-                    evaluated.charge_residual_m3_by_zone[zone_id]
-                ),
-            }
-            if needs_power_ledger:
-                ledger = evaluated.ledger_by_zone[zone_id]
-                values_by_name[f"absorbed_power_W[{zone_id}]"] = (
-                    ledger.absorbed_power_J_m3_s + ledger.gas_power_J_m3_s
-                ) * zone_by_id[zone_id].volume_m3
-            for name, value in values_by_name.items():
-                if name in output:
-                    output[name][time_index] = value
-        if model.surface_model is not None:
-            coverage_state = values[model.layout.surface_coverage_slice]
-            for surface in model.surface_model.surfaces:
-                free_species = model.surface_model.layout.free_species_by_surface[
-                    surface.surface_id
-                ]
-                name = f"coverage[{surface.surface_id},{free_species}]"
-                if name in output:
-                    output[name][time_index] = model.surface_model.coverage(
-                        coverage_state, surface.surface_id, free_species
-                    )
+        diagnostics["charge_closure_normalized"] = max(
+            diagnostics["charge_closure_normalized"], normalized_residual
+        )
+        for name, value in values_by_name.items():
+            if name in output:
+                output[name][time_index] = value
     return output, diagnostics
 
 

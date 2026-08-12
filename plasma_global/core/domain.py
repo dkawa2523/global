@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from itertools import pairwise
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, SupportsFloat
 
 from plasma_global.core.exceptions import ModelConfigurationError
 from plasma_global.models.power import CompiledPowerCommand
@@ -192,6 +192,65 @@ class InitialState:
         object.__setattr__(self, "surface_coverages", MappingProxyType(coverages))
 
 
+def _validate_solver_tolerances(rtol: float, atol: float) -> None:
+    if not math.isfinite(rtol) or not _MIN_BDF_RTOL <= rtol < 1.0:
+        raise ModelConfigurationError(
+            f"rtol must be finite and satisfy {_MIN_BDF_RTOL:.16g} <= rtol < 1"
+        )
+    if not math.isfinite(atol) or atol <= 0.0:
+        raise ModelConfigurationError("atol must be positive")
+
+
+def _validate_step_controls(
+    first_step_s: float | None,
+    max_step_s: float | None,
+    sample_interval_s: float | None,
+) -> None:
+    for name, value in (
+        ("first_step_s", first_step_s),
+        ("max_step_s", max_step_s),
+        ("sample_interval_s", sample_interval_s),
+    ):
+        if value is not None and (not math.isfinite(value) or value <= 0.0):
+            raise ModelConfigurationError(f"{name} must be positive when provided")
+    if (
+        first_step_s is not None
+        and max_step_s is not None
+        and first_step_s > max_step_s
+    ):
+        raise ModelConfigurationError("first_step_s must not exceed max_step_s")
+
+
+def _normalized_save_times(
+    values: tuple[SupportsFloat, ...] | None,
+) -> tuple[float, ...] | None:
+    if values is None:
+        return None
+    save_at = tuple(float(value) for value in values)
+    if not save_at:
+        raise ModelConfigurationError("save_at_s must not be empty")
+    if any(not math.isfinite(value) or value < 0.0 for value in save_at):
+        raise ModelConfigurationError("save_at_s must contain finite nonnegative times")
+    if any(right <= left for left, right in pairwise(save_at)):
+        raise ModelConfigurationError("save_at_s must be strictly increasing")
+    return save_at
+
+
+def _validate_quasi_steady_controls(
+    threshold_s_inv: float | None, min_time_s: float
+) -> None:
+    if threshold_s_inv is not None and (
+        not math.isfinite(threshold_s_inv) or threshold_s_inv < 0.0
+    ):
+        raise ModelConfigurationError(
+            "experimental quasi-steady threshold must be finite and nonnegative"
+        )
+    if not math.isfinite(min_time_s) or min_time_s < 0.0:
+        raise ModelConfigurationError(
+            "experimental quasi-steady min_time_s must be finite and nonnegative"
+        )
+
+
 @dataclass(frozen=True)
 class SolverSettings:
     """Numerical controls for sequential BDF integration.
@@ -211,52 +270,21 @@ class SolverSettings:
     experimental_quasi_steady_min_time_s: float = 0.0
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.rtol) or not _MIN_BDF_RTOL <= self.rtol < 1.0:
-            raise ModelConfigurationError(
-                f"rtol must be finite and satisfy {_MIN_BDF_RTOL:.16g} <= rtol < 1"
-            )
-        if not math.isfinite(self.atol) or self.atol <= 0.0:
-            raise ModelConfigurationError("atol must be positive")
-        for name, value in (
-            ("first_step_s", self.first_step_s),
-            ("max_step_s", self.max_step_s),
-            ("sample_interval_s", self.sample_interval_s),
-        ):
-            if value is not None and (not math.isfinite(value) or value <= 0.0):
-                raise ModelConfigurationError(f"{name} must be positive when provided")
+        _validate_solver_tolerances(self.rtol, self.atol)
+        _validate_step_controls(
+            self.first_step_s,
+            self.max_step_s,
+            self.sample_interval_s,
+        )
         if self.sample_interval_s is not None and self.save_at_s is not None:
             raise ModelConfigurationError(
                 "sample_interval_s and save_at_s are mutually exclusive"
             )
-        if self.save_at_s is not None:
-            save_at = tuple(float(value) for value in self.save_at_s)
-            if not save_at:
-                raise ModelConfigurationError("save_at_s must not be empty")
-            if any(not math.isfinite(value) or value < 0.0 for value in save_at):
-                raise ModelConfigurationError(
-                    "save_at_s must contain finite nonnegative times"
-                )
-            if any(right <= left for left, right in pairwise(save_at)):
-                raise ModelConfigurationError("save_at_s must be strictly increasing")
-            object.__setattr__(self, "save_at_s", save_at)
-        if (
-            self.first_step_s is not None
-            and self.max_step_s is not None
-            and self.first_step_s > self.max_step_s
-        ):
-            raise ModelConfigurationError("first_step_s must not exceed max_step_s")
-        threshold = self.experimental_quasi_steady_threshold_s_inv
-        if threshold is not None and (not math.isfinite(threshold) or threshold < 0.0):
-            raise ModelConfigurationError(
-                "experimental quasi-steady threshold must be finite and nonnegative"
-            )
-        if (
-            not math.isfinite(self.experimental_quasi_steady_min_time_s)
-            or self.experimental_quasi_steady_min_time_s < 0.0
-        ):
-            raise ModelConfigurationError(
-                "experimental quasi-steady min_time_s must be finite and nonnegative"
-            )
+        object.__setattr__(self, "save_at_s", _normalized_save_times(self.save_at_s))
+        _validate_quasi_steady_controls(
+            self.experimental_quasi_steady_threshold_s_inv,
+            self.experimental_quasi_steady_min_time_s,
+        )
 
 
 __all__ = [

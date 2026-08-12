@@ -49,8 +49,79 @@ def _freeze_metadata_value(value: Any, *, path: str) -> Any:
 
 def _freeze_mapping(value: Mapping[str, Any] | None, *, name: str) -> Mapping[str, Any]:
     frozen = _freeze_metadata_value(dict(value or {}), path=name)
-    assert isinstance(frozen, Mapping)
+    if not isinstance(frozen, Mapping):
+        raise RuntimeError("mapping metadata did not remain a mapping")
     return frozen
+
+
+def _validated_time(value: Any) -> np.ndarray:
+    time_s = _readonly_float_array(value, name="time_s")
+    if time_s.ndim != 1:
+        raise ValueError(f"time_s must be one-dimensional, got shape {time_s.shape}")
+    if not np.all(np.isfinite(time_s)):
+        raise ValueError("time_s must contain only finite values")
+    if time_s.size > 1 and np.any(np.diff(time_s) <= 0.0):
+        raise ValueError("time_s must be strictly increasing")
+    return time_s
+
+
+def _validated_labels(values: tuple[object, ...]) -> tuple[str, ...]:
+    labels = tuple(str(label).strip() for label in values)
+    if any(not label for label in labels):
+        raise ValueError("state_labels must not contain empty labels")
+    if len(set(labels)) != len(labels):
+        raise ValueError("state_labels must be unique")
+    return labels
+
+
+def _validated_state(value: Any, expected_shape: tuple[int, int]) -> np.ndarray:
+    state = _readonly_float_array(value, name="state")
+    if state.ndim != 2:
+        raise ValueError(
+            f"state must be two-dimensional and time-major, got shape {state.shape}"
+        )
+    if state.shape != expected_shape:
+        raise ValueError(
+            f"state must have time-major shape {expected_shape}, got {state.shape}"
+        )
+    return state
+
+
+def _validated_observable_name(value: Any, state_labels: tuple[str, ...]) -> str:
+    name = str(value).strip()
+    if not name:
+        raise ValueError("observable names must not be empty")
+    if "/" in name or "\x00" in name or name in {".", ".."}:
+        raise ValueError(
+            f"observable name {name!r} is not safe for the result HDF5 layout"
+        )
+    if name in state_labels:
+        raise ValueError(f"observable name {name!r} conflicts with a state label")
+    return name
+
+
+def _validated_observables(
+    values: Mapping[str, np.ndarray],
+    *,
+    time_count: int,
+    state_labels: tuple[str, ...],
+) -> Mapping[str, np.ndarray]:
+    observables: dict[str, np.ndarray] = {}
+    for raw_name, raw_values in dict(values or {}).items():
+        name = _validated_observable_name(raw_name, state_labels)
+        observable = _readonly_float_array(raw_values, name=f"observables[{name!r}]")
+        if observable.ndim == 1 and observable.shape != (time_count,):
+            raise ValueError(
+                f"observable {name!r} must have shape ({time_count},) or be scalar, "
+                f"got {observable.shape}"
+            )
+        if observable.ndim not in {0, 1}:
+            raise ValueError(
+                f"observable {name!r} must be scalar or one-dimensional, got "
+                f"{observable.ndim} dimensions"
+            )
+        observables[name] = observable
+    return MappingProxyType(observables)
 
 
 def to_plain_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -111,64 +182,21 @@ class SimulationResult:
     _state_index: Mapping[str, int] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        time_s = _readonly_float_array(self.time_s, name="time_s")
-        if time_s.ndim != 1:
-            raise ValueError(
-                f"time_s must be one-dimensional, got shape {time_s.shape}"
-            )
-        if not np.all(np.isfinite(time_s)):
-            raise ValueError("time_s must contain only finite values")
-        if time_s.size > 1 and np.any(np.diff(time_s) <= 0.0):
-            raise ValueError("time_s must be strictly increasing")
-
-        labels = tuple(str(label).strip() for label in self.state_labels)
-        if any(not label for label in labels):
-            raise ValueError("state_labels must not contain empty labels")
-        if len(set(labels)) != len(labels):
-            raise ValueError("state_labels must be unique")
-
-        state = _readonly_float_array(self.state, name="state")
-        if state.ndim != 2:
-            raise ValueError(
-                f"state must be two-dimensional and time-major, got shape {state.shape}"
-            )
-        expected_shape = (time_s.size, len(labels))
-        if state.shape != expected_shape:
-            raise ValueError(
-                f"state must have time-major shape {expected_shape}, got {state.shape}"
-            )
-
-        observables: dict[str, np.ndarray] = {}
-        for raw_name, raw_values in dict(self.observables or {}).items():
-            name = str(raw_name).strip()
-            if not name:
-                raise ValueError("observable names must not be empty")
-            if "/" in name or "\x00" in name or name in {".", ".."}:
-                raise ValueError(
-                    f"observable name {name!r} is not safe for the result HDF5 layout"
-                )
-            if name in labels:
-                raise ValueError(
-                    f"observable name {name!r} conflicts with a state label"
-                )
-            values = _readonly_float_array(raw_values, name=f"observables[{name!r}]")
-            if values.ndim == 1 and values.shape != (time_s.size,):
-                raise ValueError(
-                    f"observable {name!r} must have shape ({time_s.size},) or be scalar, got {values.shape}"
-                )
-            if values.ndim not in {0, 1}:
-                raise ValueError(
-                    f"observable {name!r} must be scalar or one-dimensional, got {values.ndim} dimensions"
-                )
-            observables[name] = values
-
+        time_s = _validated_time(self.time_s)
+        labels = _validated_labels(self.state_labels)
+        state = _validated_state(self.state, (time_s.size, len(labels)))
+        observables = _validated_observables(
+            self.observables,
+            time_count=time_s.size,
+            state_labels=labels,
+        )
         if not isinstance(self.status, SimulationStatus):
             raise TypeError("status must be a SimulationStatus")
 
         object.__setattr__(self, "time_s", time_s)
         object.__setattr__(self, "state", state)
         object.__setattr__(self, "state_labels", labels)
-        object.__setattr__(self, "observables", MappingProxyType(observables))
+        object.__setattr__(self, "observables", observables)
         object.__setattr__(
             self,
             "solver_stats",

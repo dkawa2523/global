@@ -11,6 +11,7 @@ from typing import Any, Protocol, cast
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from plasma_global.core._initial_state import build_initial_state
 from plasma_global.core.domain import InitialState, RecipeSegment, Zone
 from plasma_global.core.exceptions import ModelConfigurationError, StateDomainError
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
@@ -125,12 +126,10 @@ def _required_cached_derivative(derivative: np.ndarray | None) -> np.ndarray:
     return derivative
 
 
-def _required_heavy_energy_closure(
-    closure: HeavyEnergyClosure | None,
-) -> HeavyEnergyClosure:
-    if closure is None:
-        raise RuntimeError("Heavy-energy state requires an energy closure")
-    return closure
+def _normalized_identifier(value: object) -> str:
+    """Return the plain-string identifier used by compiled lookup tables."""
+
+    return str(value)
 
 
 @dataclass(frozen=True)
@@ -499,6 +498,12 @@ class CompiledGlobalModel:
             raise ModelConfigurationError("Reaction IDs must be unique")
         n_species = len(self.species_ids)
         n_reactions = len(self.reaction_ids)
+        self._compile_chemistry_arrays(n_species, n_reactions)
+        self._compile_reaction_zones(n_reactions)
+        self._validate_chemistry_arrays()
+        self._compile_rate_evaluators(n_reactions)
+
+    def _compile_chemistry_arrays(self, n_species: int, n_reactions: int) -> None:
         self.charges = self._readonly_array(
             self.chemistry.charges, shape=(n_species,), name="charges"
         )
@@ -542,14 +547,19 @@ class CompiledGlobalModel:
             shape=(n_reactions,),
             name="gas_heating_eV",
         )
+
+    def _compile_reaction_zones(self, n_reactions: int) -> None:
         raw_reaction_zones = self.chemistry.reaction_zones
         if len(raw_reaction_zones) != n_reactions:
             raise ModelConfigurationError(
                 "reaction_zones length must match reaction_ids"
             )
         self.reaction_zones = tuple(
-            tuple(str(zone_id) for zone_id in zones) for zones in raw_reaction_zones
+            tuple(_normalized_identifier(zone_id) for zone_id in zones)
+            for zones in raw_reaction_zones
         )
+
+    def _validate_chemistry_arrays(self) -> None:
         if np.any(self.masses_kg <= 0.0):
             raise ModelConfigurationError(
                 "Every evolved species must have positive mass_kg"
@@ -562,6 +572,8 @@ class CompiledGlobalModel:
             raise ModelConfigurationError("Electron energy losses must be non-negative")
         if np.any(self.gas_heating_eV < 0.0):
             raise ModelConfigurationError("Gas reaction heating must be non-negative")
+
+    def _compile_rate_evaluators(self, n_reactions: int) -> None:
         raw_evaluators = tuple(self.chemistry.rate_evaluators)
         if len(raw_evaluators) != n_reactions:
             raise ModelConfigurationError(
@@ -997,74 +1009,82 @@ class CompiledGlobalModel:
                 f"got {incomplete}"
             )
 
-    def _build_jac_sparsity(self) -> csr_matrix:
-        pattern = np.zeros((self.layout.size, self.layout.size), dtype=bool)
+    def _zone_state_bounds(self, zone_id: str) -> tuple[int, int]:
+        density_slice = self.layout.density_slices[zone_id]
+        stop = density_slice.stop
+        if self.layout.evolves_electron_energy:
+            stop = self.layout.electron_energy_indices[zone_id] + 1
+        if self.layout.evolves_heavy_energy:
+            stop = self.layout.heavy_energy_indices[zone_id] + 1
+        return density_slice.start, stop
 
-        def zone_bounds(zone_id: str) -> tuple[int, int]:
-            density_slice = self.layout.density_slices[zone_id]
-            stop = density_slice.stop
-            if self.layout.evolves_electron_energy:
-                stop = self.layout.electron_energy_indices[zone_id] + 1
-            if self.layout.evolves_heavy_energy:
-                stop = self.layout.heavy_energy_indices[zone_id] + 1
-            return density_slice.start, stop
-
+    def _add_zone_jacobian_blocks(self, pattern: np.ndarray) -> None:
+        reactive_species = np.any(self.stoichiometry != 0.0, axis=0)
         for zone_id in self.layout.zone_ids:
-            start, stop = zone_bounds(zone_id)
+            start, stop = self._zone_state_bounds(zone_id)
             density_slice = self.layout.density_slices[zone_id]
             pattern[density_slice, density_slice] = (
                 self.chemistry_jacobian_species_pattern
             )
             if self.layout.evolves_electron_energy:
                 energy_index = self.layout.electron_energy_indices[zone_id]
-                pattern[density_slice, energy_index] = np.any(
-                    self.stoichiometry != 0.0, axis=0
-                )
+                pattern[density_slice, energy_index] = reactive_species
                 pattern[energy_index, start:stop] = True
             if self.layout.evolves_heavy_energy:
                 heavy_index = self.layout.heavy_energy_indices[zone_id]
-                pattern[density_slice, heavy_index] = np.any(
-                    self.stoichiometry != 0.0, axis=0
-                )
+                pattern[density_slice, heavy_index] = reactive_species
                 pattern[heavy_index, start:stop] = True
             if self._walls_by_zone.get(zone_id):
                 pattern[start:stop, start:stop] = True
-        if self.transport is not None:
-            for zone_id in self.layout.zone_ids:
-                start, stop = zone_bounds(zone_id)
-                pattern[start:stop, start:stop] |= np.eye(stop - start, dtype=bool)
-            for source_index, target_index in zip(
-                self.transport.edge_from, self.transport.edge_to
-            ):
-                source_zone = self.layout.zone_ids[int(source_index)]
-                target_zone = self.layout.zone_ids[int(target_index)]
-                source_start, source_stop = zone_bounds(source_zone)
-                target_start, target_stop = zone_bounds(target_zone)
-                pattern[
-                    target_start:target_stop,
-                    source_start:source_stop,
-                ] = True
-        if self.surface_model is not None:
-            for surface in self.surface_model.surfaces:
-                zone_start, zone_stop = zone_bounds(surface.zone_id)
-                pattern[zone_start:zone_stop, zone_start:zone_stop] = True
-                coverage_indices = [
-                    self.layout.surface_coverage_indices[key]
-                    for key in self.layout.surface_coverage_indices
-                    if key[0] == surface.surface_id
-                ]
-                if not coverage_indices:
-                    continue
+
+    def _add_transport_jacobian_blocks(self, pattern: np.ndarray) -> None:
+        transport = self.transport
+        if transport is None:
+            return
+        for zone_id in self.layout.zone_ids:
+            start, stop = self._zone_state_bounds(zone_id)
+            pattern[start:stop, start:stop] |= np.eye(stop - start, dtype=bool)
+        for source_index, target_index in zip(
+            transport.edge_from, transport.edge_to, strict=True
+        ):
+            source_zone = self.layout.zone_ids[int(source_index)]
+            target_zone = self.layout.zone_ids[int(target_index)]
+            source_start, source_stop = self._zone_state_bounds(source_zone)
+            target_start, target_stop = self._zone_state_bounds(target_zone)
+            pattern[target_start:target_stop, source_start:source_stop] = True
+
+    def _add_surface_jacobian_blocks(self, pattern: np.ndarray) -> None:
+        surface_model = self.surface_model
+        if surface_model is None:
+            return
+        for surface in surface_model.surfaces:
+            zone_start, zone_stop = self._zone_state_bounds(surface.zone_id)
+            pattern[zone_start:zone_stop, zone_start:zone_stop] = True
+            coverage_indices = [
+                index
+                for key, index in self.layout.surface_coverage_indices.items()
+                if key[0] == surface.surface_id
+            ]
+            if coverage_indices:
                 pattern[zone_start:zone_stop, coverage_indices] = True
                 pattern[coverage_indices, zone_start:zone_stop] = True
                 pattern[np.ix_(coverage_indices, coverage_indices)] = True
+
+    def _add_power_jacobian_blocks(self, pattern: np.ndarray) -> None:
         if (
             self.power_coordinator is not None
             and self.electron_closure.mode == "local_field"
         ):
             for zone_id in self.layout.zone_ids:
-                start, stop = zone_bounds(zone_id)
+                start, stop = self._zone_state_bounds(zone_id)
                 pattern[start:stop, start:stop] = True
+
+    def _build_jac_sparsity(self) -> csr_matrix:
+        pattern = np.zeros((self.layout.size, self.layout.size), dtype=bool)
+        self._add_zone_jacobian_blocks(pattern)
+        self._add_transport_jacobian_blocks(pattern)
+        self._add_surface_jacobian_blocks(pattern)
+        self._add_power_jacobian_blocks(pattern)
         if self.extension_accumulator is not None:
             # Experimental accumulators are one-way consumers of compiled
             # drivers. Their RHS may depend on any plasma/surface state, while
@@ -1106,134 +1126,7 @@ class CompiledGlobalModel:
         return resolved_electron_density(net_heavy_charge_density_m3, prescribed)
 
     def initial_state(self, initial: InitialState) -> np.ndarray:
-        expected_zones = set(self.layout.zone_ids)
-        supplied_zones = set(initial.densities_m3_by_zone)
-        if supplied_zones != expected_zones:
-            raise ModelConfigurationError(
-                f"Initial density zones must be exactly {sorted(expected_zones)}, got {sorted(supplied_zones)}"
-            )
-        if self.layout.evolves_electron_energy:
-            energy_zones = set(initial.mean_energy_eV_by_zone)
-            if energy_zones != expected_zones:
-                raise ModelConfigurationError(
-                    f"electron_energy closure needs initial mean energy for zones {sorted(expected_zones)}"
-                )
-        elif initial.mean_energy_eV_by_zone:
-            raise ModelConfigurationError(
-                "local_field closure derives mean energy and rejects an initial energy state"
-            )
-        if self.layout.evolves_heavy_energy:
-            gas_temperature_zones = set(initial.gas_temperature_K_by_zone)
-            if gas_temperature_zones and gas_temperature_zones != expected_zones:
-                raise ModelConfigurationError(
-                    "Evolved gas energy initial temperatures must name every zone"
-                )
-        elif initial.gas_temperature_K_by_zone:
-            raise ModelConfigurationError(
-                "Fixed gas energy rejects an initial gas-energy state"
-            )
-        if self.surface_model is None and initial.surface_coverages:
-            raise ModelConfigurationError(
-                "Initial surface coverages require CompiledSurfaceModel"
-            )
-
-        state = np.zeros(self.layout.size, dtype=float)
-        density_rows: list[np.ndarray] = []
-        gas_temperatures: list[float] = []
-        for zone_id in self.layout.zone_ids:
-            values = initial.densities_m3_by_zone[zone_id]
-            if set(values) != set(self.species_ids):
-                raise ModelConfigurationError(
-                    f"Initial densities for zone {zone_id!r} must explicitly name every species "
-                    f"{list(self.species_ids)}"
-                )
-            density = np.array(
-                [values[species_id] for species_id in self.species_ids], dtype=float
-            )
-            state[self.layout.density_slices[zone_id]] = density
-            density_rows.append(density)
-            net_charge = float(self.charges @ density)
-            electron_density = self._electron_density(
-                self.segments[0].start_s,
-                zone_id,
-                net_charge,
-                self.segments[0],
-            )
-            if self.layout.evolves_electron_energy:
-                mean_energy = float(initial.mean_energy_eV_by_zone[zone_id])
-                if electron_density == 0.0 and mean_energy != 0.0:
-                    raise ModelConfigurationError(
-                        f"Zone {zone_id!r} cannot initialize nonzero electron energy at zero electron density"
-                    )
-                state[self.layout.electron_energy_indices[zone_id]] = (
-                    electron_density * ELEMENTARY_CHARGE_C * mean_energy
-                )
-            if self.layout.evolves_heavy_energy:
-                gas_temperatures.append(
-                    float(
-                        initial.gas_temperature_K_by_zone.get(
-                            zone_id, self._zone_by_id[zone_id].gas_temperature_K
-                        )
-                    )
-                )
-        if self.layout.evolves_heavy_energy:
-            heavy_energy_closure = _required_heavy_energy_closure(
-                self.heavy_energy_closure
-            )
-            initial_heavy_energy = heavy_energy_closure.energy_J_m3(
-                np.asarray(density_rows), np.asarray(gas_temperatures)
-            )
-            for zone_id, energy in zip(self.layout.zone_ids, initial_heavy_energy):
-                state[self.layout.heavy_energy_indices[zone_id]] = energy
-        if self.surface_model is not None:
-            coverage = self.surface_model.initial_state()
-            known_surfaces = {
-                surface.surface_id for surface in self.surface_model.surfaces
-            }
-            unknown_surfaces = set(initial.surface_coverages) - known_surfaces
-            if unknown_surfaces:
-                raise ModelConfigurationError(
-                    f"Initial coverages reference unknown surfaces {sorted(unknown_surfaces)}"
-                )
-            for surface_id, values in initial.surface_coverages.items():
-                for species_id, value in values.items():
-                    local_index = self.surface_model.layout.state_index.get(
-                        (surface_id, species_id)
-                    )
-                    if local_index is None:
-                        raise ModelConfigurationError(
-                            f"Initial coverage {(surface_id, species_id)!r} is not an independent state"
-                        )
-                    coverage[local_index] = value
-            for surface in self.surface_model.surfaces:
-                free_species = self.surface_model.layout.free_species_by_surface[
-                    surface.surface_id
-                ]
-                if (
-                    self.surface_model.coverage(
-                        coverage, surface.surface_id, free_species
-                    )
-                    < -1.0e-12
-                ):
-                    raise ModelConfigurationError(
-                        f"Initial coverage on surface {surface.surface_id!r} exceeds site occupancy"
-                    )
-            state[self.layout.surface_coverage_slice] = coverage
-        if self.extension_accumulator is not None:
-            extension_state = np.asarray(
-                self.extension_accumulator.initial_state(), dtype=float
-            )
-            expected = (
-                self.layout.extension_slice.stop - self.layout.extension_slice.start
-            )
-            if extension_state.shape != (expected,) or not np.all(
-                np.isfinite(extension_state)
-            ):
-                raise ModelConfigurationError(
-                    "Extension initial state must match its compiled state block"
-                )
-            state[self.layout.extension_slice] = extension_state
-        return state
+        return build_initial_state(self, initial)
 
     def evaluate(
         self,
@@ -1252,7 +1145,8 @@ class CompiledGlobalModel:
             collect_ledger=collect_ledger,
             derivative_only=False,
         )
-        assert isinstance(result, ModelEvaluation)
+        if not isinstance(result, ModelEvaluation):
+            raise RuntimeError("diagnostic evaluation returned only a derivative")
         return result
 
     def evaluate_derivative(
@@ -1273,7 +1167,8 @@ class CompiledGlobalModel:
             derivative_only=True,
             domain_atol=domain_atol,
         )
-        assert isinstance(result, np.ndarray)
+        if not isinstance(result, np.ndarray):
+            raise RuntimeError("derivative evaluation returned diagnostic data")
         return result
 
     def _prepare_zone_evaluation(

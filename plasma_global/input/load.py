@@ -6,9 +6,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import ValidationError
 
+from plasma_global._yaml import YamlLoadError, load_unique_yaml
 from plasma_global.errors import CaseValidationError
 from plasma_global.input.schema import CaseSpec
 
@@ -17,50 +17,13 @@ class CaseLoadError(CaseValidationError):
     """A case document could not be read, merged, or validated."""
 
 
-class _UniqueKeyLoader(yaml.SafeLoader):
-    pass
-
-
-def _construct_unique_mapping(
-    loader: _UniqueKeyLoader, node: yaml.MappingNode, deep: bool = False
-) -> dict[Any, Any]:
-    loader.flatten_mapping(node)
-    result: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        try:
-            duplicate = key in result
-        except TypeError as exc:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                "found an unhashable mapping key",
-                key_node.start_mark,
-            ) from exc
-        if duplicate:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                f"found duplicate key {key!r}",
-                key_node.start_mark,
-            )
-        result[key] = loader.construct_object(value_node, deep=deep)
-    return result
-
-
-_UniqueKeyLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    _construct_unique_mapping,
-)
-
-
 def _read_yaml(path: Path) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as stream:
-            document = yaml.load(stream, Loader=_UniqueKeyLoader)
+            document = load_unique_yaml(stream)
     except OSError as exc:
         raise CaseLoadError(f"cannot read case input {path}: {exc}") from exc
-    except yaml.YAMLError as exc:
+    except YamlLoadError as exc:
         raise CaseLoadError(f"invalid YAML in {path}: {exc}") from exc
     if document is None:
         return {}
@@ -103,6 +66,56 @@ def _mapping_at(document: dict[str, Any], key: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _resolve_model_paths(models: dict[str, Any], declaring_file: Path) -> None:
+    for section_name in ("electrons", "electron_density"):
+        section = _mapping_at(models, section_name)
+        if section is not None and "file" in section:
+            section["file"] = _absolute_path(
+                section["file"],
+                declaring_file,
+                f"models.{section_name}.file",
+            )
+
+
+def _resolve_port_model_paths(reactor: dict[str, Any], declaring_file: Path) -> None:
+    ports = reactor.get("power_ports")
+    if not isinstance(ports, list):
+        return
+    for index, port in enumerate(ports):
+        if not isinstance(port, dict):
+            continue
+        model = port.get("model")
+        if isinstance(model, dict) and "file" in model:
+            model["file"] = _absolute_path(
+                model["file"],
+                declaring_file,
+                f"reactor.power_ports[{index}].model.file",
+            )
+
+
+def _resolve_step_command_paths(recipe: dict[str, Any], declaring_file: Path) -> None:
+    steps = recipe.get("steps")
+    if not isinstance(steps, list):
+        return
+    for step_index, step in enumerate(steps):
+        commands = step.get("commands") if isinstance(step, dict) else None
+        power_commands = (
+            commands.get("power_ports") if isinstance(commands, dict) else None
+        )
+        if not isinstance(power_commands, dict):
+            continue
+        for port_id, command in power_commands.items():
+            if isinstance(command, dict) and "file" in command:
+                command["file"] = _absolute_path(
+                    command["file"],
+                    declaring_file,
+                    (
+                        f"recipe.steps[{step_index}].commands.power_ports"
+                        f"[{port_id!r}].file"
+                    ),
+                )
+
+
 def _resolve_declared_paths(
     document: dict[str, Any], declaring_file: Path
 ) -> dict[str, Any]:
@@ -118,51 +131,15 @@ def _resolve_declared_paths(
 
     models = _mapping_at(resolved, "models")
     if models is not None:
-        for section_name in ("electrons", "electron_density"):
-            section = _mapping_at(models, section_name)
-            if section is not None and "file" in section:
-                section["file"] = _absolute_path(
-                    section["file"],
-                    declaring_file,
-                    f"models.{section_name}.file",
-                )
+        _resolve_model_paths(models, declaring_file)
 
     reactor = _mapping_at(resolved, "reactor")
-    ports = reactor.get("power_ports") if reactor is not None else None
-    if isinstance(ports, list):
-        for index, port in enumerate(ports):
-            if not isinstance(port, dict):
-                continue
-            model = port.get("model")
-            if isinstance(model, dict) and "file" in model:
-                model["file"] = _absolute_path(
-                    model["file"],
-                    declaring_file,
-                    f"reactor.power_ports[{index}].model.file",
-                )
+    if reactor is not None:
+        _resolve_port_model_paths(reactor, declaring_file)
 
     recipe = _mapping_at(resolved, "recipe")
-    steps = recipe.get("steps") if recipe is not None else None
-    if isinstance(steps, list):
-        for step_index, step in enumerate(steps):
-            if not isinstance(step, dict):
-                continue
-            commands = step.get("commands")
-            if not isinstance(commands, dict):
-                continue
-            power_commands = commands.get("power_ports")
-            if not isinstance(power_commands, dict):
-                continue
-            for port_id, command in power_commands.items():
-                if isinstance(command, dict) and "file" in command:
-                    command["file"] = _absolute_path(
-                        command["file"],
-                        declaring_file,
-                        (
-                            f"recipe.steps[{step_index}].commands.power_ports"
-                            f"[{port_id!r}].file"
-                        ),
-                    )
+    if recipe is not None:
+        _resolve_step_command_paths(recipe, declaring_file)
 
     return resolved
 

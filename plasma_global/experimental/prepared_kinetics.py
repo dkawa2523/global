@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, SupportsFloat, SupportsIndex
 
 import numpy as np
 
@@ -30,6 +30,18 @@ _MOMENTUM_KINDS = frozenset(
         "mt",
     }
 )
+
+
+def _python_float(value: SupportsFloat) -> float:
+    return float(value)
+
+
+def _python_int(value: SupportsIndex) -> int:
+    return int(value)
+
+
+def _string_id(value: object) -> str:
+    return str(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,9 +100,27 @@ def _compile_collisions(chemistry: ChemistryData) -> tuple[ElectronCollision, ..
         )
     if not any(collision.kind == "momentum" for collision in collisions):
         raise CaseValidationError(
-            "experimental.approximate_two_term requires a momentum-transfer cross section"
+            "experimental.approximate_two_term requires a momentum-transfer "
+            "cross section"
         )
     return tuple(collisions)
+
+
+def _preparation_species(
+    collisions: tuple[ElectronCollision, ...],
+    mixture_key_species: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    targets = tuple(sorted({collision.target_species for collision in collisions}))
+    requested_key = tuple(_string_id(value) for value in mixture_key_species)
+    if len(set(requested_key)) != len(requested_key):
+        raise CaseValidationError("mixture_key_species must be unique")
+    unknown_key = sorted(set(requested_key) - set(targets))
+    if unknown_key:
+        raise CaseValidationError(
+            "mixture_key_species are not electron-neutral collision targets: "
+            f"{', '.join(unknown_key)}"
+        )
+    return targets, requested_key
 
 
 def _fixed_mixture(
@@ -99,7 +129,9 @@ def _fixed_mixture(
     targets: tuple[str, ...],
     momentum_targets: frozenset[str],
 ) -> tuple[dict[str, float], dict[str, float]]:
-    values = {target: float(densities_m3.get(target, 0.0)) for target in targets}
+    values = {
+        target: _python_float(densities_m3.get(target, 0.0)) for target in targets
+    }
     invalid = [
         target
         for target, density in values.items()
@@ -122,7 +154,8 @@ def _fixed_mixture(
     )
     if missing_momentum:
         raise CaseValidationError(
-            f"zone {zone_id!r} has positive collision targets without momentum-transfer "
+            f"zone {zone_id!r} has positive collision targets without "
+            "momentum-transfer "
             f"cross sections: {', '.join(missing_momentum)}"
         )
     fractions = {
@@ -137,7 +170,7 @@ def _mixture_identity(
     # Exact float identities prevent two physically different initial mixtures
     # from silently sharing mobility or rate data.  Human-facing rounded keys
     # remain provenance only.
-    return tuple((target, float(densities_m3[target]).hex()) for target in targets)
+    return tuple((target, densities_m3[target].hex()) for target in targets)
 
 
 def _readonly(values: object) -> np.ndarray:
@@ -178,6 +211,135 @@ def _prepare_table(
     )
 
 
+def _prepared_grid_and_model(
+    collisions: tuple[ElectronCollision, ...],
+    *,
+    energy_min_eV: float,
+    energy_max_eV: float,
+    energy_points: int,
+    field_min_Td: float,
+    field_max_Td: float,
+    field_points: int,
+    max_iterations: int,
+) -> tuple[np.ndarray, ApproximateTwoTermEEDF]:
+    try:
+        field_grid = np.geomspace(field_min_Td, field_max_Td, field_points)
+        model = ApproximateTwoTermEEDF(
+            collisions=collisions,
+            energy_min_eV=energy_min_eV,
+            energy_max_eV=energy_max_eV,
+            energy_points=energy_points,
+            max_iterations=max_iterations,
+        )
+    except (TypeError, ValueError) as exc:
+        raise CaseValidationError(
+            f"invalid approximate two-term preparation grid: {exc}"
+        ) from exc
+    if (
+        field_grid.ndim != 1
+        or field_grid.size < 2
+        or not np.isfinite(field_grid).all()
+        or np.any(np.diff(field_grid) <= 0.0)
+    ):
+        raise CaseValidationError(
+            "approximate two-term reduced-field grid must be finite and strictly "
+            "increasing"
+        )
+    field_grid.setflags(write=False)
+    return field_grid, model
+
+
+def _new_mixture_table(
+    *,
+    chemistry: ChemistryData,
+    model: ApproximateTwoTermEEDF,
+    field_grid_Td: np.ndarray,
+    densities_m3: Mapping[str, float],
+    zone_id: str,
+) -> TabulatedElectronKinetics:
+    try:
+        return _prepare_table(
+            source=chemistry.source,
+            model=model,
+            field_grid_Td=field_grid_Td,
+            target_densities_m3=densities_m3,
+        )
+    except (ArithmeticError, TypeError, ValueError) as exc:
+        raise CaseValidationError(
+            f"failed to prepare approximate two-term kinetics for zone "
+            f"{zone_id!r}: {exc}"
+        ) from exc
+
+
+def _zone_mixture_provenance(
+    *,
+    table_index: int,
+    densities: Mapping[str, float],
+    fractions: Mapping[str, float],
+    key_species: tuple[str, ...],
+    fraction_decimals: int,
+) -> dict[str, Any]:
+    return {
+        "table_index": table_index,
+        "target_densities_m3": dict(densities),
+        "target_fractions": dict(fractions),
+        "rounded_mixture_key": {
+            species: round(fractions.get(species, 0.0), fraction_decimals)
+            for species in key_species
+        },
+    }
+
+
+def _prepare_zone_tables(
+    chemistry: ChemistryData,
+    initial_densities_m3_by_zone: Mapping[str, Mapping[str, float]],
+    *,
+    model: ApproximateTwoTermEEDF,
+    field_grid_Td: np.ndarray,
+    targets: tuple[str, ...],
+    momentum_targets: frozenset[str],
+    key_species: tuple[str, ...],
+    cache_max_entries: int,
+    fraction_decimals: int,
+) -> tuple[
+    dict[tuple[tuple[str, str], ...], TabulatedElectronKinetics],
+    dict[str, TabulatedElectronKinetics],
+    dict[str, Any],
+]:
+    tables: dict[tuple[tuple[str, str], ...], TabulatedElectronKinetics] = {}
+    zone_tables: dict[str, TabulatedElectronKinetics] = {}
+    zone_provenance: dict[str, Any] = {}
+    for raw_zone_id, raw_densities in initial_densities_m3_by_zone.items():
+        zone_id = _string_id(raw_zone_id)
+        densities, fractions = _fixed_mixture(
+            zone_id, raw_densities, targets, momentum_targets
+        )
+        identity = _mixture_identity(densities, targets)
+        if identity not in tables:
+            if len(tables) >= cache_max_entries:
+                raise CaseValidationError(
+                    "distinct initial neutral mixtures exceed cache.max_entries "
+                    f"({cache_max_entries})"
+                )
+            tables[identity] = _new_mixture_table(
+                chemistry=chemistry,
+                model=model,
+                field_grid_Td=field_grid_Td,
+                densities_m3=densities,
+                zone_id=zone_id,
+            )
+        table_index = tuple(tables).index(identity)
+        zone_tables[zone_id] = tables[identity]
+        zone_provenance[zone_id] = _zone_mixture_provenance(
+            table_index=table_index,
+            densities=densities,
+            fractions=fractions,
+            key_species=key_species,
+            fraction_decimals=fraction_decimals,
+        )
+    return tables, zone_tables, zone_provenance
+
+
 def prepare_approximate_two_term_kinetics(
     chemistry: ChemistryData,
     initial_densities_m3_by_zone: Mapping[str, Mapping[str, float]],
@@ -197,88 +359,47 @@ def prepare_approximate_two_term_kinetics(
 
     if not initial_densities_m3_by_zone:
         raise CaseValidationError("approximate two-term preparation requires zones")
+    cache_max_entries = _python_int(cache_max_entries)
+    fraction_decimals = _python_int(fraction_decimals)
+    energy_min_eV = _python_float(energy_min_eV)
+    energy_max_eV = _python_float(energy_max_eV)
+    energy_points = _python_int(energy_points)
+    field_min_Td = _python_float(field_min_Td)
+    field_max_Td = _python_float(field_max_Td)
+    field_points = _python_int(field_points)
+    max_iterations = _python_int(max_iterations)
     if cache_max_entries < 1 or fraction_decimals < 0:
         raise CaseValidationError("approximate two-term cache settings are invalid")
     collisions = _compile_collisions(chemistry)
-    targets = tuple(sorted({collision.target_species for collision in collisions}))
-    requested_key = tuple(str(value) for value in mixture_key_species)
-    if len(set(requested_key)) != len(requested_key):
-        raise CaseValidationError("mixture_key_species must be unique")
-    unknown_key = sorted(set(requested_key) - set(targets))
-    if unknown_key:
-        raise CaseValidationError(
-            "mixture_key_species are not electron-neutral collision targets: "
-            f"{', '.join(unknown_key)}"
-        )
+    targets, requested_key = _preparation_species(collisions, mixture_key_species)
 
-    try:
-        field_grid = np.geomspace(
-            float(field_min_Td), float(field_max_Td), int(field_points)
-        )
-        model = ApproximateTwoTermEEDF(
-            collisions=collisions,
-            energy_min_eV=float(energy_min_eV),
-            energy_max_eV=float(energy_max_eV),
-            energy_points=int(energy_points),
-            max_iterations=int(max_iterations),
-        )
-    except (TypeError, ValueError) as exc:
-        raise CaseValidationError(
-            f"invalid approximate two-term preparation grid: {exc}"
-        ) from exc
-    if (
-        field_grid.ndim != 1
-        or field_grid.size < 2
-        or not np.isfinite(field_grid).all()
-        or np.any(np.diff(field_grid) <= 0.0)
-    ):
-        raise CaseValidationError(
-            "approximate two-term reduced-field grid must be finite and strictly increasing"
-        )
-    field_grid.setflags(write=False)
+    field_grid, model = _prepared_grid_and_model(
+        collisions,
+        energy_min_eV=energy_min_eV,
+        energy_max_eV=energy_max_eV,
+        energy_points=energy_points,
+        field_min_Td=field_min_Td,
+        field_max_Td=field_max_Td,
+        field_points=field_points,
+        max_iterations=max_iterations,
+    )
 
     momentum_targets = frozenset(
         collision.target_species
         for collision in collisions
         if collision.kind == "momentum"
     )
-    tables: dict[tuple[tuple[str, str], ...], TabulatedElectronKinetics] = {}
-    zone_tables: dict[str, TabulatedElectronKinetics] = {}
-    zone_provenance: dict[str, Any] = {}
-    for zone_id, raw_densities in initial_densities_m3_by_zone.items():
-        densities, fractions = _fixed_mixture(
-            str(zone_id), raw_densities, targets, momentum_targets
-        )
-        identity = _mixture_identity(densities, targets)
-        if identity not in tables:
-            if len(tables) >= cache_max_entries:
-                raise CaseValidationError(
-                    "distinct initial neutral mixtures exceed cache.max_entries "
-                    f"({cache_max_entries})"
-                )
-            try:
-                tables[identity] = _prepare_table(
-                    source=chemistry.source,
-                    model=model,
-                    field_grid_Td=field_grid,
-                    target_densities_m3=densities,
-                )
-            except (ArithmeticError, TypeError, ValueError) as exc:
-                raise CaseValidationError(
-                    f"failed to prepare approximate two-term kinetics for zone "
-                    f"{zone_id!r}: {exc}"
-                ) from exc
-        table_index = tuple(tables).index(identity)
-        zone_tables[str(zone_id)] = tables[identity]
-        zone_provenance[str(zone_id)] = {
-            "table_index": table_index,
-            "target_densities_m3": dict(densities),
-            "target_fractions": dict(fractions),
-            "rounded_mixture_key": {
-                species: round(float(fractions.get(species, 0.0)), fraction_decimals)
-                for species in (requested_key or targets)
-            },
-        }
+    tables, zone_tables, zone_provenance = _prepare_zone_tables(
+        chemistry,
+        initial_densities_m3_by_zone,
+        model=model,
+        field_grid_Td=field_grid,
+        targets=targets,
+        momentum_targets=momentum_targets,
+        key_species=requested_key or targets,
+        cache_max_entries=cache_max_entries,
+        fraction_decimals=fraction_decimals,
+    )
 
     provenance = {
         "kind": "experimental.approximate_two_term",
@@ -292,14 +413,14 @@ def prepare_approximate_two_term_kinetics(
         "cross_section_ids": tuple(collision.collision_id for collision in collisions),
         "mixture_key_species": requested_key or targets,
         "energy_grid_eV": {
-            "minimum": float(energy_min_eV),
-            "maximum": float(energy_max_eV),
-            "count": int(energy_points),
+            "minimum": energy_min_eV,
+            "maximum": energy_max_eV,
+            "count": energy_points,
         },
         "reduced_field_grid_Td": {
-            "minimum": float(field_grid[0]),
-            "maximum": float(field_grid[-1]),
-            "count": int(field_grid.size),
+            "minimum": _python_float(field_grid[0]),
+            "maximum": _python_float(field_grid[-1]),
+            "count": _python_int(field_grid.size),
         },
         "unique_table_count": len(tables),
         "zones": zone_provenance,

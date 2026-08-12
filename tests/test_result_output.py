@@ -250,6 +250,55 @@ def test_result_reader_rejects_legacy_or_extra_hdf5_layout(tmp_path: Path) -> No
         read_result_h5(path)
 
 
+@pytest.mark.parametrize(
+    ("attribute", "value", "message"),
+    [
+        ("format", np.bytes_("legacy_result"), "is not a plasma_global_result"),
+        ("format_version", 2, "Unsupported result HDF5 format version 2"),
+        ("state_layout", "state-major", "state layout must be time-major"),
+    ],
+)
+def test_result_reader_validates_every_hdf5_header_contract(
+    tmp_path: Path, attribute: str, value: object, message: str
+) -> None:
+    path = write_result_h5(tmp_path / f"invalid-{attribute}.h5", _result())
+    with h5py.File(path, "a") as h5:
+        h5.attrs[attribute] = value
+
+    with pytest.raises(ValueError, match=message):
+        read_result_h5(path)
+
+
+@pytest.mark.parametrize(
+    ("dataset_path", "content", "message"),
+    [
+        ("metadata/model_ids", "- invalid\n", "model_ids and provenance"),
+        ("metadata/provenance", "- invalid\n", "model_ids and provenance"),
+        ("solver/statistics_yaml", "- invalid\n", "must contain a mapping"),
+    ],
+)
+def test_result_reader_rejects_non_mapping_hdf5_documents(
+    tmp_path: Path, dataset_path: str, content: str, message: str
+) -> None:
+    path = write_result_h5(tmp_path / "invalid-document.h5", _result())
+    with h5py.File(path, "a") as h5:
+        del h5[dataset_path]
+        h5.create_dataset(dataset_path, data=content)
+
+    with pytest.raises(TypeError, match=message):
+        read_result_h5(path)
+
+
+def test_result_reader_rejects_non_dataset_observable(tmp_path: Path) -> None:
+    path = write_result_h5(tmp_path / "invalid-observable.h5", _result())
+    with h5py.File(path, "a") as h5:
+        del h5["observables/absorbed_power_W"]
+        h5.create_group("observables/absorbed_power_W")
+
+    with pytest.raises(TypeError, match="must be a dataset"):
+        read_result_h5(path)
+
+
 def test_summary_defaults_to_no_implicit_final_or_conservation_quantities() -> None:
     result = SimulationResult(
         time_s=np.array([0.0]),
@@ -289,3 +338,42 @@ def test_csv_is_created_only_by_explicit_export(tmp_path: Path) -> None:
         default_conservation_tolerance=1.0e-8,
     )
     assert report.passed
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("", "Result CSV is empty"),
+        ("elapsed_s,state:x\n0,1\n", "first column must be 'time_s'"),
+        ("time_s,state:x,state:x\n0,1,2\n", "column names must be unique"),
+        ("time_s,state:x\n0\n", "rows do not match its header"),
+        ("time_s,state:x\n0,not-a-number\n", "contains a non-numeric cell"),
+        (
+            "time_s,observable_scalar:pressure\n0,1\n1,2\n",
+            "Invalid scalar observable column 'pressure'",
+        ),
+        ("time_s,unknown:value\n0,1\n", "Unsupported result CSV column"),
+    ],
+)
+def test_result_csv_reader_rejects_malformed_public_artifacts(
+    tmp_path: Path, content: str, message: str
+) -> None:
+    path = tmp_path / "malformed.csv"
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        read_result_csv(path)
+
+
+def test_result_csv_reader_preserves_empty_state_and_default_status(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "empty-result.csv"
+    path.write_text("time_s,state:density\n", encoding="utf-8")
+
+    result = read_result_csv(path)
+
+    assert result.time_s.shape == (0,)
+    assert result.state.shape == (0, 1)
+    assert result.state_labels == ("density",)
+    assert result.status.code == "imported_csv"

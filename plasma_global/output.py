@@ -188,82 +188,95 @@ def write_result_h5(path: str | Path, result: SimulationResult) -> Path:
     return target
 
 
+def _validate_h5_header(h5: h5py.File, source: Path) -> None:
+    file_format = h5.attrs.get("format", "")
+    if isinstance(file_format, bytes):
+        file_format = file_format.decode("utf-8")
+    if str(file_format) != RESULT_FORMAT:
+        raise ValueError(f"{source} is not a {RESULT_FORMAT} HDF5 file")
+    version = int(h5.attrs.get("format_version", -1))
+    if version != RESULT_FORMAT_VERSION:
+        raise ValueError(f"Unsupported result HDF5 format version {version}")
+    if str(h5.attrs.get("state_layout", "")) != "time-major":
+        raise ValueError("Result HDF5 state layout must be time-major")
+    _require_exact_children(
+        h5,
+        {"time_s", "state", "observables", "metadata", "solver"},
+        "/",
+    )
+
+
+def _read_h5_state(
+    h5: h5py.File,
+) -> tuple[np.ndarray, np.ndarray, tuple[str, ...]]:
+    time_s = np.asarray(_required_dataset(h5, "time_s", "/time_s")[...], dtype=float)
+    state_group = _required_group(h5, "state")
+    _require_exact_children(state_group, {"values", "labels"}, "/state")
+    state = np.asarray(
+        _required_dataset(state_group, "values", "/state/values")[...], dtype=float
+    )
+    labels = _required_dataset(state_group, "labels", "/state/labels").asstr()[...]
+    return time_s, state, tuple(str(value) for value in labels.tolist())
+
+
+def _read_h5_observables(h5: h5py.File) -> dict[str, np.ndarray]:
+    group = _required_group(h5, "observables")
+    observables: dict[str, np.ndarray] = {}
+    for name, dataset in group.items():
+        if not isinstance(dataset, h5py.Dataset):
+            raise TypeError(f"Result HDF5 /observables/{name} must be a dataset")
+        observables[str(name)] = np.asarray(dataset[()], dtype=float)
+    return observables
+
+
+def _read_h5_metadata(h5: h5py.File) -> dict[str, Any]:
+    group = _required_group(h5, "metadata")
+    _require_exact_children(group, set(_METADATA_DATASETS), "/metadata")
+    for name in _METADATA_DATASETS:
+        _required_dataset(group, name, f"/metadata/{name}")
+    model_ids = _read_yaml(group, "model_ids", "/metadata/model_ids") or {}
+    provenance = _read_yaml(group, "provenance", "/metadata/provenance") or {}
+    if not isinstance(model_ids, dict) or not isinstance(provenance, dict):
+        raise TypeError("result metadata model_ids and provenance must be mappings")
+    return {
+        "effective_case_yaml": _read_text(
+            group, "effective_case_yaml", "/metadata/effective_case_yaml"
+        ),
+        "model_ids": model_ids,
+        "provenance": provenance,
+    }
+
+
+def _read_h5_solver(
+    h5: h5py.File,
+) -> tuple[SimulationStatus, dict[str, Any]]:
+    group = _required_group(h5, "solver")
+    _require_exact_children(group, set(_SOLVER_DATASETS), "/solver")
+    datasets = {
+        name: _required_dataset(group, name, f"/solver/{name}")
+        for name in _SOLVER_DATASETS
+    }
+    status = SimulationStatus(
+        success=bool(datasets["success"][()]),
+        code=_read_text(group, "status_code", "/solver/status_code"),
+        message=_read_text(group, "status_message", "/solver/status_message"),
+    )
+    solver_stats = _read_yaml(group, "statistics_yaml", "/solver/statistics_yaml")
+    if not isinstance(solver_stats, dict):
+        raise TypeError("/solver/statistics_yaml must contain a mapping")
+    return status, solver_stats
+
+
 def read_result_h5(path: str | Path) -> SimulationResult:
     """Read and validate a canonical result artifact."""
 
     source = Path(path)
     with h5py.File(source, "r") as h5:
-        file_format = h5.attrs.get("format", "")
-        if isinstance(file_format, bytes):
-            file_format = file_format.decode("utf-8")
-        if str(file_format) != RESULT_FORMAT:
-            raise ValueError(f"{source} is not a {RESULT_FORMAT} HDF5 file")
-        version = int(h5.attrs.get("format_version", -1))
-        if version != RESULT_FORMAT_VERSION:
-            raise ValueError(f"Unsupported result HDF5 format version {version}")
-        if str(h5.attrs.get("state_layout", "")) != "time-major":
-            raise ValueError("Result HDF5 state layout must be time-major")
-        _require_exact_children(
-            h5,
-            {"time_s", "state", "observables", "metadata", "solver"},
-            "/",
-        )
-
-        time_s = np.asarray(
-            _required_dataset(h5, "time_s", "/time_s")[...], dtype=float
-        )
-        state_group = _required_group(h5, "state")
-        _require_exact_children(state_group, {"values", "labels"}, "/state")
-        state = np.asarray(
-            _required_dataset(state_group, "values", "/state/values")[...],
-            dtype=float,
-        )
-        labels = _required_dataset(state_group, "labels", "/state/labels").asstr()[...]
-        state_labels = tuple(str(value) for value in labels.tolist())
-
-        observables_group = _required_group(h5, "observables")
-        observables: dict[str, np.ndarray] = {}
-        for name, dataset in observables_group.items():
-            if not isinstance(dataset, h5py.Dataset):
-                raise TypeError(f"Result HDF5 /observables/{name} must be a dataset")
-            observables[str(name)] = np.asarray(dataset[()], dtype=float)
-
-        metadata_group = _required_group(h5, "metadata")
-        _require_exact_children(metadata_group, set(_METADATA_DATASETS), "/metadata")
-        for name in _METADATA_DATASETS:
-            _required_dataset(metadata_group, name, f"/metadata/{name}")
-        model_ids = _read_yaml(metadata_group, "model_ids", "/metadata/model_ids") or {}
-        provenance = (
-            _read_yaml(metadata_group, "provenance", "/metadata/provenance") or {}
-        )
-        if not isinstance(model_ids, dict) or not isinstance(provenance, dict):
-            raise TypeError("result metadata model_ids and provenance must be mappings")
-        metadata = {
-            "effective_case_yaml": _read_text(
-                metadata_group,
-                "effective_case_yaml",
-                "/metadata/effective_case_yaml",
-            ),
-            "model_ids": model_ids,
-            "provenance": provenance,
-        }
-
-        solver_group = _required_group(h5, "solver")
-        _require_exact_children(solver_group, set(_SOLVER_DATASETS), "/solver")
-        for name in _SOLVER_DATASETS:
-            _required_dataset(solver_group, name, f"/solver/{name}")
-        status = SimulationStatus(
-            success=bool(solver_group["success"][()]),
-            code=_read_text(solver_group, "status_code", "/solver/status_code"),
-            message=_read_text(
-                solver_group, "status_message", "/solver/status_message"
-            ),
-        )
-        solver_stats = _read_yaml(
-            solver_group, "statistics_yaml", "/solver/statistics_yaml"
-        )
-        if not isinstance(solver_stats, dict):
-            raise TypeError("/solver/statistics_yaml must contain a mapping")
+        _validate_h5_header(h5, source)
+        time_s, state, state_labels = _read_h5_state(h5)
+        observables = _read_h5_observables(h5)
+        metadata = _read_h5_metadata(h5)
+        status, solver_stats = _read_h5_solver(h5)
 
     return SimulationResult(
         time_s=time_s,
@@ -443,23 +456,19 @@ def write_result_csv(path: str | Path, result: SimulationResult) -> Path:
     return target
 
 
-def read_result_csv(
-    path: str | Path,
-    *,
-    status: SimulationStatus | None = None,
-    solver_stats: Mapping[str, Any] | None = None,
-    metadata: Mapping[str, Any] | None = None,
-) -> SimulationResult:
-    """Read a CSV produced by :func:`write_result_csv`."""
-
-    source = Path(path)
+def _read_csv_rows(source: Path) -> tuple[list[str], list[list[str]]]:
     with source.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.reader(stream)
         try:
             header = next(reader)
         except StopIteration as exc:
             raise ValueError(f"Result CSV is empty: {source}") from exc
-        rows = list(reader)
+        return header, list(reader)
+
+
+def _numeric_csv_values(
+    source: Path, header: list[str], rows: list[list[str]]
+) -> np.ndarray:
     if not header or header[0] != _CSV_TIME:
         raise ValueError(f"Result CSV first column must be {_CSV_TIME!r}")
     if len(set(header)) != len(header):
@@ -473,8 +482,13 @@ def read_result_csv(
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Result CSV contains a non-numeric cell: {source}") from exc
     if not rows:
-        values = np.empty((0, len(header)), dtype=float)
+        return np.empty((0, len(header)), dtype=float)
+    return values
 
+
+def _decode_csv_columns(
+    header: list[str], values: np.ndarray
+) -> tuple[np.ndarray, tuple[str, ...], dict[str, np.ndarray]]:
     time_s = values[:, 0]
     labels: list[str] = []
     state_columns: list[np.ndarray] = []
@@ -484,24 +498,42 @@ def read_result_csv(
         if column.startswith(_CSV_STATE):
             labels.append(column.removeprefix(_CSV_STATE))
             state_columns.append(data)
-        elif column.startswith(_CSV_SCALAR_OBSERVABLE):
+            continue
+        if column.startswith(_CSV_SCALAR_OBSERVABLE):
             name = column.removeprefix(_CSV_SCALAR_OBSERVABLE)
             if data.size == 0 or not np.allclose(data, data[0], equal_nan=True):
                 raise ValueError(f"Invalid scalar observable column {name!r}")
             observables[name] = np.asarray(data[0], dtype=float)
-        elif column.startswith(_CSV_OBSERVABLE):
+            continue
+        if column.startswith(_CSV_OBSERVABLE):
             observables[column.removeprefix(_CSV_OBSERVABLE)] = data
-        else:
-            raise ValueError(f"Unsupported result CSV column {column!r}")
+            continue
+        raise ValueError(f"Unsupported result CSV column {column!r}")
     state = (
         np.column_stack(state_columns)
         if state_columns
         else np.empty((time_s.size, 0), dtype=float)
     )
+    return state, tuple(labels), observables
+
+
+def read_result_csv(
+    path: str | Path,
+    *,
+    status: SimulationStatus | None = None,
+    solver_stats: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> SimulationResult:
+    """Read a CSV produced by :func:`write_result_csv`."""
+
+    source = Path(path)
+    header, rows = _read_csv_rows(source)
+    values = _numeric_csv_values(source, header, rows)
+    state, state_labels, observables = _decode_csv_columns(header, values)
     return SimulationResult(
-        time_s=time_s,
+        time_s=values[:, 0],
         state=state,
-        state_labels=tuple(labels),
+        state_labels=state_labels,
         observables=observables,
         status=status
         or SimulationStatus(

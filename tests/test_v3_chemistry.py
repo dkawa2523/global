@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
 
 import plasma_global.chemistry.compile as compile_module
 from plasma_global.chemistry.compile import compile_chemistry
-from plasma_global.chemistry.data import CrossSectionData, load_chemistry
+from plasma_global.chemistry.data import (
+    ChemistryData,
+    CrossSectionData,
+    RateModelData,
+    ReactionData,
+    SpeciesData,
+    load_chemistry,
+)
 from plasma_global.errors import ChemistryError, ModelDomainError
 
 
@@ -34,7 +41,11 @@ def _mechanism(
         encoding="utf-8",
     )
     (tmp_path / "rates.yaml").write_text(
-        "rate_models:\n  electron_impact:\n    kind: electron_impact\n    cross_section: ionization\n    branching_yield: 1.0\n",
+        "rate_models:\n"
+        "  electron_impact:\n"
+        "    kind: electron_impact\n"
+        "    cross_section: ionization\n"
+        "    branching_yield: 1.0\n",
         encoding="utf-8",
     )
     curve = (
@@ -80,8 +91,65 @@ def test_compiles_balanced_chemistry_to_readonly_arrays(tmp_path: Path) -> None:
         [True, True],
         [True, True],
     ]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="read-only"):
         chemistry.stoichiometry[0, 0] = 0.0
+
+
+def _species_validation_chemistry(
+    *, electron: SpeciesData, cross_section_target: str
+) -> ChemistryData:
+    cross_section = CrossSectionData(
+        id="momentum",
+        kind="momentum_transfer",
+        target=cross_section_target,
+        threshold_eV=0.0,
+        energy_loss_eV=0.0,
+        energy_eV=np.array([0.0, 1.0]),
+        sigma_m2=np.array([1.0e-20, 1.0e-20]),
+    )
+    return ChemistryData(
+        source=Path("species-validation.yaml"),
+        species=(
+            electron,
+            SpeciesData("Ar", "gas", 0, 39.948, {"Ar": 1.0}),
+            SpeciesData("site", "surface", 0, 0.0, {"site": 1.0}),
+        ),
+        gas_reactions=(),
+        boundary_reactions=(),
+        surface_reactions=(),
+        rate_models={},
+        cross_sections={cross_section.id: cross_section},
+    )
+
+
+def test_species_validation_reports_invalid_electron_before_cross_section() -> None:
+    chemistry = _species_validation_chemistry(
+        electron=SpeciesData("e", "surface", -1, 0.00054858, {}),
+        cross_section_target="missing",
+    )
+
+    with pytest.raises(
+        ChemistryError,
+        match="exactly one gas electron species 'e' with charge -1",
+    ):
+        compile_chemistry(chemistry)
+
+
+@pytest.mark.parametrize("target", ["missing", "e", "site"])
+def test_species_validation_rejects_nonheavy_cross_section_target(target: str) -> None:
+    chemistry = _species_validation_chemistry(
+        electron=SpeciesData("e", "gas", -1, 0.00054858, {}),
+        cross_section_target=target,
+    )
+
+    with pytest.raises(
+        ChemistryError,
+        match=(
+            rf"cross section momentum target {target!r} must be a declared heavy "
+            "gas species"
+        ),
+    ):
+        compile_chemistry(chemistry)
 
 
 def test_maxwellian_cross_section_rate_is_positive(tmp_path: Path) -> None:
@@ -206,3 +274,149 @@ def test_shared_tabulated_rate_model_is_compiled_once(
 
     assert calls == 1
     assert chemistry.rate_evaluators[0] is chemistry.rate_evaluators[1]
+
+
+def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
+    electron = SpeciesData("e", "gas", -1, 0.00054858, {})
+    oxygen = SpeciesData("O", "gas", 0, 16.0, {"O": 1.0})
+    oxygen_ion = SpeciesData("O_plus", "gas", 1, 16.0, {"O": 1.0})
+    oxygen_molecule = SpeciesData("O2", "gas", 0, 32.0, {"O": 2.0})
+    oxygen_anion = SpeciesData("O_minus", "gas", -1, 16.0, {"O": 1.0})
+    site = SpeciesData("site", "surface", 0, 0.0, {"site": 1.0})
+    adsorbed_oxygen = SpeciesData(
+        "O_site",
+        "surface",
+        0,
+        16.0,
+        {"O": 1.0, "site": 1.0},
+    )
+    shared_rate = RateModelData("shared", "constant", {"value": 2.0e-15})
+    surface_rate = RateModelData("stick", "surface_sticking", {})
+    gas_reactions = (
+        ReactionData(
+            "dissociate",
+            {"O2": 1.0},
+            {"O": 2.0},
+            "shared",
+            3.5,
+            gas_heating_eV=0.25,
+            zones=("bulk",),
+        ),
+        ReactionData(
+            "attach",
+            {"e": 1.0, "O": 1.0},
+            {"O_minus": 1.0},
+            "shared",
+            None,
+        ),
+        ReactionData(
+            "detach",
+            {"O_minus": 1.0},
+            {"e": 1.0, "O": 1.0},
+            "shared",
+            0.5,
+        ),
+    )
+    boundary_reactions = (
+        ReactionData(
+            "neutralize",
+            {"O_plus": 1.0},
+            {"O": 1.0},
+            None,
+            None,
+            zones=("plasma",),
+            surfaces=("wall",),
+        ),
+    )
+    surface_reactions = (
+        ReactionData(
+            "adsorb",
+            {"O": 1.0, "site": 1.0},
+            {"O_site": 1.0},
+            "stick",
+            None,
+            surfaces=("wall",),
+        ),
+    )
+    data = ChemistryData(
+        source=tmp_path / "chemistry.yaml",
+        species=(
+            electron,
+            oxygen,
+            oxygen_ion,
+            oxygen_molecule,
+            oxygen_anion,
+            site,
+            adsorbed_oxygen,
+        ),
+        gas_reactions=gas_reactions,
+        boundary_reactions=boundary_reactions,
+        surface_reactions=surface_reactions,
+        rate_models=MappingProxyType(
+            {shared_rate.id: shared_rate, surface_rate.id: surface_rate}
+        ),
+        cross_sections=MappingProxyType({}),
+        provenance=MappingProxyType({"source": "contract-test"}),
+    )
+
+    chemistry = compile_chemistry(data)
+
+    assert chemistry.species_ids == ("O", "O_plus", "O2", "O_minus")
+    assert chemistry.reaction_ids == ("dissociate", "attach", "detach")
+    assert chemistry.reaction_zones == (("bulk",), (), ())
+    np.testing.assert_array_equal(chemistry.charges, [0.0, 1.0, 0.0, -1.0])
+    np.testing.assert_array_equal(
+        chemistry.masses_kg,
+        [
+            oxygen.mass_kg,
+            oxygen_ion.mass_kg,
+            oxygen_molecule.mass_kg,
+            oxygen_anion.mass_kg,
+        ],
+    )
+    np.testing.assert_array_equal(
+        chemistry.stoichiometry,
+        [[2.0, 0.0, -1.0, 0.0], [-1.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, -1.0]],
+    )
+    np.testing.assert_array_equal(
+        chemistry.reactant_orders,
+        [[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+    )
+    np.testing.assert_array_equal(chemistry.electron_orders, [0.0, 1.0, 0.0])
+    np.testing.assert_array_equal(chemistry.energy_loss_eV, [3.5, 0.0, 0.5])
+    np.testing.assert_array_equal(chemistry.gas_heating_eV, [0.25, 0.0, 0.0])
+    assert chemistry.element_names == ("O",)
+    np.testing.assert_array_equal(chemistry.element_matrix, [[1.0, 1.0, 2.0, 1.0]])
+    np.testing.assert_array_equal(
+        chemistry.jacobian_species_pattern,
+        [
+            [True, True, True, True],
+            [False, False, False, False],
+            [False, False, True, False],
+            [True, True, False, True],
+        ],
+    )
+    assert chemistry.boundary_reactions[0].incident_species == "O_plus"
+    assert chemistry.boundary_reactions[0].products == {"O": 1.0}
+    assert chemistry.boundary_reactions[0].zones == ("plasma",)
+    assert chemistry.boundary_reactions[0].surfaces == ("wall",)
+    assert chemistry.boundary_reactions[0].probability == 1.0
+    assert chemistry.boundary_reactions[0].wall_charge_per_event == 1.0
+    assert chemistry.surface_reactions == surface_reactions
+    assert chemistry.provenance == {"source": "contract-test"}
+    for values in (
+        chemistry.charges,
+        chemistry.masses_kg,
+        chemistry.stoichiometry,
+        chemistry.reactant_orders,
+        chemistry.electron_orders,
+        chemistry.energy_loss_eV,
+        chemistry.gas_heating_eV,
+        chemistry.element_matrix,
+        chemistry.jacobian_species_pattern,
+    ):
+        if values is chemistry.jacobian_species_pattern:
+            assert values.dtype == bool
+        else:
+            assert values.dtype == float
+        assert not values.flags.writeable

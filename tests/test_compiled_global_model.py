@@ -123,6 +123,46 @@ def test_local_field_is_algebraic_and_rejects_out_of_table_domain() -> None:
         )
 
 
+def test_initial_state_packs_zone_blocks_in_layout_order() -> None:
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("upstream", 1.0), Zone("downstream", 2.0)),
+        segments=(RecipeSegment("step", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={
+                "upstream": {"Ar": 1.0e20, "Ar_plus": 2.0e15},
+                "downstream": {"Ar": 3.0e20, "Ar_plus": 4.0e15},
+            },
+            mean_energy_eV_by_zone={"upstream": 2.5, "downstream": 4.0},
+        )
+    )
+
+    assert model.layout.labels == (
+        "n[upstream,Ar]",
+        "n[upstream,Ar_plus]",
+        "electron_energy[upstream]",
+        "n[downstream,Ar]",
+        "n[downstream,Ar_plus]",
+        "electron_energy[downstream]",
+    )
+    assert np.array_equal(
+        state,
+        np.array(
+            [
+                1.0e20,
+                2.0e15,
+                2.0e15 * ELEMENTARY_CHARGE_C * 2.5,
+                3.0e20,
+                4.0e15,
+                4.0e15 * ELEMENTARY_CHARGE_C * 4.0,
+            ]
+        ),
+    )
+
+
 def test_mass_action_bdf_matches_first_order_analytic_solution() -> None:
     rate_s_inv = 2.0
     chemistry = ChemistryFixture(

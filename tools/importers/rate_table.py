@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -101,25 +102,24 @@ def _first_column(columns: list[str], choices: tuple[str, ...]) -> str | None:
     return None
 
 
-def build_rate_table_h5(table_dir: Path, output_path: Path) -> Path:
-    """Convert strict CSV inputs to the HDF5 read by v3 electron kinetics."""
-
-    table_dir = Path(table_dir)
-    output_path = Path(output_path)
-    rates_path = table_dir / "rates.csv"
-    transport_path = table_dir / "transport.csv"
-    metadata_path = table_dir / "metadata.yaml"
-    rate_columns, rates = _read_csv(rates_path)
-    transport_columns, transport = _read_csv(transport_path)
-    grid_col = _first_column(rate_columns, GRID_COLUMNS)
-    if grid_col is None:
+def _validated_table_grid(
+    rates_path: Path,
+    transport_path: Path,
+    rate_columns: list[str],
+    transport_columns: list[str],
+    rates: dict[str, np.ndarray],
+    transport: dict[str, np.ndarray],
+) -> tuple[str, np.ndarray, np.ndarray]:
+    grid_column = _first_column(rate_columns, GRID_COLUMNS)
+    if grid_column is None:
         raise ValueError(f"{rates_path} needs one grid column from {GRID_COLUMNS}")
-    if grid_col not in transport:
+    if grid_column not in transport:
         raise ValueError(
-            f"{transport_path} must include the same grid column {grid_col!r}"
+            f"{transport_path} must include the same grid column {grid_column!r}"
         )
+
     allowed_transport = {
-        grid_col,
+        grid_column,
         "mean_energy_eV",
         "effective_field_Td",
         "EoverN_Td",
@@ -131,30 +131,39 @@ def build_rate_table_h5(table_dir: Path, output_path: Path) -> Path:
             f"{transport_path} has unsupported columns: {', '.join(unknown_transport)}"
         )
 
-    rate_order = np.argsort(rates[grid_col])
-    transport_order = np.argsort(transport[grid_col])
-    grid = rates[grid_col][rate_order]
-    transport_grid = transport[grid_col][transport_order]
+    rate_order = np.argsort(rates[grid_column])
+    transport_order = np.argsort(transport[grid_column])
+    grid = rates[grid_column][rate_order]
+    transport_grid = transport[grid_column][transport_order]
     if grid.shape != transport_grid.shape or not np.array_equal(grid, transport_grid):
         raise ValueError("rates.csv and transport.csv must contain the same grid")
     if grid.size < 2 or np.any(grid < 0.0) or np.any(np.diff(grid) <= 0.0):
         raise ValueError("rate-table grid must be nonnegative, unique, and increasing")
+    return grid_column, rate_order, transport_order
 
-    metadata: dict[str, Any] = {}
-    if metadata_path.exists():
-        loaded = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(loaded, dict):
-            raise ValueError(f"{metadata_path} must contain a mapping")
-        metadata = loaded
 
+def _read_metadata(path: Path) -> dict[Any, Any]:
+    if not path.exists():
+        return {}
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path} must contain a mapping")
+    return loaded
+
+
+def _ordered_transport_arrays(
+    transport: dict[str, np.ndarray],
+    grid_column: str,
+    order: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     mean_energy = transport.get("mean_energy_eV")
     effective_field = transport.get("effective_field_Td")
     if effective_field is None:
         effective_field = transport.get("EoverN_Td")
-    if grid_col == "mean_energy_eV":
-        mean_energy = transport[grid_col]
-    if grid_col in {"EoverN_Td", "effective_field_Td"}:
-        effective_field = transport[grid_col]
+    if grid_column == "mean_energy_eV":
+        mean_energy = transport[grid_column]
+    if grid_column in {"EoverN_Td", "effective_field_Td"}:
+        effective_field = transport[grid_column]
     if mean_energy is None:
         raise ValueError(
             "transport.csv needs mean_energy_eV unless rates.csv is gridded by "
@@ -170,24 +179,44 @@ def build_rate_table_h5(table_dir: Path, output_path: Path) -> Path:
     if mobility is None:
         raise ValueError("transport.csv needs mobility_m2_V_s")
 
-    mean_energy = np.asarray(mean_energy, dtype=float)[transport_order]
-    effective_field = np.asarray(effective_field, dtype=float)[transport_order]
-    mobility = np.asarray(mobility, dtype=float)[transport_order]
+    mean_energy = np.asarray(mean_energy, dtype=float)[order]
+    effective_field = np.asarray(effective_field, dtype=float)[order]
+    mobility = np.asarray(mobility, dtype=float)[order]
     if np.any(mean_energy < 0.0) or np.any(effective_field < 0.0):
         raise ValueError("mean energy and effective field must be nonnegative")
     if np.any(mobility <= 0.0):
         raise ValueError("mobility must be positive")
-    rate_names = [column for column in rate_columns if column != grid_col]
-    if not rate_names:
-        raise ValueError("rates.csv must contain at least one rate coefficient")
-    if any(np.any(rates[name] < 0.0) for name in rate_names):
-        raise ValueError("rate coefficients must be nonnegative")
+    return mean_energy, effective_field, mobility
 
+
+def _rate_names(
+    columns: list[str], grid_column: str, rates: dict[str, np.ndarray]
+) -> list[str]:
+    names = [column for column in columns if column != grid_column]
+    if not names:
+        raise ValueError("rates.csv must contain at least one rate coefficient")
+    if any(np.any(rates[name] < 0.0) for name in names):
+        raise ValueError("rate coefficients must be nonnegative")
+    return names
+
+
+def _write_rate_table(
+    output_path: Path,
+    *,
+    grid_column: str,
+    mean_energy: np.ndarray,
+    effective_field: np.ndarray,
+    mobility: np.ndarray,
+    rate_names: list[str],
+    rates: dict[str, np.ndarray],
+    rate_order: np.ndarray,
+    metadata: Mapping[Any, Any],
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(output_path, "w") as h5:
         h5.attrs["format"] = "plasma_global_electron_kinetics"
         h5.attrs["format_version"] = 1
-        h5.attrs["grid_column"] = grid_col
+        h5.attrs["grid_column"] = grid_column
         h5.create_dataset("mean_energy_eV", data=mean_energy)
         h5.create_dataset("effective_field_Td", data=effective_field)
         h5.create_dataset("mobility_m2_V_s", data=mobility)
@@ -197,6 +226,42 @@ def build_rate_table_h5(table_dir: Path, output_path: Path) -> Path:
         for key, value in metadata.items():
             if isinstance(value, (str, int, float, bool)):
                 h5.attrs[str(key)] = value
+
+
+def build_rate_table_h5(table_dir: Path, output_path: Path) -> Path:
+    """Convert strict CSV inputs to the HDF5 read by v3 electron kinetics."""
+
+    table_dir = Path(table_dir)
+    output_path = Path(output_path)
+    rates_path = table_dir / "rates.csv"
+    transport_path = table_dir / "transport.csv"
+    metadata_path = table_dir / "metadata.yaml"
+    rate_columns, rates = _read_csv(rates_path)
+    transport_columns, transport = _read_csv(transport_path)
+    grid_column, rate_order, transport_order = _validated_table_grid(
+        rates_path,
+        transport_path,
+        rate_columns,
+        transport_columns,
+        rates,
+        transport,
+    )
+    metadata = _read_metadata(metadata_path)
+    mean_energy, effective_field, mobility = _ordered_transport_arrays(
+        transport, grid_column, transport_order
+    )
+    rate_names = _rate_names(rate_columns, grid_column, rates)
+    _write_rate_table(
+        output_path,
+        grid_column=grid_column,
+        mean_energy=mean_energy,
+        effective_field=effective_field,
+        mobility=mobility,
+        rate_names=rate_names,
+        rates=rates,
+        rate_order=rate_order,
+        metadata=metadata,
+    )
     return output_path
 
 
@@ -209,7 +274,10 @@ def main() -> int:
     parser.add_argument(
         "table_dir",
         type=Path,
-        help="Directory containing rates.csv, transport.csv, and optional metadata.yaml.",
+        help=(
+            "Directory containing rates.csv, transport.csv, and optional "
+            + "metadata.yaml."
+        ),
     )
     parser.add_argument("--output", type=Path, required=True, help="Output HDF5 path.")
     args = parser.parse_args()

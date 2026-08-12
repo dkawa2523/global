@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -123,6 +124,29 @@ def test_save_at_is_global_and_includes_every_forcing_boundary() -> None:
 
     assert result.metadata["sampling_mode"] == "save_at"
     assert np.allclose(result.time_s, [0.1, 0.2, 0.55, 0.9, 1.05])
+
+
+def test_result_contract_records_segment_statistics_and_scaling() -> None:
+    model = compiled_model(
+        RecipeSegment("first", 0.0, 0.4),
+        RecipeSegment("second", 0.4, 1.0),
+        chemistry=first_order_chemistry(rate_s_inv=0.0),
+    )
+
+    result = solve_compiled_model(
+        model,
+        initial_state(),
+        SolverSettings(save_at_s=(0.0, 0.25, 0.75, 1.0)),
+    )
+
+    assert np.array_equal(result.time_s, [0.0, 0.25, 0.4, 0.75, 1.0])
+    assert result.solver_stats.keys() == {"nfev", "njev", "nlu", "segments_completed"}
+    assert result.solver_stats["segments_completed"] == 2
+    assert result.solver_stats["nfev"] > 0
+    assert result.metadata["sampling_mode"] == "save_at"
+    assert len(result.metadata["state_scale"]) == model.layout.size
+    assert len(result.metadata["domain_atol"]) == model.layout.size
+    assert result.metadata["provenance"]["accepted_state_zeroed_negative_count"] == 0
 
 
 def test_sampling_modes_are_exclusive_and_save_times_are_bounded() -> None:
@@ -284,3 +308,100 @@ def test_domain_failure_reports_segment_and_time() -> None:
 
     with pytest.raises(IntegrationError, match=r"segment 'bad-domain' at t=.* s"):
         solve_compiled_model(model, bad_state)
+
+
+def test_solver_setup_failure_reports_segment_and_start_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = compiled_model(RecipeSegment("bad-setup", 0.25, 1.0))
+
+    def fail_setup(**kwargs: object) -> object:
+        del kwargs
+        raise ValueError("invalid solver option")
+
+    monkeypatch.setattr(solver_module, "solve_ivp", fail_setup)
+
+    with pytest.raises(
+        IntegrationError,
+        match=(
+            r"Integration setup failed in segment 'bad-setup' "
+            r"at t=0\.25 s: invalid solver option"
+        ),
+    ):
+        solve_compiled_model(model, initial_state())
+
+
+def test_initial_vector_rejects_wrong_shape_and_nonfinite_values() -> None:
+    model = compiled_model(RecipeSegment("initial", 0.0, 1.0))
+
+    with pytest.raises(ValueError, match=r"Initial state has shape .* expected"):
+        solve_compiled_model(model, np.zeros(model.layout.size + 1))
+
+    nonfinite_state = model.initial_state(initial_state())
+    nonfinite_state[0] = np.nan
+    with pytest.raises(ModelConfigurationError, match="only finite values"):
+        solve_compiled_model(model, nonfinite_state)
+
+
+@pytest.mark.parametrize(
+    ("solver_times", "failure_time"),
+    [
+        (np.array([0.25, 0.5]), "0.5"),
+        (np.empty(0, dtype=float), "0.25"),
+    ],
+)
+def test_unsuccessful_solver_response_reports_last_available_time(
+    monkeypatch: pytest.MonkeyPatch,
+    solver_times: np.ndarray,
+    failure_time: str,
+) -> None:
+    model = compiled_model(RecipeSegment("failed", 0.25, 1.0))
+    failed_solution = SimpleNamespace(
+        success=False,
+        t=solver_times,
+        message="step size failed",
+    )
+
+    def return_failed_solution(**kwargs: object) -> object:
+        del kwargs
+        return failed_solution
+
+    monkeypatch.setattr(solver_module, "solve_ivp", return_failed_solution)
+
+    with pytest.raises(
+        IntegrationError,
+        match=(
+            rf"Integration failed in segment 'failed' at t={failure_time} s: "
+            "step size failed"
+        ),
+    ):
+        solve_compiled_model(model, initial_state())
+
+
+def test_solver_success_without_state_is_reported_as_integration_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = compiled_model(RecipeSegment("no-state", 0.25, 1.0))
+    empty_solution = SimpleNamespace(
+        success=True,
+        t=np.empty(0, dtype=float),
+        y=np.empty((model.layout.size, 0), dtype=float),
+        nfev=0,
+        njev=0,
+        nlu=0,
+    )
+
+    def return_empty_solution(**kwargs: object) -> object:
+        del kwargs
+        return empty_solution
+
+    monkeypatch.setattr(solver_module, "solve_ivp", return_empty_solution)
+
+    with pytest.raises(
+        IntegrationError,
+        match=(
+            r"Integration failed in segment 'no-state' "
+            r"at t=0\.25 s: solver returned no state"
+        ),
+    ):
+        solve_compiled_model(model, initial_state())

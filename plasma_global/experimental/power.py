@@ -60,10 +60,12 @@ def _command_value(
     default_voltage_V: float | None,
 ) -> tuple[Literal["power", "voltage"], float]:
     if command is not None and command.kind == "power":
-        assert command.power_W is not None
+        if command.power_W is None:
+            raise TypeError("compiled power command has no power value")
         return "power", command.power_W
     if command is not None and command.kind == "voltage":
-        assert command.voltage_V is not None
+        if command.voltage_V is None:
+            raise TypeError("compiled voltage command has no voltage value")
         return "voltage", abs(command.voltage_V)
     if command is not None:
         raise TypeError("power ports accept compiled power or voltage commands")

@@ -41,6 +41,84 @@ class BoundaryReaction:
         object.__setattr__(self, "products", MappingProxyType(products))
 
 
+def _validate_prescribed_transport(
+    *,
+    area_m2: float,
+    prescribed_frequency_s_inv: float | None,
+) -> None:
+    if (
+        prescribed_frequency_s_inv is None
+        or not math.isfinite(prescribed_frequency_s_inv)
+        or prescribed_frequency_s_inv < 0.0
+    ):
+        raise ModelConfigurationError(
+            "prescribed_frequency wall transport requires a finite nonnegative "
+            "frequency"
+        )
+    if area_m2 <= 0.0:
+        raise ModelConfigurationError(
+            "prescribed_frequency wall transport requires positive area_m2"
+        )
+
+
+def _validate_ambipolar_transport(
+    *,
+    area_m2: float,
+    diffusion_coefficient_m2_s: float | None,
+    diffusion_length_m: float | None,
+) -> None:
+    for name, value in (
+        ("diffusion_coefficient_m2_s", diffusion_coefficient_m2_s),
+        ("diffusion_length_m", diffusion_length_m),
+    ):
+        if value is None or not math.isfinite(value) or value <= 0.0:
+            raise ModelConfigurationError(
+                f"ambipolar wall transport requires positive {name}"
+            )
+    if area_m2 <= 0.0:
+        raise ModelConfigurationError(
+            "ambipolar wall transport requires positive area_m2"
+        )
+
+
+def _validate_wall_transport(
+    *,
+    kind: str,
+    area_m2: float,
+    prescribed_frequency_s_inv: float | None,
+    diffusion_coefficient_m2_s: float | None,
+    diffusion_length_m: float | None,
+) -> None:
+    if kind not in {"bohm", "prescribed_frequency", "ambipolar", "off"}:
+        raise ModelConfigurationError(f"Unknown wall transport kind {kind!r}")
+    if kind == "prescribed_frequency":
+        _validate_prescribed_transport(
+            area_m2=area_m2,
+            prescribed_frequency_s_inv=prescribed_frequency_s_inv,
+        )
+    if kind == "ambipolar":
+        _validate_ambipolar_transport(
+            area_m2=area_m2,
+            diffusion_coefficient_m2_s=diffusion_coefficient_m2_s,
+            diffusion_length_m=diffusion_length_m,
+        )
+
+
+def _validate_branch_probabilities(reactions: tuple[BoundaryReaction, ...]) -> None:
+    totals: dict[str, float] = {}
+    for reaction in reactions:
+        totals[reaction.incident_species] = (
+            totals.get(reaction.incident_species, 0.0) + reaction.probability
+        )
+    overfull = {
+        species: total for species, total in totals.items() if total > 1.0 + 1.0e-12
+    }
+    if overfull:
+        raise ModelConfigurationError(
+            f"Boundary branch probabilities exceed one: {overfull}"
+        )
+
+
 @dataclass(frozen=True)
 class WallBoundary:
     """One surface's positive-ion transport and boundary reaction branches."""
@@ -73,53 +151,14 @@ class WallBoundary:
             )
         if self.surface_id is not None and not self.surface_id:
             raise ModelConfigurationError("Wall boundary surface_id must not be empty")
-        if self.transport_kind not in {
-            "bohm",
-            "prescribed_frequency",
-            "ambipolar",
-            "off",
-        }:
-            raise ModelConfigurationError(
-                f"Unknown wall transport kind {self.transport_kind!r}"
-            )
-        if self.transport_kind == "prescribed_frequency":
-            if (
-                self.prescribed_frequency_s_inv is None
-                or not math.isfinite(self.prescribed_frequency_s_inv)
-                or self.prescribed_frequency_s_inv < 0.0
-            ):
-                raise ModelConfigurationError(
-                    "prescribed_frequency wall transport requires a finite nonnegative frequency"
-                )
-            if self.area_m2 <= 0.0:
-                raise ModelConfigurationError(
-                    "prescribed_frequency wall transport requires positive area_m2"
-                )
-        if self.transport_kind == "ambipolar":
-            for name, value in (
-                ("diffusion_coefficient_m2_s", self.diffusion_coefficient_m2_s),
-                ("diffusion_length_m", self.diffusion_length_m),
-            ):
-                if value is None or not math.isfinite(value) or value <= 0.0:
-                    raise ModelConfigurationError(
-                        f"ambipolar wall transport requires positive {name}"
-                    )
-            if self.area_m2 <= 0.0:
-                raise ModelConfigurationError(
-                    "ambipolar wall transport requires positive area_m2"
-                )
-        totals: dict[str, float] = {}
-        for reaction in self.reactions:
-            totals[reaction.incident_species] = (
-                totals.get(reaction.incident_species, 0.0) + reaction.probability
-            )
-        overfull = {
-            species: total for species, total in totals.items() if total > 1.0 + 1.0e-12
-        }
-        if overfull:
-            raise ModelConfigurationError(
-                f"Boundary branch probabilities exceed one: {overfull}"
-            )
+        _validate_wall_transport(
+            kind=self.transport_kind,
+            area_m2=self.area_m2,
+            prescribed_frequency_s_inv=self.prescribed_frequency_s_inv,
+            diffusion_coefficient_m2_s=self.diffusion_coefficient_m2_s,
+            diffusion_length_m=self.diffusion_length_m,
+        )
+        _validate_branch_probabilities(self.reactions)
 
 
 @dataclass(frozen=True)
@@ -271,6 +310,21 @@ def _resolved_sheath_energy_eV(
     return 0.5 * electrons.temperature_eV * math.log(mass_ratio)
 
 
+def _compiled_loss_frequency(boundary: WallBoundary) -> float:
+    if (
+        boundary.transport_kind == "prescribed_frequency"
+        and boundary.prescribed_frequency_s_inv is not None
+    ):
+        return boundary.prescribed_frequency_s_inv
+    if (
+        boundary.transport_kind == "ambipolar"
+        and boundary.diffusion_coefficient_m2_s is not None
+        and boundary.diffusion_length_m is not None
+    ):
+        return boundary.diffusion_coefficient_m2_s / boundary.diffusion_length_m**2
+    raise RuntimeError("compiled wall transport parameters are inconsistent")
+
+
 def evaluate_compiled_wall_boundary(
     *,
     compiled: CompiledWallBoundary,
@@ -308,15 +362,7 @@ def evaluate_compiled_wall_boundary(
             incident_flux = ion_density * transport_speed
             incident_rate = incident_flux * area_over_volume
         else:
-            if boundary.transport_kind == "prescribed_frequency":
-                assert boundary.prescribed_frequency_s_inv is not None
-                loss_frequency = boundary.prescribed_frequency_s_inv
-            else:
-                assert boundary.diffusion_coefficient_m2_s is not None
-                assert boundary.diffusion_length_m is not None
-                loss_frequency = (
-                    boundary.diffusion_coefficient_m2_s / boundary.diffusion_length_m**2
-                )
+            loss_frequency = _compiled_loss_frequency(boundary)
             incident_rate = ion_density * loss_frequency
             incident_flux = incident_rate / area_over_volume
             transport_speed = loss_frequency / area_over_volume

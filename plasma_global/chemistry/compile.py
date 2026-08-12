@@ -16,6 +16,7 @@ from plasma_global.chemistry.data import (
     CrossSectionData,
     RateModelData,
     ReactionData,
+    SpeciesData,
 )
 from plasma_global.errors import ChemistryError, ModelDomainError
 
@@ -98,6 +99,16 @@ class CompiledChemistry:
     provenance: Mapping[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class _CompiledGasReactions:
+    stoichiometry: np.ndarray
+    reactant_orders: np.ndarray
+    electron_orders: np.ndarray
+    rate_evaluators: tuple[RateEvaluator, ...]
+    energy_loss_eV: np.ndarray
+    gas_heating_eV: np.ndarray
+
+
 def _readonly(values: np.ndarray) -> np.ndarray:
     result = np.asarray(values, dtype=float)
     result.setflags(write=False)
@@ -122,7 +133,10 @@ def _normalized_residual(delta: float, scale: float) -> float:
 
 
 def _validate_reaction_balance(
-    reaction: ReactionData, species: Mapping[str, Any], *, boundary: bool
+    reaction: ReactionData,
+    species: Mapping[str, SpeciesData],
+    *,
+    boundary: bool,
 ) -> None:
     unknown = sorted((set(reaction.reactants) | set(reaction.products)) - set(species))
     if unknown:
@@ -166,7 +180,7 @@ def _validate_reaction_balance(
 
 def _table(path: Any) -> tuple[np.ndarray, np.ndarray]:
     try:
-        with open(path, "r", encoding="utf-8-sig", newline="") as stream:
+        with open(path, encoding="utf-8-sig", newline="") as stream:
             reader = csv.reader(stream)
             header = next(reader, None)
             if header != ["x", "value"]:
@@ -194,7 +208,8 @@ def _table(path: Any) -> tuple[np.ndarray, np.ndarray]:
         or np.any(rates < 0.0)
     ):
         raise ChemistryError(
-            f"rate table {path} must be finite, nonnegative, strictly increasing, and unique"
+            f"rate table {path} must be finite, nonnegative, strictly increasing, "
+            "and unique"
         )
     return axis, rates
 
@@ -256,107 +271,120 @@ def maxwell_rate_table(
     return mean_energy, rates
 
 
+def _electron_impact_evaluator(
+    model: RateModelData, cross_sections: Mapping[str, CrossSectionData]
+) -> tuple[RateEvaluator, float | None]:
+    cross_section_id = str(model.parameters["cross_section"])
+    if cross_section_id not in cross_sections:
+        raise ChemistryError(
+            f"rate model {model.id} references unknown cross section "
+            f"{cross_section_id!r}"
+        )
+    cross_section = cross_sections[cross_section_id]
+    axis, values = maxwell_rate_table(cross_section)
+    branch = float(model.parameters["branching_yield"])
+    if not np.isfinite(branch) or branch < 0.0:
+        raise ChemistryError(f"rate model {model.id} has invalid branching_yield")
+
+    def electron_impact(context: RateContextLike) -> float:
+        supplied = getattr(context, "rate_coefficients", None)
+        if supplied is not None and cross_section_id in supplied:
+            return branch * float(supplied[cross_section_id])
+        return branch * _bounded_interp(
+            axis,
+            values,
+            context.mean_energy_eV,
+            name="mean_energy_eV (Maxwellian tail-safe range)",
+        )
+
+    return electron_impact, cross_section.energy_loss_eV
+
+
+def _arrhenius_evaluator(model: RateModelData) -> RateEvaluator:
+    amplitude = float(model.parameters["A"])
+    exponent = float(model.parameters["beta"])
+    activation = float(model.parameters["activation_eV"])
+
+    def arrhenius(context: RateContextLike) -> float:
+        temperature = max(context.gas_temperature_K, 1.0e-12)
+        thermal_eV = temperature / EV_TO_K
+        return float(
+            amplitude
+            * (temperature / 300.0) ** exponent
+            * np.exp(-activation / thermal_eV)
+        )
+
+    return arrhenius
+
+
+def _electron_temperature_power_evaluator(model: RateModelData) -> RateEvaluator:
+    amplitude = float(model.parameters["A"])
+    reference = float(model.parameters["reference_temperature_K"])
+    exponent = float(model.parameters["exponent"])
+
+    def electron_power(context: RateContextLike) -> float:
+        temperature_K = max(context.electron_temperature_eV * EV_TO_K, 1.0e-12)
+        return float(amplitude * (temperature_K / reference) ** exponent)
+
+    return electron_power
+
+
+def _tabulated_evaluator(model: RateModelData) -> RateEvaluator:
+    axis_name = str(model.parameters["axis"])
+    if axis_name not in {
+        "gas_temperature_K",
+        "mean_energy_eV",
+        "electron_temperature_eV",
+        "reduced_field_Td",
+        "pressure_Pa",
+    }:
+        raise ChemistryError(
+            f"rate model {model.id} has unsupported table axis {axis_name!r}"
+        )
+    axis, values = _table(model.parameters["file"])
+    bounds = str(model.parameters["bounds"])
+    if bounds not in {"error", "clip"}:
+        raise ChemistryError(f"rate model {model.id} bounds must be error or clip")
+
+    def tabulated(context: RateContextLike) -> float:
+        return _bounded_interp(
+            axis,
+            values,
+            _context_value(context, axis_name),
+            name=axis_name,
+            bounds=bounds,
+        )
+
+    return tabulated
+
+
 def _rate_evaluator(
     model: RateModelData, cross_sections: Mapping[str, CrossSectionData]
 ) -> tuple[RateEvaluator, float | None]:
-    parameters, kind = model.parameters, model.kind
-    if kind == "electron_impact":
-        cross_section_id = str(parameters["cross_section"])
-        if cross_section_id not in cross_sections:
-            raise ChemistryError(
-                f"rate model {model.id} references unknown cross section {cross_section_id!r}"
-            )
-        cross_section = cross_sections[cross_section_id]
-        axis, values = maxwell_rate_table(cross_section)
-        branch = float(parameters["branching_yield"])
-        if not np.isfinite(branch) or branch < 0.0:
-            raise ChemistryError(f"rate model {model.id} has invalid branching_yield")
-
-        def electron_impact(context: RateContextLike) -> float:
-            supplied = getattr(context, "rate_coefficients", None)
-            if supplied is not None and cross_section_id in supplied:
-                return branch * float(supplied[cross_section_id])
-            return branch * _bounded_interp(
-                axis,
-                values,
-                float(context.mean_energy_eV),
-                name="mean_energy_eV (Maxwellian tail-safe range)",
-            )
-
-        return electron_impact, cross_section.energy_loss_eV
-
-    if kind == "arrhenius":
-        amplitude = float(parameters["A"])
-        exponent = float(parameters["beta"])
-        activation = float(parameters["activation_eV"])
-
-        def arrhenius(context: RateContextLike) -> float:
-            temperature = max(float(context.gas_temperature_K), 1.0e-12)
-            thermal_eV = temperature / EV_TO_K
-            return float(
-                amplitude
-                * (temperature / 300.0) ** exponent
-                * np.exp(-activation / thermal_eV)
-            )
-
-        return arrhenius, None
-
-    if kind == "constant":
-        value = float(parameters["value"])
+    if model.kind == "electron_impact":
+        return _electron_impact_evaluator(model, cross_sections)
+    if model.kind == "arrhenius":
+        return _arrhenius_evaluator(model), None
+    if model.kind == "constant":
+        value = float(model.parameters["value"])
         return lambda _context: value, None
-
-    if kind == "first_order":
-        value = float(parameters["rate_s_inv"])
+    if model.kind == "first_order":
+        value = float(model.parameters["rate_s_inv"])
         return lambda _context: value, None
-
-    if kind == "experimental.electron_temperature_power_law":
-        amplitude = float(parameters["A"])
-        reference = float(parameters["reference_temperature_K"])
-        exponent = float(parameters["exponent"])
-
-        def electron_power(context: RateContextLike) -> float:
-            temperature_K = max(
-                float(context.electron_temperature_eV) * EV_TO_K, 1.0e-12
-            )
-            return float(amplitude * (temperature_K / reference) ** exponent)
-
-        return electron_power, None
-
-    if kind == "tabulated_1d":
-        axis_name = str(parameters["axis"])
-        if axis_name not in {
-            "gas_temperature_K",
-            "mean_energy_eV",
-            "electron_temperature_eV",
-            "reduced_field_Td",
-            "pressure_Pa",
-        }:
-            raise ChemistryError(
-                f"rate model {model.id} has unsupported table axis {axis_name!r}"
-            )
-        axis, values = _table(parameters["file"])
-        bounds = str(parameters["bounds"])
-        if bounds not in {"error", "clip"}:
-            raise ChemistryError(f"rate model {model.id} bounds must be error or clip")
-
-        def tabulated(context: RateContextLike) -> float:
-            return _bounded_interp(
-                axis,
-                values,
-                _context_value(context, axis_name),
-                name=axis_name,
-                bounds=bounds,
-            )
-
-        return tabulated, None
+    if model.kind == "experimental.electron_temperature_power_law":
+        return _electron_temperature_power_evaluator(model), None
+    if model.kind == "tabulated_1d":
+        return _tabulated_evaluator(model), None
 
     # Surface-only evaluators are compiled by the surface model and must not
     # accidentally appear in the gas reaction matrix.
-    raise ChemistryError(f"rate model {model.id} kind {kind!r} is not a gas-rate model")
+    raise ChemistryError(
+        f"rate model {model.id} kind {model.kind!r} is not a gas-rate model"
+    )
 
 
 def _compile_boundary(
-    reaction: ReactionData, species: Mapping[str, Any]
+    reaction: ReactionData, species: Mapping[str, SpeciesData]
 ) -> CompiledBoundaryReaction:
     incident = [
         species_id
@@ -383,7 +411,7 @@ def _compile_boundary(
         )
     before_charge = float(species[incident[0]].charge)
     after_charge = sum(
-        float(order) * species[species_id].charge
+        order * species[species_id].charge
         for species_id, order in reaction.products.items()
     )
     return CompiledBoundaryReaction(
@@ -397,23 +425,11 @@ def _compile_boundary(
     )
 
 
-def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
-    """Validate conservation and compile all gas reactions once."""
-
-    _unique([item.id for item in data.species], "species")
-    all_reactions = [
-        *data.gas_reactions,
-        *data.boundary_reactions,
-        *data.surface_reactions,
-    ]
-    _unique([item.id for item in all_reactions], "reaction")
-    species_by_id = {item.id: item for item in data.species}
-    electrons = [item for item in data.species if item.id == "e"]
-    if len(electrons) != 1 or electrons[0].phase != "gas" or electrons[0].charge != -1:
-        raise ChemistryError(
-            "canonical chemistry must contain exactly one gas electron species 'e' with charge -1"
-        )
-    for cross_section in data.cross_sections.values():
+def _validate_cross_section_targets(
+    cross_sections: Mapping[str, CrossSectionData],
+    species_by_id: Mapping[str, SpeciesData],
+) -> None:
+    for cross_section in cross_sections.values():
         target = species_by_id.get(cross_section.target)
         if target is None or target.phase != "gas" or target.id == "e":
             raise ChemistryError(
@@ -421,9 +437,77 @@ def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
                 "must be a declared heavy gas species"
             )
 
+
+def _validate_species(
+    data: ChemistryData,
+) -> tuple[dict[str, SpeciesData], tuple[SpeciesData, ...]]:
+    species_by_id = {item.id: item for item in data.species}
+    electron = species_by_id.get("e")
+    if electron is None or electron.phase != "gas" or electron.charge != -1:
+        raise ChemistryError(
+            "canonical chemistry must contain exactly one gas electron species 'e' "
+            "with charge -1"
+        )
+    _validate_cross_section_targets(data.cross_sections, species_by_id)
     gas_species = tuple(
         item for item in data.species if item.phase == "gas" and item.id != "e"
     )
+    return species_by_id, gas_species
+
+
+def _validate_electron_impact_reaction(
+    reaction: ReactionData,
+    rate_model: RateModelData,
+    cross_sections: Mapping[str, CrossSectionData],
+) -> None:
+    cross_section = cross_sections.get(str(rate_model.parameters["cross_section"]))
+    if cross_section is None:
+        raise ChemistryError(
+            f"reaction {reaction.id} references an unknown cross section"
+        )
+    if cross_section.kind == "momentum_transfer":
+        raise ChemistryError(
+            f"reaction {reaction.id} cannot use momentum-transfer cross section "
+            f"{cross_section.id!r} as a reactive rate"
+        )
+    if reaction.reactants.get("e", 0.0) <= 0.0:
+        raise ChemistryError(
+            f"electron-impact reaction {reaction.id} must consume an electron"
+        )
+    if reaction.reactants.get(cross_section.target, 0.0) <= 0.0:
+        raise ChemistryError(
+            f"electron-impact reaction {reaction.id} must consume cross-section "
+            f"target {cross_section.target!r}"
+        )
+
+
+def _validated_gas_rate_model(
+    data: ChemistryData,
+    reaction: ReactionData,
+    species_by_id: Mapping[str, SpeciesData],
+) -> RateModelData:
+    _validate_reaction_balance(reaction, species_by_id, boundary=False)
+    if any(
+        species_by_id[item].phase != "gas"
+        for item in (*reaction.reactants, *reaction.products)
+    ):
+        raise ChemistryError(f"gas reaction {reaction.id} contains a surface species")
+    if reaction.rate_model not in data.rate_models:
+        raise ChemistryError(
+            f"reaction {reaction.id} references unknown rate model "
+            f"{reaction.rate_model!r}"
+        )
+    rate_model = data.rate_models[reaction.rate_model]
+    if rate_model.kind == "electron_impact":
+        _validate_electron_impact_reaction(reaction, rate_model, data.cross_sections)
+    return rate_model
+
+
+def _compile_gas_reactions(
+    data: ChemistryData,
+    species_by_id: Mapping[str, SpeciesData],
+    gas_species: tuple[SpeciesData, ...],
+) -> _CompiledGasReactions:
     gas_ids = tuple(item.id for item in gas_species)
     gas_index = {species_id: index for index, species_id in enumerate(gas_ids)}
     reaction_count, species_count = len(data.gas_reactions), len(gas_species)
@@ -436,41 +520,7 @@ def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
     gas_heating = np.zeros(reaction_count)
 
     for row, reaction in enumerate(data.gas_reactions):
-        _validate_reaction_balance(reaction, species_by_id, boundary=False)
-        if any(
-            species_by_id[item].phase != "gas"
-            for item in (*reaction.reactants, *reaction.products)
-        ):
-            raise ChemistryError(
-                f"gas reaction {reaction.id} contains a surface species"
-            )
-        if reaction.rate_model not in data.rate_models:
-            raise ChemistryError(
-                f"reaction {reaction.id} references unknown rate model {reaction.rate_model!r}"
-            )
-        rate_model = data.rate_models[str(reaction.rate_model)]
-        if rate_model.kind == "electron_impact":
-            cross_section = data.cross_sections.get(
-                str(rate_model.parameters["cross_section"])
-            )
-            if cross_section is None:
-                raise ChemistryError(
-                    f"reaction {reaction.id} references an unknown cross section"
-                )
-            if cross_section.kind == "momentum_transfer":
-                raise ChemistryError(
-                    f"reaction {reaction.id} cannot use momentum-transfer cross section "
-                    f"{cross_section.id!r} as a reactive rate"
-                )
-            if reaction.reactants.get("e", 0.0) <= 0.0:
-                raise ChemistryError(
-                    f"electron-impact reaction {reaction.id} must consume an electron"
-                )
-            if reaction.reactants.get(cross_section.target, 0.0) <= 0.0:
-                raise ChemistryError(
-                    f"electron-impact reaction {reaction.id} must consume cross-section "
-                    f"target {cross_section.target!r}"
-                )
+        rate_model = _validated_gas_rate_model(data, reaction, species_by_id)
         compiled_rate = evaluator_by_model_id.get(rate_model.id)
         if compiled_rate is None:
             compiled_rate = _rate_evaluator(rate_model, data.cross_sections)
@@ -480,26 +530,43 @@ def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
         energy_losses[row] = (
             reaction.energy_loss_eV
             if reaction.energy_loss_eV is not None
-            else float(default_loss or 0.0)
+            else default_loss or 0.0
         )
         gas_heating[row] = reaction.gas_heating_eV
-        electron_orders[row] = float(reaction.reactants.get("e", 0.0))
+        electron_orders[row] = reaction.reactants.get("e", 0.0)
         for species_id, index in gas_index.items():
-            reactant_orders[row, index] = float(reaction.reactants.get(species_id, 0.0))
-            stoichiometry[row, index] = float(
-                reaction.products.get(species_id, 0.0)
-                - reaction.reactants.get(species_id, 0.0)
-            )
+            reactant_orders[row, index] = reaction.reactants.get(species_id, 0.0)
+            stoichiometry[row, index] = reaction.products.get(
+                species_id, 0.0
+            ) - reaction.reactants.get(species_id, 0.0)
 
+    return _CompiledGasReactions(
+        stoichiometry=stoichiometry,
+        reactant_orders=reactant_orders,
+        electron_orders=electron_orders,
+        rate_evaluators=tuple(evaluators),
+        energy_loss_eV=energy_losses,
+        gas_heating_eV=gas_heating,
+    )
+
+
+def _validate_non_gas_reactions(
+    data: ChemistryData, species_by_id: Mapping[str, SpeciesData]
+) -> None:
     for reaction in data.boundary_reactions:
         _validate_reaction_balance(reaction, species_by_id, boundary=True)
     for reaction in data.surface_reactions:
         _validate_reaction_balance(reaction, species_by_id, boundary=False)
         if reaction.rate_model not in data.rate_models:
             raise ChemistryError(
-                f"surface reaction {reaction.id} references unknown rate model {reaction.rate_model!r}"
+                f"surface reaction {reaction.id} references unknown rate model "
+                f"{reaction.rate_model!r}"
             )
 
+
+def _compile_element_matrix(
+    gas_species: tuple[SpeciesData, ...],
+) -> tuple[tuple[str, ...], np.ndarray]:
     element_names = tuple(
         sorted(
             {
@@ -517,27 +584,44 @@ def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
         ],
         dtype=float,
     )
+    return element_names, element_matrix
+
+
+def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
+    """Validate conservation and compile all gas reactions once."""
+
+    _unique([item.id for item in data.species], "species")
+    all_reactions = [
+        *data.gas_reactions,
+        *data.boundary_reactions,
+        *data.surface_reactions,
+    ]
+    _unique([item.id for item in all_reactions], "reaction")
+    species_by_id, gas_species = _validate_species(data)
+    gas = _compile_gas_reactions(data, species_by_id, gas_species)
+    _validate_non_gas_reactions(data, species_by_id)
+    element_names, element_matrix = _compile_element_matrix(gas_species)
+    jacobian_species_pattern = _compile_jacobian_species_pattern(
+        data,
+        gas_species,
+        gas.stoichiometry,
+        gas.reactant_orders,
+        gas.electron_orders,
+    )
+
     return CompiledChemistry(
-        species_ids=gas_ids,
+        species_ids=tuple(item.id for item in gas_species),
         charges=_readonly(np.array([item.charge for item in gas_species])),
         masses_kg=_readonly(np.array([item.mass_kg for item in gas_species])),
         reaction_ids=tuple(item.id for item in data.gas_reactions),
-        stoichiometry=_readonly(stoichiometry),
-        reactant_orders=_readonly(reactant_orders),
-        electron_orders=_readonly(electron_orders),
-        rate_evaluators=tuple(evaluators),
-        energy_loss_eV=_readonly(energy_losses),
-        gas_heating_eV=_readonly(gas_heating),
+        stoichiometry=_readonly(gas.stoichiometry),
+        reactant_orders=_readonly(gas.reactant_orders),
+        electron_orders=_readonly(gas.electron_orders),
+        rate_evaluators=gas.rate_evaluators,
+        energy_loss_eV=_readonly(gas.energy_loss_eV),
+        gas_heating_eV=_readonly(gas.gas_heating_eV),
         reaction_zones=tuple(item.zones for item in data.gas_reactions),
-        jacobian_species_pattern=_readonly_bool(
-            _compile_jacobian_species_pattern(
-                data,
-                gas_species,
-                stoichiometry,
-                reactant_orders,
-                electron_orders,
-            )
-        ),
+        jacobian_species_pattern=_readonly_bool(jacobian_species_pattern),
         element_names=element_names,
         element_matrix=_readonly(element_matrix),
         boundary_reactions=tuple(
@@ -551,7 +635,7 @@ def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
 
 def _compile_jacobian_species_pattern(
     data: ChemistryData,
-    gas_species: tuple[Any, ...],
+    gas_species: tuple[SpeciesData, ...],
     stoichiometry: np.ndarray,
     reactant_orders: np.ndarray,
     electron_orders: np.ndarray,

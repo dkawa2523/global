@@ -51,6 +51,21 @@ def test_prescribed_electron_profile_reads_zone_columns(tmp_path) -> None:
     assert values["process"] > values["source"]
 
 
+def test_prescribed_profile_normalizes_string_convertible_zone_ids(tmp_path) -> None:
+    direct = PrescribedElectronProfile(
+        time_s=np.array([0.0, 1.0]),
+        density_m3_by_zone={1: np.array([1.0, 3.0])},
+    )
+    assert tuple(direct.density_m3_by_zone) == ("1",)
+    assert direct.density(np.float32(0.5), 1) == pytest.approx(2.0)
+    assert direct.density_by_zone(0.5, (1,)) == {"1": pytest.approx(2.0)}
+
+    path = tmp_path / "numeric-zone.csv"
+    path.write_text("time_s,density\n0,1\n1,3\n", encoding="utf-8")
+    loaded = PrescribedElectronProfile.from_csv(path, zone_columns={1: "density"})
+    assert loaded.density(0.5, "1") == pytest.approx(2.0)
+
+
 def test_prescribed_electron_profile_csv_rejects_unsorted_time(tmp_path) -> None:
     path = tmp_path / "electrons.csv"
     path.write_text(

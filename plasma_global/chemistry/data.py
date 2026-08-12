@@ -16,8 +16,8 @@ from types import MappingProxyType
 from typing import Any
 
 import numpy as np
-import yaml
 
+from plasma_global._yaml import YamlLoadError, load_unique_yaml
 from plasma_global.errors import ChemistryError
 
 AMU_TO_KG = 1.66053906660e-27
@@ -30,48 +30,11 @@ def _empty_metadata() -> Mapping[str, Any]:
 _TERM = re.compile(r"^\s*(?:(\d+(?:\.\d+)?)\s+)?([^\s].*?)\s*$")
 
 
-class _UniqueKeyLoader(yaml.SafeLoader):
-    pass
-
-
-def _construct_unique_mapping(
-    loader: _UniqueKeyLoader, node: yaml.MappingNode, deep: bool = False
-) -> dict[Any, Any]:
-    loader.flatten_mapping(node)
-    result: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        try:
-            duplicate = key in result
-        except TypeError as exc:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                "found an unhashable mapping key",
-                key_node.start_mark,
-            ) from exc
-        if duplicate:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                f"found duplicate key {key!r}",
-                key_node.start_mark,
-            )
-        result[key] = loader.construct_object(value_node, deep=deep)
-    return result
-
-
-_UniqueKeyLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    _construct_unique_mapping,
-)
-
-
 def _yaml_mapping(path: Path) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as stream:
-            document = yaml.load(stream, Loader=_UniqueKeyLoader)
-    except (OSError, yaml.YAMLError) as exc:
+            document = load_unique_yaml(stream)
+    except (OSError, YamlLoadError) as exc:
         raise ChemistryError(
             f"cannot read canonical chemistry YAML {path}: {exc}"
         ) from exc
@@ -436,10 +399,22 @@ def _validate_coverage(value: object, where: str) -> None:
     _finite_number(config, "exponent", where, minimum=0.0)
 
 
-def _validate_rate_parameters(kind: str, model: Mapping[str, Any], where: str) -> None:
-    missing = sorted(_RATE_REQUIRED[kind] - set(model))
-    if missing:
-        raise ChemistryError(f"{where} is missing: {', '.join(missing)}")
+def _validate_tabulated_rate_parameters(model: Mapping[str, Any], where: str) -> None:
+    if model["axis"] not in {
+        "gas_temperature_K",
+        "mean_energy_eV",
+        "electron_temperature_eV",
+        "reduced_field_Td",
+        "pressure_Pa",
+    }:
+        raise ChemistryError(f"{where}.axis is unsupported: {model['axis']!r}")
+    if model["bounds"] not in {"error", "clip"}:
+        raise ChemistryError(f"{where}.bounds must be error or clip")
+
+
+def _validate_gas_rate_parameters(
+    kind: str, model: Mapping[str, Any], where: str
+) -> None:
     if kind == "electron_impact":
         if (
             not isinstance(model["cross_section"], str)
@@ -462,17 +437,13 @@ def _validate_rate_parameters(kind: str, model: Mapping[str, Any], where: str) -
             raise ChemistryError(f"{where}.reference_temperature_K must be positive")
         _finite_number(model, "exponent", where)
     elif kind == "tabulated_1d":
-        if model["axis"] not in {
-            "gas_temperature_K",
-            "mean_energy_eV",
-            "electron_temperature_eV",
-            "reduced_field_Td",
-            "pressure_Pa",
-        }:
-            raise ChemistryError(f"{where}.axis is unsupported: {model['axis']!r}")
-        if model["bounds"] not in {"error", "clip"}:
-            raise ChemistryError(f"{where}.bounds must be error or clip")
-    elif kind == "sticking":
+        _validate_tabulated_rate_parameters(model, where)
+
+
+def _validate_surface_rate_parameters(
+    kind: str, model: Mapping[str, Any], where: str
+) -> None:
+    if kind == "sticking":
         value = _finite_number(model, "value", where, minimum=0.0)
         if value > 1.0:
             raise ChemistryError(f"{where}.value must not exceed one")
@@ -491,6 +462,23 @@ def _validate_rate_parameters(kind: str, model: Mapping[str, Any], where: str) -
         amplitude = "frequency_s_inv" if kind == "desorption" else "A_m2_s_inv"
         _finite_number(model, amplitude, where, minimum=0.0)
         _finite_number(model, "activation_eV", where, minimum=0.0)
+
+
+def _validate_rate_parameters(kind: str, model: Mapping[str, Any], where: str) -> None:
+    missing = sorted(_RATE_REQUIRED[kind] - set(model))
+    if missing:
+        raise ChemistryError(f"{where} is missing: {', '.join(missing)}")
+    if kind in {
+        "electron_impact",
+        "arrhenius",
+        "constant",
+        "first_order",
+        "experimental.electron_temperature_power_law",
+        "tabulated_1d",
+    }:
+        _validate_gas_rate_parameters(kind, model, where)
+    else:
+        _validate_surface_rate_parameters(kind, model, where)
 
 
 def _load_rate_models(
