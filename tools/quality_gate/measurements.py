@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
@@ -111,12 +112,12 @@ def _secret_key(filename: str, finding: dict[str, Any]) -> str:
     )
 
 
-def _secret_fingerprints(payload: dict[str, Any]) -> set[str]:
-    return {
+def _secret_fingerprints(payload: dict[str, Any]) -> Counter[str]:
+    return Counter(
         _secret_key(filename, finding)
         for filename, findings in payload.get("results", {}).items()
         for finding in findings
-    }
+    )
 
 
 def _preserve_secret_reviews(

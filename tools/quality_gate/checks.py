@@ -1,4 +1,4 @@
-"""Independent policy checks used by the fast and pull-request gates."""
+"""Static, test, security, and baseline checks used by quality commands."""
 
 from __future__ import annotations
 
@@ -26,14 +26,6 @@ from tools.quality_gate.context import (
 from tools.quality_gate.measurements import _secret_fingerprints, _secret_scan
 
 FATAL_RUFF_CODES = {"F821", "F822", "F823"}
-FORBIDDEN_ADDITION = re.compile(
-    r"(?:#\s*(?:noqa|nosec|type:\s*ignore|pragma:\s*no\s+(?:cover|mutate))"
-    r"|pytest\.(?:mark\.)?(?:skip|xfail)\b"
-    r"|@pytest\.mark\.(?:skip|xfail)\b)"
-)
-FORBIDDEN_TEST_REMOVAL = re.compile(
-    r"(?:\bassert\b|\bpytest\.raises\b|\b(?:async\s+)?def\s+test_)"
-)
 
 
 def _check_fatal_findings(ruff: Sequence[Finding], bandit: Sequence[Finding]) -> None:
@@ -146,54 +138,6 @@ def _check_diff_coverage() -> None:
             "--fail-under=90",
         ]
     )
-
-
-def _deleted_tests(base: str) -> list[str]:
-    return [
-        line
-        for line in _git("diff", "--name-status", base, "--", "tests").splitlines()
-        if line.startswith("D\t")
-    ]
-
-
-def _removed_test_contract(current_file: str, line: str) -> bool:
-    return (
-        current_file.startswith("tests/")
-        and line.startswith("-")
-        and not line.startswith("---")
-        and FORBIDDEN_TEST_REMOVAL.search(line[1:]) is not None
-    )
-
-
-def _policy_diff_violations(diff: str) -> list[str]:
-    violations = []
-    current_file = ""
-    for line in diff.splitlines():
-        if line.startswith("+++ b/"):
-            current_file = line[6:].replace("\\", "/")
-        elif line.startswith("+") and not line.startswith("+++"):
-            if FORBIDDEN_ADDITION.search(line[1:]):
-                violations.append(line[1:].strip())
-        elif _removed_test_contract(current_file, line):
-            violations.append(f"removed test contract: {line[1:].strip()}")
-    return violations
-
-
-def _check_policy_additions() -> None:
-    base = _base_ref()
-    if base is None:
-        return
-    deleted_tests = _deleted_tests(base)
-    if deleted_tests:
-        _die("Deleting tests is forbidden:\n  " + "\n  ".join(deleted_tests))
-    violations = _policy_diff_violations(
-        _git("diff", "--unified=0", base, "--", "*.py")
-    )
-    if violations:
-        _die(
-            "Forbidden quality suppressions were added:\n"
-            + "\n".join(f"  {line}" for line in violations)
-        )
 
 
 def _check_complexity(current: dict[str, int], baseline: dict[str, Any]) -> None:

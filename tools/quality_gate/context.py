@@ -146,10 +146,28 @@ def _changed_python_files() -> list[str]:
     return sorted(path for path in files if (ROOT / path).is_file())
 
 
-def _symbol_for_line(relative_path: str, line_number: int) -> str:
+def _source_for_path(
+    relative_path: str, *, source_ref: str | None = None
+) -> str | None:
+    normalized_path = relative_path.replace("\\", "/")
+    if source_ref is not None:
+        return _git(
+            "show",
+            f"{source_ref}:{normalized_path}",
+            allowed={0, 128},
+        )
     try:
-        tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, UnicodeError):
+        return (ROOT / normalized_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+
+
+def _symbol_for_source(source: str | None, line_number: int) -> str:
+    if source is None:
+        return "<module>"
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
         return "<module>"
     matches: list[tuple[int, str]] = []
 
@@ -164,6 +182,10 @@ def _symbol_for_line(relative_path: str, line_number: int) -> str:
 
     visit(tree.body, ())
     return max(matches, default=(-1, "<module>"))[1]
+
+
+def _symbol_for_line(relative_path: str, line_number: int) -> str:
+    return _symbol_for_source(_source_for_path(relative_path), line_number)
 
 
 def _relative_path(filename: str) -> str:

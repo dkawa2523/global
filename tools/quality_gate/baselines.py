@@ -16,6 +16,9 @@ from tools.quality_gate.context import (
     _base_ref,
     _die,
     _git,
+    _relative_path,
+    _source_for_path,
+    _symbol_for_source,
 )
 from tools.quality_gate.measurements import _secret_fingerprints
 
@@ -62,11 +65,8 @@ def _assert_findings_not_worse(
     _die(f"New or worsened {tool} findings:\n{details}")
 
 
-def _read_base_json(relative_path: str) -> dict[str, Any] | None:
-    base = _base_ref()
-    if base is None:
-        return None
-    output = _git("show", f"{base}:{relative_path}", allowed={0, 128})
+def _read_json_at_ref(relative_path: str, source_ref: str) -> dict[str, Any] | None:
+    output = _git("show", f"{source_ref}:{relative_path}", allowed={0, 128})
     if not output.strip():
         return None
     try:
@@ -75,24 +75,51 @@ def _read_base_json(relative_path: str) -> dict[str, Any] | None:
         _die(f"Base branch has an invalid {relative_path}: {exc}")
 
 
-def _pyrefly_fingerprints(payload: dict[str, Any]) -> Counter[str]:
-    return Counter(
-        "|".join(
-            (
-                str(item.get("path", "")).replace("\\", "/"),
-                str(item.get("name", "")),
-                str(item.get("severity", "")),
-                str(item.get("concise_description", item.get("description", ""))),
-            )
+def _read_base_json(relative_path: str) -> dict[str, Any] | None:
+    base = _base_ref()
+    return None if base is None else _read_json_at_ref(relative_path, base)
+
+
+def _pyrefly_fingerprint(
+    item: dict[str, Any],
+    sources: dict[str, str | None],
+    source_ref: str | None,
+) -> str:
+    path = _relative_path(str(item.get("path", "")))
+    if path not in sources:
+        sources[path] = _source_for_path(path, source_ref=source_ref)
+    symbol = _symbol_for_source(sources[path], int(item.get("line", 0) or 0))
+    message = str(item.get("concise_description", item.get("description", "")))
+    return "|".join(
+        (
+            path,
+            symbol,
+            str(item.get("name", "")),
+            str(item.get("severity", "")),
+            " ".join(message.split()),
         )
+    )
+
+
+def _pyrefly_fingerprints(
+    payload: dict[str, Any], *, source_ref: str | None = None
+) -> Counter[str]:
+    sources: dict[str, str | None] = {}
+    return Counter(
+        _pyrefly_fingerprint(item, sources, source_ref)
         for item in payload.get("errors", [])
     )
 
 
-def _native_fingerprints(relative_path: str, payload: dict[str, Any]) -> Counter[str]:
+def _native_fingerprints(
+    relative_path: str,
+    payload: dict[str, Any],
+    *,
+    source_ref: str | None = None,
+) -> Counter[str]:
     if relative_path == ".secrets.baseline":
-        return Counter(_secret_fingerprints(payload))
-    return _pyrefly_fingerprints(payload)
+        return _secret_fingerprints(payload)
+    return _pyrefly_fingerprints(payload, source_ref=source_ref)
 
 
 def _baseline_complexity_failures(
@@ -133,21 +160,28 @@ def _validate_baseline_monotonic(current: dict[str, Any]) -> None:
 
 
 def _check_native_baseline_sizes() -> None:
+    base = _base_ref()
+    if base is None:
+        return
     for relative_path, current_path in (
         ("quality/pyrefly-baseline.json", PYREFLY_BASELINE_PATH),
         (".secrets.baseline", SECRETS_BASELINE_PATH),
     ):
-        previous = _read_base_json(relative_path)
-        if previous is None:
-            continue
-        current = json.loads(current_path.read_text(encoding="utf-8"))
-        excess = _native_fingerprints(relative_path, current) - _native_fingerprints(
-            relative_path, previous
-        )
+        excess = _native_baseline_excess(relative_path, current_path, base)
         if excess:
             _die(
                 f"{relative_path} accepts findings that are absent from the base branch"
             )
+
+
+def _native_baseline_excess(
+    relative_path: str, current_path: Path, base: str
+) -> Counter[str]:
+    previous = _read_json_at_ref(relative_path, base) or {}
+    current = json.loads(current_path.read_text(encoding="utf-8"))
+    return _native_fingerprints(relative_path, current) - _native_fingerprints(
+        relative_path, previous, source_ref=base
+    )
 
 
 def _baseline_payload(

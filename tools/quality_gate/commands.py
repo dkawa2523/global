@@ -25,7 +25,6 @@ from tools.quality_gate.checks import (
     _check_fatal_findings,
     _check_format,
     _check_imports,
-    _check_policy_additions,
     _check_pyrefly,
     _check_secrets,
     _check_vulture,
@@ -33,6 +32,7 @@ from tools.quality_gate.checks import (
     _pip_audit,
     _pytest_with_coverage,
 )
+from tools.quality_gate.config_contract import _check_quality_config
 from tools.quality_gate.context import (
     ALL_PYTHON_PATHS,
     BASELINE_PATH,
@@ -56,6 +56,7 @@ from tools.quality_gate.measurements import (
     _secret_scan,
     _vulture_findings,
 )
+from tools.quality_gate.test_policy import _check_policy_additions
 
 
 def _run_fast() -> None:
@@ -88,6 +89,7 @@ def _check_test_regression(
 
 
 def _run_pr() -> None:
+    _check_quality_config()
     baseline = _load_baseline()
     _validate_baseline_monotonic(baseline)
     _check_native_baseline_sizes()
