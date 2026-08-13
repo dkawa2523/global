@@ -79,7 +79,7 @@ def test_current_quality_configuration_satisfies_contract() -> None:
         (
             "allow_indirect_imports = true",
             "as_packages = false\nallow_indirect_imports = true",
-            "plasma_global.core contract is missing",
+            "import-linter contracts were weakened",
         ),
         (
             'source_paths = ["plasma_global"]',

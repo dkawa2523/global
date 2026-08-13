@@ -19,7 +19,7 @@ from plasma_global.core.solver import solve_compiled_model
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
 from plasma_global.errors import ModelDomainError
 from plasma_global.models.electrons import ElectronEnergyClosure, ElectronState
-from plasma_global.models.gas_energy import HeavyEnergyClosure
+from plasma_global.models.gas_energy import BOLTZMANN_J_K, HeavyEnergyClosure
 from plasma_global.models.power import (
     CompiledPowerCommand,
     PowerCoordinator,
@@ -281,7 +281,9 @@ def test_heavy_energy_ledger_composes_power_reaction_flow_and_elastic_terms() ->
     assert evaluated.derivative[electron_index] == pytest.approx(-3.0)
 
 
-def surface_chemistry(*, ion_assisted: bool) -> ChemistryData:
+def surface_chemistry(
+    *, ion_assisted: bool, gas_heating_eV: float = 0.25
+) -> ChemistryData:
     species = (
         SpeciesData("A", "gas", 0, 36.0, {"X": 1.0}),
         SpeciesData("ion", "gas", 1, 36.0, {"X": 1.0}),
@@ -329,7 +331,7 @@ def surface_chemistry(*, ion_assisted: bool) -> ChemistryData:
             products={"Ads": 1.0},
             rate_model="stick",
             energy_loss_eV=None,
-            gas_heating_eV=0.25,
+            gas_heating_eV=gas_heating_eV,
             surfaces=("wall",),
         )
         model = RateModelData("stick", "sticking", {"value": 0.2})
@@ -345,10 +347,15 @@ def surface_chemistry(*, ion_assisted: bool) -> ChemistryData:
 
 
 def compiled_surface(
-    *, ion_assisted: bool, initial_coverage: float
+    *,
+    ion_assisted: bool,
+    initial_coverage: float,
+    gas_heating_eV: float = 0.25,
 ) -> CompiledSurfaceModel:
     return CompiledSurfaceModel(
-        chemistry=surface_chemistry(ion_assisted=ion_assisted),
+        chemistry=surface_chemistry(
+            ion_assisted=ion_assisted, gas_heating_eV=gas_heating_eV
+        ),
         gas_species_ids=("A", "ion"),
         gas_masses_kg=np.array([6.0e-26, 6.0e-26]),
         zone_ids=("z",),
@@ -364,6 +371,74 @@ def compiled_surface(
             ),
         ),
     )
+
+
+def test_wall_and_surface_particle_fluxes_carry_species_internal_energy() -> None:
+    gas_temperature_K = 400.0
+    closure = HeavyEnergyClosure(
+        cv_over_kb=np.array([2.5, 1.5]),
+        wall_temperature_K=np.array([gas_temperature_K]),
+        wall_relaxation_s_inv=np.zeros(1),
+    )
+    surface = compiled_surface(
+        ion_assisted=False,
+        initial_coverage=0.2,
+        gas_heating_eV=0.0,
+    )
+    wall = WallBoundary(
+        zone_id="z",
+        area_m2=2.0,
+        surface_id="wall",
+        transport_kind="prescribed_frequency",
+        prescribed_frequency_s_inv=0.5,
+        reactions=(BoundaryReaction("neutralize", "ion", products={"A": 1.0}),),
+    )
+    model = CompiledGlobalModel(
+        chemistry=inert_chemistry(),
+        zones=(Zone("z", 1.0, gas_temperature_K),),
+        segments=(RecipeSegment("particle-energy", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+        heavy_energy_closure=closure,
+        wall_boundaries=(wall,),
+        surface_model=surface,
+    )
+    state = model.initial_state(
+        initial_state(gas_temperature_K=gas_temperature_K, ads_coverage=0.25)
+    )
+
+    evaluated = model.evaluate(0.0, state, model.segments[0])
+    ledger = evaluated.ledger_by_zone["z"]
+    density_slice = model.layout.density_slices["z"]
+    energy_index = model.layout.heavy_energy_indices["z"]
+    incident_rate = ledger.wall_fluxes[0].incident_rate_m3_s
+    surface_rate = ledger.surface_rates_m2_s["stick@wall"]
+    expected_wall_energy = (
+        BOLTZMANN_J_K
+        * gas_temperature_K
+        * (closure.cv_over_kb[0] - closure.cv_over_kb[1])
+        * incident_rate
+    )
+    expected_surface_energy = (
+        -BOLTZMANN_J_K * gas_temperature_K * closure.cv_over_kb[0] * 2.0 * surface_rate
+    )
+
+    assert ledger.wall_species_energy_J_m3_s == pytest.approx(expected_wall_energy)
+    assert ledger.surface_species_energy_J_m3_s == pytest.approx(
+        expected_surface_energy
+    )
+    assert evaluated.derivative[energy_index] == pytest.approx(
+        expected_wall_energy + expected_surface_energy
+    )
+
+    # With no explicit heating, advancing density and its carried internal energy
+    # by the same flux must leave the algebraic closure temperature unchanged.
+    dt_s = 1.0e-8
+    next_density = state[density_slice] + dt_s * evaluated.derivative[density_slice]
+    next_energy = state[energy_index] + dt_s * evaluated.derivative[energy_index]
+    next_temperature = closure.temperature_K(
+        next_density.reshape(1, -1), np.array([next_energy])
+    )[0]
+    assert next_temperature == pytest.approx(gas_temperature_K)
 
 
 def test_surface_sticking_adds_independent_coverage_and_conserves_event_rate() -> None:

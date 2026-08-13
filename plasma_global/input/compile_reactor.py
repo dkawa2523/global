@@ -11,7 +11,11 @@ from typing import Literal, assert_never
 import numpy as np
 
 from plasma_global.chemistry.compile import CompiledChemistry
-from plasma_global.chemistry.data import ChemistryData, SpeciesData
+from plasma_global.chemistry.data import ChemistryData
+from plasma_global.chemistry.surface_roles import (
+    SurfaceSpeciesRoles,
+    surface_species_roles,
+)
 from plasma_global.core.domain import Zone
 from plasma_global.core.transport import CompiledTransport
 from plasma_global.errors import CaseValidationError
@@ -167,41 +171,25 @@ def compile_initial_densities(
     return MappingProxyType(resolved)
 
 
-def _surface_coverage_roles(
-    applicable_species: tuple[SpeciesData, ...],
-) -> tuple[set[str], set[str], dict[str, float]]:
-    """Classify algebraic, independent, and site-occupancy surface species."""
-
-    free_sites = {item.id for item in applicable_species if "site" in item.state_tags}
-    independent = {
-        item.id
-        for item in applicable_species
-        if item.id not in free_sites and "film_fragment" not in item.state_tags
-    }
-    occupancy = {item.id: item.elements.get("site", 1.0) for item in applicable_species}
-    return free_sites, independent, occupancy
-
-
 def _validate_surface_coverages(
     surface: SurfaceConfig,
-    applicable_species: tuple[SpeciesData, ...],
+    roles: SurfaceSpeciesRoles,
 ) -> None:
     """Validate that supplied coverages are independent and fit one site layer."""
 
-    free_sites, independent, occupancy = _surface_coverage_roles(applicable_species)
     supplied = set(surface.initial_coverages)
-    if explicit_free := supplied & free_sites:
+    if explicit_free := supplied & set(roles.free_site_ids):
         raise CaseValidationError(
             f"surface {surface.surface_id!r} must not initialize algebraic "
             f"free site(s) {sorted(explicit_free)}"
         )
-    if unknown := supplied - independent:
+    if unknown := supplied - set(roles.independent_ids):
         raise CaseValidationError(
             f"surface {surface.surface_id!r} initializes unknown or dependent "
             f"coverage species {sorted(unknown)}"
         )
     occupied = sum(
-        occupancy[species_id] * coverage
+        roles.occupancy_by_species[species_id] * coverage
         for species_id, coverage in surface.initial_coverages.items()
     )
     if occupied > 1.0 + 1.0e-12:
@@ -215,16 +203,12 @@ def validate_surface_initial_conditions(
 ) -> None:
     """Validate independent adsorbates after chemistry IDs are available."""
 
-    surface_species = tuple(
-        item for item in chemistry_data.species if item.phase == "surface"
-    )
     for surface in case.reactor.surfaces:
-        applicable = tuple(
-            item
-            for item in surface_species
-            if not item.surfaces or surface.surface_id in item.surfaces
+        roles = surface_species_roles(
+            chemistry_data.species,
+            surface.surface_id,
         )
-        _validate_surface_coverages(surface, applicable)
+        _validate_surface_coverages(surface, roles)
 
 
 def _compile_zones(case: CaseSpec) -> tuple[Zone, ...]:

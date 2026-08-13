@@ -122,3 +122,21 @@ def test_approximate_two_term_requires_cross_sections_to_cover_energy_grid() -> 
             energy_max_eV=2.0,
             energy_points=32,
         )
+
+
+def test_approximate_two_term_rejects_missing_low_energy_momentum_support() -> None:
+    collision = ElectronCollision(
+        collision_id="late momentum",
+        target_species="Ar",
+        kind="momentum",
+        energy_eV=np.array([1.0e-2, 1.0]),
+        cross_section_m2=np.array([1.0e-19, 1.0e-19]),
+    )
+
+    with pytest.raises(ValueError, match="lower bound"):
+        ApproximateTwoTermEEDF(
+            collisions=(collision,),
+            energy_min_eV=1.0e-3,
+            energy_max_eV=1.0,
+            energy_points=32,
+        )

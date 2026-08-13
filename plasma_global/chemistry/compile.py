@@ -13,7 +13,7 @@ import numpy as np
 
 from plasma_global.chemistry._contracts import (
     cross_section_support_error,
-    has_onset_threshold,
+    normalized_cross_section_curve,
     surface_reaction_shape_error,
 )
 from plasma_global.chemistry.data import (
@@ -35,6 +35,14 @@ EV_TO_K = E_CHARGE / 1.380649e-23
 _MAXWELL_UNRESOLVED_TAIL_FRACTION = 1.0e-6
 _MAXWELL_MIN_MEAN_ENERGY_EV = 1.0e-3
 _MAXWELL_TABLE_POINTS = 512
+_DIMENSIONAL_GAS_RATE_KINDS = frozenset(
+    {
+        "arrhenius",
+        "constant",
+        "experimental.electron_temperature_power_law",
+        "tabulated_1d",
+    }
+)
 
 
 def _maxwell_tail_cutoff(tolerance: float) -> float:
@@ -252,59 +260,6 @@ def _bounded_interp(
     return float(np.interp(x, axis, values))
 
 
-def _onset_quadrature_curve(
-    cross_section: CrossSectionData,
-) -> tuple[np.ndarray, np.ndarray]:
-    energy = cross_section.energy_eV
-    sigma = cross_section.sigma_m2
-    threshold = cross_section.threshold_eV
-    threshold_index = int(np.searchsorted(energy, threshold))
-    tolerance = max(abs(float(np.spacing(threshold))), np.finfo(float).tiny)
-    has_threshold_node = threshold_index < energy.size and math.isclose(
-        float(energy[threshold_index]), threshold, rel_tol=0.0, abs_tol=tolerance
-    )
-    if not has_threshold_node:
-        energy = np.insert(energy, threshold_index, threshold)
-        sigma = np.insert(sigma, threshold_index, 0.0)
-    elif float(sigma[threshold_index]) != 0.0:
-        lower_edge = np.nextafter(float(energy[threshold_index]), 0.0)
-        energy = np.insert(energy, threshold_index, lower_edge)
-        sigma = np.insert(sigma, threshold_index, 0.0)
-    if float(energy[0]) > 0.0:
-        energy = np.insert(energy, 0, 0.0)
-        sigma = np.insert(sigma, 0, 0.0)
-    return energy, sigma
-
-
-def _continuous_low_energy_curve(
-    energy: np.ndarray, sigma: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    first_energy = float(energy[0])
-    if first_energy == 0.0:
-        return energy, sigma
-    if sigma[0] == 0.0:
-        return np.insert(energy, 0, 0.0), np.insert(sigma, 0, 0.0)
-
-    # A curve with a finite first value explicitly represents a nonzero
-    # low-energy cross section. Resolve the missing interval on a private grid;
-    # the canonical CSV and runtime interpolation stay intact.
-    lower_energy = np.concatenate(
-        ([0.0], np.geomspace(first_energy * 1.0e-6, first_energy, 32)[:-1])
-    )
-    lower_sigma = np.full(lower_energy.shape, float(sigma[0]))
-    return np.concatenate((lower_energy, energy)), np.concatenate((lower_sigma, sigma))
-
-
-def _maxwell_quadrature_curve(
-    cross_section: CrossSectionData,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Resolve the physical lower tail without changing the source curve."""
-
-    if has_onset_threshold(cross_section):
-        return _onset_quadrature_curve(cross_section)
-    return _continuous_low_energy_curve(cross_section.energy_eV, cross_section.sigma_m2)
-
-
 def _maxwell_mean_energy_axis(cross_section: CrossSectionData) -> np.ndarray:
     """Validate support and construct the tail-safe mean-energy axis."""
 
@@ -345,7 +300,7 @@ def maxwell_rate_table(
     """Precompute Maxwellian ``<sigma v>`` on a tail-safe mean-energy range."""
 
     mean_energy = _maxwell_mean_energy_axis(cross_section)
-    energy, sigma = _maxwell_quadrature_curve(cross_section)
+    energy, sigma = normalized_cross_section_curve(cross_section)
     rates = _integrate_maxwell_rates(mean_energy, energy, sigma)
     mean_energy.setflags(write=False)
     rates.setflags(write=False)
@@ -639,12 +594,7 @@ def _validated_gas_rate_model(
     return rate_model
 
 
-def _reaction_electron_energy_transfer(
-    reaction: ReactionData,
-    default_transfer_eV: float | None,
-) -> float:
-    """Resolve positive electron gain while retaining legacy positive loss."""
-
+def _explicit_reaction_electron_transfer(reaction: ReactionData) -> float | None:
     legacy_loss = reaction.energy_loss_eV
     signed_transfer = reaction.electron_energy_transfer_eV
     if legacy_loss is not None and signed_transfer is not None:
@@ -665,7 +615,114 @@ def _reaction_electron_energy_transfer(
                 "nonnegative"
             )
         return -legacy_loss
-    return 0.0 if default_transfer_eV is None else default_transfer_eV
+    return None
+
+
+def _validate_electron_energy_topology(
+    reaction: ReactionData, transfer_eV: float
+) -> None:
+    has_electron = (
+        reaction.reactants.get("e", 0.0) > 0.0 or reaction.products.get("e", 0.0) > 0.0
+    )
+    if transfer_eV != 0.0 and not has_electron:
+        raise ChemistryError(
+            f"reaction {reaction.id!r} defines electron-energy transfer but does "
+            "not contain an electron reactant or product"
+        )
+
+
+def _reaction_electron_energy_transfer(
+    reaction: ReactionData,
+    default_transfer_eV: float | None,
+) -> float:
+    """Resolve positive electron gain while retaining legacy positive loss."""
+
+    explicit_transfer = _explicit_reaction_electron_transfer(reaction)
+    transfer = (
+        explicit_transfer
+        if explicit_transfer is not None
+        else 0.0
+        if default_transfer_eV is None
+        else default_transfer_eV
+    )
+    _validate_electron_energy_topology(reaction, transfer)
+    return transfer
+
+
+def _reaction_order(reaction: ReactionData) -> float:
+    orders = tuple(reaction.reactants.values())
+    if any(not math.isfinite(value) or value < 0.0 for value in orders):
+        raise ChemistryError(
+            f"reaction {reaction.id!r} reactant orders must be finite and nonnegative"
+        )
+    return float(sum(orders))
+
+
+def _rate_coefficient_unit(overall_order: float) -> str:
+    length_exponent = 3.0 * (overall_order - 1.0)
+    rounded_exponent = round(length_exponent)
+    if math.isclose(length_exponent, rounded_exponent, rel_tol=0.0, abs_tol=1.0e-12):
+        length_exponent = float(rounded_exponent)
+    if length_exponent == 0.0:
+        return "s^-1"
+    return f"m{length_exponent:g}/s"
+
+
+def _declared_rate_order(rate_model: RateModelData) -> float | None:
+    value = rate_model.parameters.get("overall_order")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ChemistryError(
+            f"rate model {rate_model.id!r} overall_order must be a number"
+        )
+    order = float(value)
+    if not math.isfinite(order) or order < 0.0:
+        raise ChemistryError(
+            f"rate model {rate_model.id!r} overall_order must be finite and nonnegative"
+        )
+    return order
+
+
+def _validate_gas_rate_dimensions(
+    reactions: tuple[ReactionData, ...], rate_models: tuple[RateModelData, ...]
+) -> None:
+    inferred_order_by_model: dict[str, tuple[float, str]] = {}
+    for reaction, rate_model in zip(reactions, rate_models, strict=True):
+        if rate_model.kind not in _DIMENSIONAL_GAS_RATE_KINDS:
+            continue
+        actual_order = _reaction_order(reaction)
+        declared_order = _declared_rate_order(rate_model)
+        if declared_order is not None and not math.isclose(
+            declared_order, actual_order, rel_tol=0.0, abs_tol=1.0e-12
+        ):
+            raise ChemistryError(
+                f"rate model {rate_model.id!r} declares overall_order "
+                f"{declared_order:g} ({_rate_coefficient_unit(declared_order)}) but "
+                f"reaction {reaction.id!r} has reactant order {actual_order:g} "
+                f"({_rate_coefficient_unit(actual_order)})"
+            )
+        previous = inferred_order_by_model.get(rate_model.id)
+        if previous is not None and not math.isclose(
+            previous[0], actual_order, rel_tol=0.0, abs_tol=1.0e-12
+        ):
+            raise ChemistryError(
+                f"legacy rate model {rate_model.id!r} is reused by reactions "
+                f"{previous[1]!r} and {reaction.id!r} with incompatible overall "
+                f"orders {previous[0]:g} ({_rate_coefficient_unit(previous[0])}) "
+                f"and {actual_order:g} ({_rate_coefficient_unit(actual_order)}); "
+                "split the model and declare overall_order on each coefficient"
+            )
+        inferred_order_by_model[rate_model.id] = (actual_order, reaction.id)
+
+
+def _validated_gas_rate_models(
+    data: ChemistryData, species_by_id: Mapping[str, SpeciesData]
+) -> tuple[RateModelData, ...]:
+    return tuple(
+        _validated_gas_rate_model(data, reaction, species_by_id)
+        for reaction in data.gas_reactions
+    )
 
 
 def _compile_gas_reactions(
@@ -683,9 +740,12 @@ def _compile_gas_reactions(
     evaluator_by_model_id: dict[str, tuple[RateEvaluator, float | None]] = {}
     electron_energy_transfers = np.zeros(reaction_count)
     gas_heating = np.zeros(reaction_count)
+    validated_rate_models = _validated_gas_rate_models(data, species_by_id)
+    _validate_gas_rate_dimensions(data.gas_reactions, validated_rate_models)
 
-    for row, reaction in enumerate(data.gas_reactions):
-        rate_model = _validated_gas_rate_model(data, reaction, species_by_id)
+    for row, (reaction, rate_model) in enumerate(
+        zip(data.gas_reactions, validated_rate_models, strict=True)
+    ):
         compiled_rate = evaluator_by_model_id.get(rate_model.id)
         if compiled_rate is None:
             compiled_rate = _rate_evaluator(rate_model, data.cross_sections)
@@ -738,9 +798,28 @@ def _validate_non_gas_reactions(
     data: ChemistryData, species_by_id: Mapping[str, SpeciesData]
 ) -> None:
     for reaction in data.boundary_reactions:
+        _validate_non_gas_energy_fields(reaction, family="boundary")
         _validate_reaction_balance(reaction, species_by_id, boundary=True)
     for reaction in data.surface_reactions:
+        _validate_non_gas_energy_fields(reaction, family="surface")
         _validate_surface_reaction(data, reaction, species_by_id)
+
+
+def _validate_non_gas_energy_fields(reaction: ReactionData, *, family: str) -> None:
+    if any(
+        value is not None and value != 0.0
+        for value in (
+            reaction.energy_loss_eV,
+            reaction.electron_energy_transfer_eV,
+        )
+    ):
+        raise ChemistryError(
+            f"{family} reaction {reaction.id!r} does not support electron-energy fields"
+        )
+    if family == "boundary" and reaction.gas_heating_eV != 0.0:
+        raise ChemistryError(
+            f"boundary reaction {reaction.id!r} does not support gas_heating_eV"
+        )
 
 
 def _compile_element_matrix(

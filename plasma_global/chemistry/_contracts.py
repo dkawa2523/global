@@ -28,9 +28,20 @@ def has_onset_threshold(cross_section: CrossSectionData) -> bool:
     )
 
 
-def cross_section_support_error(cross_section: CrossSectionData) -> str | None:
-    """Describe curve data that contradicts a declared physical onset."""
+def _momentum_support_error(cross_section: CrossSectionData) -> str | None:
+    if (
+        cross_section.kind == "momentum_transfer"
+        and float(cross_section.energy_eV[0]) > 0.0
+        and float(cross_section.sigma_m2[0]) != 0.0
+    ):
+        return (
+            f"momentum cross section {cross_section.id!r} must explicitly cover "
+            "0 eV; low-energy support is not extrapolated"
+        )
+    return None
 
+
+def _onset_support_error(cross_section: CrossSectionData) -> str | None:
     if not has_onset_threshold(cross_section):
         return None
     threshold = cross_section.threshold_eV
@@ -50,6 +61,84 @@ def cross_section_support_error(cross_section: CrossSectionData) -> str | None:
             f"threshold {threshold:g} eV or above"
         )
     return None
+
+
+def cross_section_support_error(cross_section: CrossSectionData) -> str | None:
+    """Describe curve data that contradicts declared low-energy support."""
+
+    return _momentum_support_error(cross_section) or _onset_support_error(cross_section)
+
+
+def _readonly_curve(
+    energy_eV: np.ndarray, sigma_m2: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    energy_eV.setflags(write=False)
+    sigma_m2.setflags(write=False)
+    return energy_eV, sigma_m2
+
+
+def _threshold_node_index(energy_eV: np.ndarray, threshold_eV: float) -> int | None:
+    tolerance = max(abs(float(np.spacing(threshold_eV))), np.finfo(float).tiny)
+    candidates = np.flatnonzero(np.abs(energy_eV - threshold_eV) <= tolerance)
+    if candidates.size == 0:
+        return None
+    distances = np.abs(energy_eV[candidates] - threshold_eV)
+    return int(candidates[int(np.argmin(distances))])
+
+
+def _normalized_onset_curve(
+    cross_section: CrossSectionData,
+) -> tuple[np.ndarray, np.ndarray]:
+    energy = np.array(cross_section.energy_eV, dtype=float, copy=True)
+    sigma = np.array(cross_section.sigma_m2, dtype=float, copy=True)
+    threshold = cross_section.threshold_eV
+    sigma[energy < threshold] = 0.0
+    threshold_index = _threshold_node_index(energy, threshold)
+    if threshold_index is None:
+        threshold_index = int(np.searchsorted(energy, threshold))
+        energy = np.insert(energy, threshold_index, threshold)
+        sigma = np.insert(sigma, threshold_index, 0.0)
+    else:
+        energy[threshold_index] = threshold
+        if float(sigma[threshold_index]) != 0.0:
+            lower_edge = np.nextafter(threshold, 0.0)
+            previous = (
+                0.0 if threshold_index == 0 else float(energy[threshold_index - 1])
+            )
+            if lower_edge > previous:
+                energy = np.insert(energy, threshold_index, lower_edge)
+                sigma = np.insert(sigma, threshold_index, 0.0)
+    if float(energy[0]) > 0.0:
+        energy = np.insert(energy, 0, 0.0)
+        sigma = np.insert(sigma, 0, 0.0)
+    return _readonly_curve(energy, sigma)
+
+
+def _normalized_continuous_curve(
+    cross_section: CrossSectionData,
+) -> tuple[np.ndarray, np.ndarray]:
+    energy = np.array(cross_section.energy_eV, dtype=float, copy=True)
+    sigma = np.array(cross_section.sigma_m2, dtype=float, copy=True)
+    first_energy = float(energy[0])
+    if first_energy == 0.0:
+        return _readonly_curve(energy, sigma)
+    return _readonly_curve(
+        np.insert(energy, 0, 0.0),
+        np.insert(sigma, 0, 0.0),
+    )
+
+
+def normalized_cross_section_curve(
+    cross_section: CrossSectionData,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return one immutable lower-support policy for all electron closures."""
+
+    support_error = cross_section_support_error(cross_section)
+    if support_error is not None:
+        raise ValueError(support_error)
+    if has_onset_threshold(cross_section):
+        return _normalized_onset_curve(cross_section)
+    return _normalized_continuous_curve(cross_section)
 
 
 def _reactants_in_phase(
@@ -133,5 +222,6 @@ def surface_reaction_shape_error(
 __all__ = [
     "cross_section_support_error",
     "has_onset_threshold",
+    "normalized_cross_section_curve",
     "surface_reaction_shape_error",
 ]

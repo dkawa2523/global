@@ -21,6 +21,7 @@ from plasma_global.models._power_coupling import (
     _ZonePowerIteration,
     _ZonePowerResult,
     advance_coupled_field,
+    command_field_capability,
     commands_are_time_dependent,
     field_feedback,
     group_ports,
@@ -85,6 +86,7 @@ class CompiledPowerCommand:
     power_W: float | None = None
     voltage_V: float | None = None
     external_table: ExternalTableBinding | ExternalTableSample | None = None
+    reduced_field_capability: bool | None = None
 
     def __post_init__(self) -> None:
         validate_compiled_power_command(
@@ -92,6 +94,7 @@ class CompiledPowerCommand:
             self.power_W,
             self.voltage_V,
             self.external_table,
+            self.reduced_field_capability,
         )
 
     @property
@@ -102,10 +105,17 @@ class CompiledPowerCommand:
 
     @property
     def produces_reduced_field(self) -> bool | None:
+        if self.kind == "off":
+            return self.reduced_field_capability
         if self.kind != "external_table":
             return None
-        table = self.external_table
-        return table.produces_reduced_field if table is not None else None
+        return _table_reduced_field_capability(self.external_table)
+
+
+def _table_reduced_field_capability(
+    table: ExternalTableBinding | ExternalTableSample | None,
+) -> bool | None:
+    return None if table is None else table.produces_reduced_field
 
 
 @dataclass(frozen=True, slots=True)
@@ -482,10 +492,7 @@ class PowerCoordinator:
 
         for port in self._ports_by_zone[normalize_id(zone_id)]:
             command = commands.get(normalize_id(port.port_id))
-            produces_field = None if command is None else command.produces_reduced_field
-            if produces_field is None:
-                produces_field = port.produces_reduced_field
-            if produces_field:
+            if command_field_capability(port, command):
                 return True
         return False
 
@@ -502,7 +509,9 @@ class PowerCoordinator:
                 zone_id=normalize_id(port.zone_id),
                 electron_power_W=0.0,
                 gas_power_W=0.0,
-                reduced_field_Td=(0.0 if port.produces_reduced_field else None),
+                reduced_field_Td=(
+                    0.0 if command_field_capability(port, command) else None
+                ),
             )
         return port.evaluate(time_s, state, command)
 
@@ -539,9 +548,9 @@ class PowerCoordinator:
         """Return whether an off command fixes this zone's field at zero."""
 
         return any(
-            port.produces_reduced_field
-            and (command := commands.get(normalize_id(port.port_id))) is not None
+            (command := commands.get(normalize_id(port.port_id))) is not None
             and command.kind == "off"
+            and command_field_capability(port, command)
             for port in self._ports_by_zone[zone_id]
         )
 

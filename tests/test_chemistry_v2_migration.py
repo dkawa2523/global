@@ -253,6 +253,43 @@ def test_cross_section_conversion_selects_segment_and_removes_exact_duplicates(
     )
 
 
+def test_momentum_conversion_rejects_missing_low_energy_support(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "legacy.csv"
+    source.write_text(
+        "energy_eV,sigma_m2\n5,2e-19\n10,1e-19\n",
+        encoding="utf-8",
+    )
+    destination = tmp_path / "canonical.csv"
+
+    with pytest.raises(MigrationError, match="must explicitly cover 0 eV"):
+        chemistry_v2._write_canonical_cross_section(
+            source, destination, require_zero_energy=True
+        )
+
+    assert not destination.exists()
+
+
+def test_momentum_conversion_preserves_explicit_zero_energy_support(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "legacy.csv"
+    source.write_text(
+        "energy_eV,sigma_m2\n0,2e-19\n5,1e-19\n",
+        encoding="utf-8",
+    )
+    destination = tmp_path / "canonical.csv"
+
+    chemistry_v2._write_canonical_cross_section(
+        source, destination, require_zero_energy=True
+    )
+
+    assert destination.read_text(encoding="utf-8") == (
+        "energy_eV,sigma_m2\n0.0,2e-19\n5.0,1e-19\n"
+    )
+
+
 @pytest.mark.parametrize(
     ("contents", "message"),
     [

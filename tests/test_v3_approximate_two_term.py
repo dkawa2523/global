@@ -7,9 +7,10 @@ import pytest
 import yaml
 
 from plasma_global.build import compile_case
-from plasma_global.chemistry.data import load_chemistry
+from plasma_global.chemistry.data import CrossSectionData, load_chemistry
 from plasma_global.core.solver import solve_compiled_model
 from plasma_global.errors import CaseValidationError
+from plasma_global.experimental import prepared_kinetics as prepared_module
 from plasma_global.experimental.eedf import ApproximateTwoTermEEDF
 from plasma_global.experimental.prepared_kinetics import (
     prepare_approximate_two_term_kinetics,
@@ -221,6 +222,36 @@ def test_approximate_two_term_rejects_superelastic_energy_gain(
             field_max_Td=10.0,
             field_points=2,
             max_iterations=48,
+        )
+
+
+def test_prepared_collisions_share_onset_normalization() -> None:
+    onset = prepared_module._compile_collision(
+        CrossSectionData(
+            id="gapped-excitation",
+            kind="excitation",
+            target="Ar",
+            threshold_eV=10.0,
+            energy_loss_eV=10.0,
+            energy_eV=np.array([0.0, 20.0]),
+            sigma_m2=np.array([0.0, 1.0e-20]),
+        )
+    )
+    np.testing.assert_array_equal(onset.interpolate(np.array([5.0, 10.0])), 0.0)
+
+
+def test_prepared_collision_rejects_missing_momentum_low_energy_support() -> None:
+    with pytest.raises(CaseValidationError, match="must explicitly cover 0 eV"):
+        prepared_module._compile_collision(
+            CrossSectionData(
+                id="late-momentum",
+                kind="momentum_transfer",
+                target="Ar",
+                threshold_eV=0.0,
+                energy_loss_eV=0.0,
+                energy_eV=np.array([1.0e-2, 20.0]),
+                sigma_m2=np.array([2.0e-20, 1.0e-20]),
+            )
         )
 
 

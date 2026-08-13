@@ -11,6 +11,10 @@ import numpy as np
 import pytest
 
 from plasma_global.errors import CaseValidationError, ModelDomainError
+from plasma_global.models.external_table import (
+    ExternalTableBinding,
+    load_external_table,
+)
 from plasma_global.models.kinetics import TabulatedElectronKinetics
 from plasma_global.models.power import (
     CompiledPowerCommand,
@@ -281,6 +285,87 @@ def test_local_field_off_preserves_an_explicit_zero_field_table_node() -> None:
     kinetics = result.kinetics_by_zone["plasma"]
     assert kinetics.mean_energy_eV == pytest.approx(0.1)
     assert kinetics.rate_coefficients == {"attachment": 3.0e-15}
+
+
+def test_external_table_default_override_and_off_use_command_field_capability(
+    tmp_path: Path,
+) -> None:
+    default_path = tmp_path / "power-only.csv"
+    default_path.write_text("time_s,electron_power_W\n0,1\n1,1\n", encoding="utf-8")
+    field_path = tmp_path / "field.csv"
+    field_path.write_text(
+        "time_s,electron_power_W,reduced_field_Td\n0,1,5\n1,1,5\n",
+        encoding="utf-8",
+    )
+
+    def binding(path: Path) -> ExternalTableBinding:
+        return ExternalTableBinding(
+            data=load_external_table(path),
+            interpolation="linear",
+            bounds="error",
+            power_scale=1.0,
+            voltage_scale=1.0,
+            current_scale=1.0,
+            gap_m=None,
+            total_density_m3=None,
+            plasma_potential_V=0.0,
+        )
+
+    port = ExternalTablePowerPort("external", "plasma", binding(default_path))
+    coordinator = PowerCoordinator((port,), ("plasma",))
+    override = CompiledPowerCommand(
+        kind="external_table", external_table=binding(field_path)
+    )
+    off = CompiledPowerCommand(kind="off", reduced_field_capability=True)
+    table = TabulatedElectronKinetics(
+        source=Path("positive-field-only.h5"),
+        lookup="local_field",
+        bounds="clip",
+        axis=np.array([1.0, 10.0]),
+        mean_energy_eV=np.array([1.0, 2.0]),
+        mobility_m2_V_s=np.array([1.0, 1.0]),
+        effective_field_Td=np.array([1.0, 10.0]),
+        rate_tables={"ionization": np.array([1.0e-15, 2.0e-15])},
+    )
+
+    assert not coordinator.has_reduced_field_source("plasma", {})
+    assert coordinator.has_reduced_field_source("plasma", {"external": override})
+    assert coordinator.has_reduced_field_source("plasma", {"external": off})
+    result = coordinator.evaluate(
+        time_s=0.0,
+        commands={"external": off},
+        electron_density_m3_by_zone={"plasma": 1.0e15},
+        neutral_density_m3_by_zone={"plasma": 1.0e20},
+        mean_energy_eV_by_zone={"plasma": None},
+        kinetics_by_zone={"plasma": table},
+    )
+
+    assert result.reduced_field_Td_by_zone["plasma"] == 0.0
+    assert result.port_results["external"].reduced_field_Td == 0.0
+    assert result.kinetics_by_zone["plasma"].effective_field_Td == 0.0
+    assert result.iterations_by_zone["plasma"] == 1
+
+    power_only_off = CompiledPowerCommand(kind="off", reduced_field_capability=False)
+    prescribed = coordinator.evaluate(
+        time_s=0.0,
+        commands={"external": power_only_off},
+        electron_density_m3_by_zone={"plasma": 1.0e15},
+        neutral_density_m3_by_zone={"plasma": 1.0e20},
+        mean_energy_eV_by_zone={"plasma": None},
+        prescribed_reduced_field_Td_by_zone={"plasma": 7.0},
+        kinetics_by_zone={"plasma": table},
+    )
+    assert prescribed.reduced_field_Td_by_zone["plasma"] == 7.0
+    assert prescribed.port_results["external"].reduced_field_Td is None
+
+
+def test_reduced_field_capability_only_annotates_off_commands() -> None:
+    with pytest.raises(CaseValidationError, match="boolean annotation for off"):
+        CompiledPowerCommand(
+            kind="power",
+            power_W=1.0,
+            reduced_field_capability=True,
+        )
 
 
 @pytest.mark.parametrize(

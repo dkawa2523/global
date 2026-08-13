@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Literal, TypeVar
 
@@ -47,17 +47,24 @@ def validate_compiled_power_command(
     power_W: float | None,
     voltage_V: float | None,
     external_table: ExternalTableBinding | ExternalTableSample | None,
+    reduced_field_capability: bool | None,
 ) -> None:
-    if kind == "off":
-        _validate_off_command(power_W, voltage_V, external_table)
-    elif kind == "power":
-        _validate_power_command(power_W, voltage_V, external_table)
-    elif kind == "voltage":
-        _validate_voltage_command(power_W, voltage_V, external_table)
-    elif kind == "external_table":
-        _validate_external_table_command(power_W, voltage_V, external_table)
-    else:
+    _validate_reduced_field_capability(kind, reduced_field_capability)
+    validator = _COMMAND_VALIDATORS.get(kind)
+    if validator is None:
         raise CaseValidationError(f"unsupported compiled power command {kind!r}")
+    validator(power_W, voltage_V, external_table)
+
+
+def _validate_reduced_field_capability(
+    kind: str, reduced_field_capability: bool | None
+) -> None:
+    if reduced_field_capability is not None and (
+        kind != "off" or not isinstance(reduced_field_capability, bool)
+    ):
+        raise CaseValidationError(
+            "reduced_field_capability is a boolean annotation for off commands"
+        )
 
 
 def _validate_off_command(
@@ -115,6 +122,24 @@ def _validate_external_table_command(
         raise CaseValidationError(
             "compiled external-table commands require one table binding"
         )
+
+
+_CommandValidator = Callable[
+    [
+        float | None,
+        float | None,
+        ExternalTableBinding | ExternalTableSample | None,
+    ],
+    None,
+]
+_COMMAND_VALIDATORS: Mapping[str, _CommandValidator] = MappingProxyType(
+    {
+        "off": _validate_off_command,
+        "power": _validate_power_command,
+        "voltage": _validate_voltage_command,
+        "external_table": _validate_external_table_command,
+    }
+)
 
 
 def validate_power_port_result(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 
@@ -7,6 +8,7 @@ import numpy as np
 import pytest
 
 import plasma_global.chemistry.compile as compile_module
+from plasma_global.chemistry._contracts import normalized_cross_section_curve
 from plasma_global.chemistry.compile import compile_chemistry
 from plasma_global.chemistry.data import (
     ChemistryData,
@@ -262,7 +264,7 @@ def test_maxwellian_constant_cross_section_matches_analytic_rate() -> None:
     assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(expected, rel=3.0e-4)
 
 
-def test_maxwellian_quadrature_resolves_zero_threshold_lower_tail() -> None:
+def test_maxwellian_rejects_missing_low_energy_momentum_support() -> None:
     sigma_m2 = 1.0e-20
     cross_section = CrossSectionData(
         id="constant-truncated-at-low-energy",
@@ -272,6 +274,23 @@ def test_maxwellian_quadrature_resolves_zero_threshold_lower_tail() -> None:
         energy_loss_eV=0.0,
         energy_eV=np.geomspace(1.0e-3, 10.0, 4001),
         sigma_m2=np.full(4001, sigma_m2),
+    )
+
+    with pytest.raises(ChemistryError, match="must explicitly cover 0 eV"):
+        compile_module.maxwell_rate_table(cross_section)
+
+
+def test_maxwellian_quadrature_resolves_zero_threshold_lower_tail() -> None:
+    sigma_m2 = 1.0e-20
+    energy_eV = np.concatenate(([0.0], np.geomspace(1.0e-3, 10.0, 4001)))
+    cross_section = CrossSectionData(
+        id="constant-with-zero-support",
+        kind="momentum_transfer",
+        target="Ar",
+        threshold_eV=0.0,
+        energy_loss_eV=0.0,
+        energy_eV=energy_eV,
+        sigma_m2=np.full(energy_eV.size, sigma_m2),
     )
 
     axis, rate = compile_module.maxwell_rate_table(cross_section)
@@ -314,6 +333,31 @@ def test_maxwellian_quadrature_keeps_positive_threshold_lower_tail_zero() -> Non
     )
 
     assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(expected, rel=3.0e-4)
+
+
+def test_onset_curve_normalizer_is_readonly_and_zero_below_threshold() -> None:
+    source_energy = np.array([0.0, 20.0])
+    source_sigma = np.array([0.0, 1.0e-20])
+    cross_section = CrossSectionData(
+        id="gapped-excitation",
+        kind="excitation",
+        target="Ar",
+        threshold_eV=10.0,
+        energy_loss_eV=10.0,
+        energy_eV=source_energy,
+        sigma_m2=source_sigma,
+    )
+
+    energy, sigma = normalized_cross_section_curve(cross_section)
+
+    np.testing.assert_array_equal(source_energy, [0.0, 20.0])
+    np.testing.assert_array_equal(source_sigma, [0.0, 1.0e-20])
+    np.testing.assert_array_equal(
+        np.interp([5.0, 10.0, 15.0], energy, sigma),
+        [0.0, 0.0, 0.5e-20],
+    )
+    assert not energy.flags.writeable
+    assert not sigma.flags.writeable
 
 
 def test_rejects_unbalanced_reaction(tmp_path: Path) -> None:
@@ -384,6 +428,197 @@ def test_first_order_rate_accepts_one_unit_electron_reactant(tmp_path: Path) -> 
 
     np.testing.assert_array_equal(chemistry.electron_orders, [1.0])
     np.testing.assert_array_equal(chemistry.reactant_orders, [[0.0, 0.0]])
+
+
+def test_rejects_electron_energy_transfer_without_electron_topology(
+    tmp_path: Path,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / "gas.csv").write_text(
+        "id,equation,rate_model,electron_energy_transfer_eV\n"
+        "neutral,Ar -> Ar,decay,5\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "rates.yaml").write_text(
+        "rate_models:\n  decay:\n    kind: first_order\n    rate_s_inv: 1.0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChemistryError, match="does not contain an electron"):
+        compile_chemistry(load_chemistry(manifest))
+
+
+@pytest.mark.parametrize(
+    ("file_name", "manifest_entry", "contents"),
+    [
+        (
+            "boundary.csv",
+            "",
+            "id,equation,electron_energy_transfer_eV\nneutralize,Ar_plus -> Ar,-5\n",
+        ),
+        (
+            "surface.csv",
+            "surface_reactions: surface.csv\n",
+            "id,equation,rate_model,energy_loss_eV\nsurface_loss,Ar -> Ar,unused,5\n",
+        ),
+    ],
+)
+def test_rejects_unused_non_gas_electron_energy_fields(
+    tmp_path: Path,
+    file_name: str,
+    manifest_entry: str,
+    contents: str,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / file_name).write_text(contents, encoding="utf-8")
+    if manifest_entry:
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8") + manifest_entry,
+            encoding="utf-8",
+        )
+
+    with pytest.raises(ChemistryError, match="do not support electron-energy"):
+        load_chemistry(manifest)
+
+
+def test_programmatic_boundary_allows_zero_legacy_energy_field(tmp_path: Path) -> None:
+    loaded = load_chemistry(_mechanism(tmp_path))
+    boundary = replace(loaded.boundary_reactions[0], energy_loss_eV=0.0)
+
+    compiled = compile_chemistry(replace(loaded, boundary_reactions=(boundary,)))
+
+    assert compiled.boundary_reactions[0].id == boundary.id
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["energy_loss_eV", "electron_energy_transfer_eV", "gas_heating_eV"],
+)
+def test_boundary_loader_allows_effectively_zero_energy_fields(
+    tmp_path: Path, field_name: str
+) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / "boundary.csv").write_text(
+        f"id,equation,{field_name}\nneutralize,Ar_plus -> Ar,0\n",
+        encoding="utf-8",
+    )
+
+    compiled = compile_chemistry(load_chemistry(manifest))
+
+    assert compiled.boundary_reactions[0].id == "neutralize"
+
+
+def test_boundary_loader_rejects_nonzero_gas_heating(tmp_path: Path) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / "boundary.csv").write_text(
+        "id,equation,gas_heating_eV\nneutralize,Ar_plus -> Ar,1\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChemistryError, match="do not support gas_heating_eV"):
+        load_chemistry(manifest)
+
+
+def _generic_rate_dimension_chemistry(
+    reactions: tuple[ReactionData, ...], rate_model: RateModelData
+) -> ChemistryData:
+    return ChemistryData(
+        source=Path("rate-dimension.yaml"),
+        species=(
+            SpeciesData("e", "gas", -1, 0.00054858, {}),
+            SpeciesData("A", "gas", 0, 10.0, {"X": 1.0}),
+            SpeciesData("B", "gas", 0, 10.0, {"X": 1.0}),
+            SpeciesData("A_plus", "gas", 1, 10.0, {"X": 1.0}),
+            SpeciesData("AB", "gas", 0, 20.0, {"X": 2.0}),
+        ),
+        gas_reactions=reactions,
+        boundary_reactions=(),
+        surface_reactions=(),
+        rate_models={rate_model.id: rate_model},
+        cross_sections={},
+    )
+
+
+def test_rejects_legacy_rate_model_shared_across_incompatible_orders() -> None:
+    rate_model = RateModelData("shared", "constant", {"value": 1.0})
+    chemistry = _generic_rate_dimension_chemistry(
+        (
+            ReactionData("unimolecular", {"A": 1.0}, {"B": 1.0}, "shared", None),
+            ReactionData(
+                "bimolecular",
+                {"A": 1.0, "B": 1.0},
+                {"AB": 1.0},
+                "shared",
+                None,
+            ),
+        ),
+        rate_model,
+    )
+
+    with pytest.raises(
+        ChemistryError,
+        match=r"incompatible overall orders.*s\^-1.*m3/s",
+    ):
+        compile_chemistry(chemistry)
+
+
+def test_rejects_declared_rate_order_that_disagrees_with_reaction() -> None:
+    rate_model = RateModelData(
+        "declared", "constant", {"value": 1.0, "overall_order": 2.0}
+    )
+    chemistry = _generic_rate_dimension_chemistry(
+        (ReactionData("convert", {"A": 1.0}, {"B": 1.0}, "declared", None),),
+        rate_model,
+    )
+
+    with pytest.raises(
+        ChemistryError,
+        match=r"declares overall_order 2.*reaction 'convert'.*order 1",
+    ):
+        compile_chemistry(chemistry)
+
+
+def test_loader_accepts_matching_explicit_rate_order_in_canonical_si(
+    tmp_path: Path,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / "gas.csv").write_text(
+        "id,equation,rate_model\nneutral,Ar -> Ar,decay\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "rates.yaml").write_text(
+        "rate_models:\n"
+        "  decay:\n"
+        "    kind: constant\n"
+        "    value: 1.0\n"
+        "    overall_order: 1\n",
+        encoding="utf-8",
+    )
+
+    chemistry = compile_chemistry(load_chemistry(manifest))
+
+    assert chemistry.rate_evaluators[0](SimpleNamespace()) == 1.0
+
+
+def test_product_electron_can_receive_explicit_chemi_ionization_energy() -> None:
+    rate_model = RateModelData("decay", "first_order", {"rate_s_inv": 1.0})
+    chemistry = _generic_rate_dimension_chemistry(
+        (
+            ReactionData(
+                "chemi_ionize",
+                {"A": 1.0},
+                {"A_plus": 1.0, "e": 1.0},
+                "decay",
+                None,
+                electron_energy_transfer_eV=2.0,
+            ),
+        ),
+        rate_model,
+    )
+
+    compiled = compile_chemistry(chemistry)
+
+    np.testing.assert_array_equal(compiled.electron_energy_transfer_eV, [2.0])
 
 
 def test_chemistry_compile_rejects_unsupported_surface_flux_shape() -> None:
@@ -478,7 +713,7 @@ def test_threshold_contract_is_ulp_aware_and_not_applied_to_momentum(
         encoding="utf-8",
     )
     (tmp_path / "xs.csv").write_text(
-        "energy_eV,sigma_m2\n1,1e-20\n10,2e-20\n",
+        "energy_eV,sigma_m2\n0,1e-20\n1,1e-20\n10,2e-20\n",
         encoding="utf-8",
     )
 
@@ -561,6 +796,7 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
         {"O": 1.0, "site": 1.0},
     )
     shared_rate = RateModelData("shared", "constant", {"value": 2.0e-15})
+    bimolecular_rate = RateModelData("bimolecular", "constant", {"value": 2.0e-15})
     surface_rate = RateModelData("stick", "surface_sticking", {})
     gas_reactions = (
         ReactionData(
@@ -568,7 +804,7 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
             {"O2": 1.0},
             {"O": 2.0},
             "shared",
-            3.5,
+            0.0,
             gas_heating_eV=0.25,
             zones=("bulk",),
         ),
@@ -576,7 +812,7 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
             "attach",
             {"e": 1.0, "O": 1.0},
             {"O_minus": 1.0},
-            "shared",
+            "bimolecular",
             None,
         ),
         ReactionData(
@@ -623,7 +859,11 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
         boundary_reactions=boundary_reactions,
         surface_reactions=surface_reactions,
         rate_models=MappingProxyType(
-            {shared_rate.id: shared_rate, surface_rate.id: surface_rate}
+            {
+                shared_rate.id: shared_rate,
+                bimolecular_rate.id: bimolecular_rate,
+                surface_rate.id: surface_rate,
+            }
         ),
         cross_sections=MappingProxyType({}),
         provenance=MappingProxyType({"source": "contract-test"}),
@@ -653,7 +893,7 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
         [[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
     )
     np.testing.assert_array_equal(chemistry.electron_orders, [0.0, 1.0, 0.0])
-    np.testing.assert_array_equal(chemistry.energy_loss_eV, [3.5, 0.0, 0.5])
+    np.testing.assert_array_equal(chemistry.energy_loss_eV, [0.0, 0.0, 0.5])
     np.testing.assert_array_equal(chemistry.gas_heating_eV, [0.25, 0.0, 0.0])
     assert chemistry.element_names == ("O",)
     np.testing.assert_array_equal(chemistry.element_matrix, [[1.0, 1.0, 2.0, 1.0]])

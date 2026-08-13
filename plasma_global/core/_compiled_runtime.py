@@ -10,6 +10,18 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
+from plasma_global.core._runtime_assembly import (
+    EnergyTerms,
+    PowerEvaluation,
+    PreparedEvaluationState,
+    PreparedZoneState,
+    ReactionWallEvaluation,
+    RuntimeAssembly,
+    RuntimeEvaluation,
+    SurfaceTerms,
+    TransportEvaluation,
+    ZoneReactionWallEvaluation,
+)
 from plasma_global.core.domain import RecipeSegment, Zone
 from plasma_global.core.exceptions import ModelConfigurationError, StateDomainError
 from plasma_global.models.electrons import (
@@ -21,9 +33,7 @@ from plasma_global.models.kinetics import (
     ElectronKineticsResult,
     TabulatedElectronKinetics,
 )
-from plasma_global.models.power import PowerCouplingResult
 from plasma_global.models.rates import DensityView, RateContext, RateEvaluator
-from plasma_global.models.surface import SurfaceEvaluation
 from plasma_global.models.walls import (
     CompiledWallBoundary,
     WallFluxRecord,
@@ -31,72 +41,7 @@ from plasma_global.models.walls import (
 )
 
 if TYPE_CHECKING:
-    from plasma_global.core.compiled import (
-        CompiledGlobalModel,
-        ModelEvaluation,
-        ZoneTermLedger,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedEvaluationState:
-    values: np.ndarray
-    domain_atol: np.ndarray
-    density_by_zone: np.ndarray
-    reaction_density_by_zone: np.ndarray
-    electron_energy_by_zone: np.ndarray | None
-    closure_electron_energy_by_zone: np.ndarray | None
-    heavy_energy_by_zone: np.ndarray | None
-    net_charge_by_zone: dict[str, float]
-    electron_density_by_zone: dict[str, float]
-    charge_residual_by_zone: dict[str, float]
-    neutral_density_by_zone: dict[str, float]
-    mean_energy_for_power: dict[str, float | None]
-    gas_temperature_by_zone: np.ndarray
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedZoneState:
-    density: np.ndarray
-    reaction_density: np.ndarray
-    electron_energy: float | None
-    closure_electron_energy: float | None
-    heavy_energy: float | None
-    net_charge: float
-    electron_density: float
-    charge_residual: float
-    neutral_density: float
-    mean_energy_for_power: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class _PowerEvaluation:
-    coupling: PowerCouplingResult | None
-    kinetics_by_zone: dict[str, ElectronKineticsResult]
-    electron_power_W_by_zone: Mapping[str, float]
-    gas_power_W_by_zone: Mapping[str, float]
-    reduced_field_Td_by_zone: dict[str, float]
-    electron_states: dict[str, ElectronState]
-
-
-@dataclass(frozen=True, slots=True)
-class _TransportEvaluation:
-    density_rhs: np.ndarray
-    electron_energy_rhs: np.ndarray | None
-    heavy_energy_rhs: np.ndarray | None
-    inlet_heavy_energy: np.ndarray
-
-
-@dataclass(frozen=True, slots=True)
-class _ReactionWallEvaluation:
-    reaction_rates_by_zone: np.ndarray
-    electron_energy_transfer: np.ndarray
-    gas_reaction_heating: np.ndarray
-    wall_species_rhs: np.ndarray
-    wall_energy_loss: np.ndarray
-    wall_records_by_zone: dict[str, list[WallFluxRecord]]
-    ion_flux_m2_s: dict[tuple[str, str], float]
-    ion_energy_eV: dict[str, float]
+    from plasma_global.core.compiled import CompiledGlobalModel
 
 
 def _evaluate_uncoordinated_table(
@@ -129,30 +74,6 @@ def _evaluate_uncoordinated_table(
         else table.evaluate(reduced_field_Td=reduced_field_Td)
     )
     return result, None
-
-
-@dataclass(frozen=True, slots=True)
-class _ZoneReactionWallEvaluation:
-    rates: np.ndarray
-    electron_energy_transfer: float
-    gas_reaction_heating: float
-    wall_species_rhs: np.ndarray
-    wall_energy_loss: float
-    wall_records: list[WallFluxRecord]
-    ion_flux_m2_s: dict[tuple[str, str], float]
-    ion_energy_eV: dict[str, float]
-
-
-@dataclass(frozen=True, slots=True)
-class _SurfaceTerms:
-    evaluation: SurfaceEvaluation | None
-    rates_by_zone: dict[str, dict[str, float]]
-
-
-@dataclass(frozen=True, slots=True)
-class _EnergyTerms:
-    wall_heavy_exchange: np.ndarray
-    elastic_heating: np.ndarray
 
 
 def _mass_action_rate(
@@ -211,10 +132,8 @@ class RuntimeEvaluator:
         segment: RecipeSegment,
         *,
         collect_ledger: bool = True,
-    ) -> ModelEvaluation:
-        """Evaluate the diagnostic view used by output and audit paths."""
-
-        from plasma_global.core.compiled import ModelEvaluation
+    ) -> RuntimeEvaluation:
+        """Evaluate the private diagnostic payload used by the public facade."""
 
         result = self._evaluate(
             time_s,
@@ -223,7 +142,7 @@ class RuntimeEvaluator:
             collect_ledger=collect_ledger,
             derivative_only=False,
         )
-        if not isinstance(result, ModelEvaluation):
+        if not isinstance(result, RuntimeEvaluation):
             raise RuntimeError("diagnostic evaluation returned only a derivative")
         return result
 
@@ -258,7 +177,7 @@ class RuntimeEvaluator:
         segment: RecipeSegment,
         zone_index: int,
         zone: Zone,
-    ) -> _PreparedZoneState:
+    ) -> PreparedZoneState:
         density_slice = self.model.layout.density_slices[zone.zone_id]
         density = values[density_slice]
         density_atol = domain_atol[density_slice]
@@ -296,7 +215,7 @@ class RuntimeEvaluator:
         heavy_energy = self._prepare_heavy_energy(
             values=values, domain_atol=domain_atol, zone=zone
         )
-        return _PreparedZoneState(
+        return PreparedZoneState(
             density=density,
             reaction_density=reaction_density,
             electron_energy=electron_energy,
@@ -360,7 +279,7 @@ class RuntimeEvaluator:
         state: np.ndarray,
         segment: RecipeSegment,
         domain_atol: np.ndarray | None,
-    ) -> _PreparedEvaluationState:
+    ) -> PreparedEvaluationState:
         values = np.asarray(state, dtype=float)
         if values.shape != (self.model.layout.size,):
             raise StateDomainError(
@@ -422,7 +341,7 @@ class RuntimeEvaluator:
         gas_temperature_by_zone = self._gas_temperatures(
             density_by_zone, heavy_energy_by_zone
         )
-        return _PreparedEvaluationState(
+        return PreparedEvaluationState(
             values=values,
             domain_atol=active_domain_atol,
             density_by_zone=density_by_zone,
@@ -470,8 +389,8 @@ class RuntimeEvaluator:
         self,
         time_s: float,
         segment: RecipeSegment,
-        prepared: _PreparedEvaluationState,
-    ) -> _PowerEvaluation:
+        prepared: PreparedEvaluationState,
+    ) -> PowerEvaluation:
         if self.model.power_coordinator is None:
             coupling = None
             electron_power = segment.absorbed_power_W_by_zone
@@ -501,7 +420,7 @@ class RuntimeEvaluator:
         electron_states = self._evaluate_electron_states(
             prepared, reduced_field, kinetics
         )
-        return _PowerEvaluation(
+        return PowerEvaluation(
             coupling=coupling,
             kinetics_by_zone=kinetics,
             electron_power_W_by_zone=electron_power,
@@ -512,7 +431,7 @@ class RuntimeEvaluator:
 
     def _uncoordinated_kinetics(
         self,
-        prepared: _PreparedEvaluationState,
+        prepared: PreparedEvaluationState,
         reduced_field_by_zone: dict[str, float],
     ) -> dict[str, ElectronKineticsResult]:
         results: dict[str, ElectronKineticsResult] = {}
@@ -539,7 +458,7 @@ class RuntimeEvaluator:
 
     def _evaluate_electron_states(
         self,
-        prepared: _PreparedEvaluationState,
+        prepared: PreparedEvaluationState,
         reduced_field_by_zone: Mapping[str, float],
         kinetics_by_zone: Mapping[str, ElectronKineticsResult],
     ) -> dict[str, ElectronState]:
@@ -587,8 +506,8 @@ class RuntimeEvaluator:
         )
 
     def _evaluate_transport(
-        self, segment: RecipeSegment, prepared: _PreparedEvaluationState
-    ) -> _TransportEvaluation:
+        self, segment: RecipeSegment, prepared: PreparedEvaluationState
+    ) -> TransportEvaluation:
         zone_count = len(self.model.zones)
         density_rhs = np.zeros_like(prepared.density_by_zone)
         electron_rhs = self._optional_zero_zone_array(
@@ -608,7 +527,7 @@ class RuntimeEvaluator:
                 heavy_flow_densities_m3=prepared.reaction_density_by_zone,
             )
             inlet_heavy_energy = forcing.inlet_heavy_energy_J_m3_s
-        return _TransportEvaluation(
+        return TransportEvaluation(
             density_rhs=density_rhs,
             electron_energy_rhs=electron_rhs,
             heavy_energy_rhs=heavy_rhs,
@@ -622,11 +541,11 @@ class RuntimeEvaluator:
     def _evaluate_reactions_and_walls(
         self,
         time_s: float,
-        prepared: _PreparedEvaluationState,
-        power: _PowerEvaluation,
+        prepared: PreparedEvaluationState,
+        power: PowerEvaluation,
         *,
         collect_ledger: bool,
-    ) -> _ReactionWallEvaluation:
+    ) -> ReactionWallEvaluation:
         zone_count = len(self.model.zones)
         reaction_rates = np.zeros((zone_count, len(self.model.reaction_ids)))
         electron_energy_transfer = np.zeros(zone_count)
@@ -654,7 +573,7 @@ class RuntimeEvaluator:
             for key, flux in result.ion_flux_m2_s.items():
                 ion_flux_m2_s[key] = ion_flux_m2_s.get(key, 0.0) + flux
             ion_energy_eV.update(result.ion_energy_eV)
-        return _ReactionWallEvaluation(
+        return ReactionWallEvaluation(
             reaction_rates_by_zone=reaction_rates,
             electron_energy_transfer=electron_energy_transfer,
             gas_reaction_heating=gas_reaction_heating,
@@ -671,10 +590,10 @@ class RuntimeEvaluator:
         time_s: float,
         zone_index: int,
         zone: Zone,
-        prepared: _PreparedEvaluationState,
-        power: _PowerEvaluation,
+        prepared: PreparedEvaluationState,
+        power: PowerEvaluation,
         collect_ledger: bool,
-    ) -> _ZoneReactionWallEvaluation:
+    ) -> ZoneReactionWallEvaluation:
         reaction_density = prepared.reaction_density_by_zone[zone_index]
         electrons = power.electron_states[zone.zone_id]
         kinetics = power.kinetics_by_zone.get(zone.zone_id)
@@ -724,7 +643,7 @@ class RuntimeEvaluator:
             wall_loss += wall.electron_energy_loss_J_m3_s
             wall_records.extend(wall.records)
             self._record_wall_ion_flux(compiled_wall, wall, ion_flux, ion_energy)
-        return _ZoneReactionWallEvaluation(
+        return ZoneReactionWallEvaluation(
             rates=rates,
             electron_energy_transfer=float(
                 self.model.electron_energy_transfer_eV @ rates
@@ -759,16 +678,16 @@ class RuntimeEvaluator:
     def _evaluate_surface_terms(
         self,
         segment: RecipeSegment,
-        prepared: _PreparedEvaluationState,
-        reactions: _ReactionWallEvaluation,
+        prepared: PreparedEvaluationState,
+        reactions: ReactionWallEvaluation,
         *,
         collect_ledger: bool,
-    ) -> _SurfaceTerms:
+    ) -> SurfaceTerms:
         rates_by_zone: dict[str, dict[str, float]] = (
             {zone.zone_id: {} for zone in self.model.zones} if collect_ledger else {}
         )
         if self.model.surface_model is None:
-            return _SurfaceTerms(None, rates_by_zone)
+            return SurfaceTerms(None, rates_by_zone)
         evaluation = self.model.surface_model.evaluate(
             prepared.values[self.model.layout.surface_coverage_slice],
             prepared.reaction_density_by_zone,
@@ -789,21 +708,21 @@ class RuntimeEvaluator:
             for rate_id, rate in evaluation.rates_m2_s.items():
                 surface_id = rate_id.rsplit("@", 1)[-1]
                 rates_by_zone[surface_zone[surface_id]][rate_id] = rate
-        return _SurfaceTerms(evaluation, rates_by_zone)
+        return SurfaceTerms(evaluation, rates_by_zone)
 
     def _evaluate_energy_terms(
         self,
         segment: RecipeSegment,
-        prepared: _PreparedEvaluationState,
-        power: _PowerEvaluation,
-    ) -> _EnergyTerms:
-        return _EnergyTerms(
+        prepared: PreparedEvaluationState,
+        power: PowerEvaluation,
+    ) -> EnergyTerms:
+        return EnergyTerms(
             wall_heavy_exchange=self._wall_heavy_exchange(segment, prepared),
             elastic_heating=self._elastic_heating(prepared, power),
         )
 
     def _wall_heavy_exchange(
-        self, segment: RecipeSegment, prepared: _PreparedEvaluationState
+        self, segment: RecipeSegment, prepared: PreparedEvaluationState
     ) -> np.ndarray:
         result = np.zeros(len(self.model.zones))
         if prepared.heavy_energy_by_zone is None:
@@ -828,7 +747,7 @@ class RuntimeEvaluator:
         )
 
     def _elastic_heating(
-        self, prepared: _PreparedEvaluationState, power: _PowerEvaluation
+        self, prepared: PreparedEvaluationState, power: PowerEvaluation
     ) -> np.ndarray:
         result = np.zeros(len(self.model.zones))
         if self.model.elastic_heating_evaluator is None:
@@ -856,9 +775,9 @@ class RuntimeEvaluator:
 
     def _extension_rhs(
         self,
-        prepared: _PreparedEvaluationState,
-        reactions: _ReactionWallEvaluation,
-        surface: _SurfaceTerms,
+        prepared: PreparedEvaluationState,
+        reactions: ReactionWallEvaluation,
+        surface: SurfaceTerms,
     ) -> np.ndarray | None:
         if self.model.extension_accumulator is None:
             return None
@@ -901,7 +820,7 @@ class RuntimeEvaluator:
         collect_ledger: bool,
         derivative_only: bool,
         domain_atol: np.ndarray | None = None,
-    ) -> ModelEvaluation | np.ndarray:
+    ) -> RuntimeEvaluation | np.ndarray:
         prepared_state = self._prepare_evaluation_state(
             time_s, state, segment, domain_atol
         )
@@ -916,7 +835,8 @@ class RuntimeEvaluator:
         )
         energy = self._evaluate_energy_terms(segment, prepared_state, power)
         derivative, ledger_by_zone = RuntimeAssembly(
-            runtime=self,
+            model=self.model,
+            extension_rhs=self._extension_rhs,
             prepared=prepared_state,
             power=power,
             transport=transport,
@@ -929,9 +849,7 @@ class RuntimeEvaluator:
         if derivative_only:
             derivative.setflags(write=False)
             return derivative
-        from plasma_global.core.compiled import ModelEvaluation
-
-        return ModelEvaluation(
+        return RuntimeEvaluation(
             derivative=derivative,
             electron_states=power.electron_states,
             kinetics_by_zone=power.kinetics_by_zone,
@@ -964,173 +882,6 @@ class RuntimeEvaluator:
                 electron_order=float(self.model.electron_orders[reaction_index]),
             )
         return rates
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeAssembly:
-    """Combine already evaluated physics terms into one state derivative."""
-
-    runtime: RuntimeEvaluator
-    prepared: _PreparedEvaluationState
-    power: _PowerEvaluation
-    transport: _TransportEvaluation
-    reactions: _ReactionWallEvaluation
-    surface: _SurfaceTerms
-    energy: _EnergyTerms
-    collect_ledger: bool
-
-    def assemble(self) -> tuple[np.ndarray, dict[str, ZoneTermLedger]]:
-        model = self.runtime.model
-        derivative = np.zeros_like(self.prepared.values)
-        surface_gas_rhs = self._surface_gas_rhs()
-        surface_heating = self._surface_heating()
-        if self.surface.evaluation is not None:
-            derivative[model.layout.surface_coverage_slice] = (
-                self.surface.evaluation.coverage_derivative_s_inv
-            )
-        extension_rhs = self.runtime._extension_rhs(
-            self.prepared, self.reactions, self.surface
-        )
-        if extension_rhs is not None:
-            derivative[model.layout.extension_slice] = extension_rhs
-        ledger_by_zone: dict[str, ZoneTermLedger] = {}
-        for zone_index, zone in enumerate(model.zones):
-            ledger = self._assemble_zone_derivative(
-                derivative=derivative,
-                zone_index=zone_index,
-                surface_gas_rhs=surface_gas_rhs,
-                surface_heating=surface_heating,
-            )
-            if ledger is not None:
-                ledger_by_zone[zone.zone_id] = ledger
-        return derivative, ledger_by_zone
-
-    def _surface_gas_rhs(self) -> np.ndarray:
-        if self.surface.evaluation is None:
-            return np.zeros_like(self.prepared.density_by_zone)
-        return self.surface.evaluation.gas_derivative_m3_s
-
-    def _surface_heating(self) -> np.ndarray:
-        if self.surface.evaluation is None:
-            return np.zeros(len(self.runtime.model.zones))
-        return self.surface.evaluation.gas_heating_J_m3_s
-
-    def _assemble_zone_derivative(
-        self,
-        *,
-        derivative: np.ndarray,
-        zone_index: int,
-        surface_gas_rhs: np.ndarray,
-        surface_heating: np.ndarray,
-    ) -> ZoneTermLedger | None:
-        model = self.runtime.model
-        zone = model.zones[zone_index]
-        density_slice = model.layout.density_slices[zone.zone_id]
-        rates = self.reactions.reaction_rates_by_zone[zone_index]
-        derivative[density_slice] = (
-            model.stoichiometry.T @ rates
-            + self.transport.density_rhs[zone_index]
-            + self.reactions.wall_species_rhs[zone_index]
-            + surface_gas_rhs[zone_index]
-        )
-        power_density = (
-            self.power.electron_power_W_by_zone.get(zone.zone_id, 0.0) / zone.volume_m3
-        )
-        gas_power_density = (
-            self.power.gas_power_W_by_zone.get(zone.zone_id, 0.0) / zone.volume_m3
-        )
-        electron_transport = self._optional_value(
-            self.transport.electron_energy_rhs, zone_index
-        )
-        heavy_transport = self._optional_value(
-            self.transport.heavy_energy_rhs, zone_index
-        )
-        if model.layout.evolves_electron_energy:
-            derivative[model.layout.electron_energy_indices[zone.zone_id]] = (
-                power_density
-                + self.reactions.electron_energy_transfer[zone_index]
-                - self.reactions.wall_energy_loss[zone_index]
-                - self.energy.elastic_heating[zone_index]
-                + electron_transport
-            )
-        if model.layout.evolves_heavy_energy:
-            derivative[model.layout.heavy_energy_indices[zone.zone_id]] = (
-                gas_power_density
-                + self.reactions.gas_reaction_heating[zone_index]
-                + surface_heating[zone_index]
-                + self.energy.wall_heavy_exchange[zone_index]
-                + self.energy.elastic_heating[zone_index]
-                + heavy_transport
-            )
-        if not self.collect_ledger:
-            return None
-        return self._zone_ledger(
-            zone_index=zone_index,
-            rates=rates,
-            power_density=power_density,
-            gas_power_density=gas_power_density,
-            electron_transport=electron_transport,
-            heavy_transport=heavy_transport,
-            surface_heating=surface_heating,
-        )
-
-    @staticmethod
-    def _optional_value(values: np.ndarray | None, index: int) -> float:
-        return 0.0 if values is None else float(values[index])
-
-    def _zone_ledger(
-        self,
-        *,
-        zone_index: int,
-        rates: np.ndarray,
-        power_density: float,
-        gas_power_density: float,
-        electron_transport: float,
-        heavy_transport: float,
-        surface_heating: np.ndarray,
-    ) -> ZoneTermLedger:
-        # Local import avoids a module cycle while preserving the public class's
-        # identity and pickle path in ``plasma_global.core.compiled``.
-        from plasma_global.core.compiled import ZoneTermLedger
-
-        model = self.runtime.model
-        zone = model.zones[zone_index]
-        return ZoneTermLedger(
-            zone_id=zone.zone_id,
-            reaction_rates_m3_s={
-                reaction_id: float(rate)
-                for reaction_id, rate in zip(model.reaction_ids, rates, strict=True)
-            },
-            absorbed_power_J_m3_s=power_density,
-            reaction_energy_loss_J_m3_s=float(
-                -self.reactions.electron_energy_transfer[zone_index]
-            ),
-            wall_energy_loss_J_m3_s=float(self.reactions.wall_energy_loss[zone_index]),
-            gas_power_J_m3_s=gas_power_density,
-            gas_reaction_heating_J_m3_s=float(
-                self.reactions.gas_reaction_heating[zone_index]
-            ),
-            surface_reaction_heating_J_m3_s=float(surface_heating[zone_index]),
-            wall_heavy_energy_exchange_J_m3_s=float(
-                self.energy.wall_heavy_exchange[zone_index]
-            ),
-            elastic_heating_J_m3_s=float(self.energy.elastic_heating[zone_index]),
-            transport_species_source_m3_s={
-                species_id: float(source)
-                for species_id, source in zip(
-                    model.species_ids,
-                    self.transport.density_rhs[zone_index],
-                    strict=True,
-                )
-            },
-            transport_electron_energy_J_m3_s=electron_transport,
-            transport_heavy_energy_J_m3_s=heavy_transport,
-            inlet_heavy_energy_J_m3_s=float(
-                self.transport.inlet_heavy_energy[zone_index]
-            ),
-            surface_rates_m2_s=self.surface.rates_by_zone[zone.zone_id],
-            wall_fluxes=tuple(self.reactions.wall_records_by_zone[zone.zone_id]),
-        )
 
 
 __all__ = ["RuntimeEvaluator"]

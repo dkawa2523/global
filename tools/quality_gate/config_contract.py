@@ -10,7 +10,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from tools.quality_gate.context import ROOT, QualityFailure
+from tools.quality_gate.context import (
+    ROOT,
+    QualityFailure,
+    _base_ref,
+    _source_for_path,
+)
 
 REQUIRED_RUFF_RULES = {
     "E",
@@ -79,54 +84,6 @@ CONFIG_SEARCH_EXCLUDES = {
     "site_ja",
     "venv",
     "env",
-}
-REQUIRED_IMPORT_DIRECTIONS = {
-    "plasma_global.core": {
-        "plasma_global.api",
-        "plasma_global.audit",
-        "plasma_global.build",
-        "plasma_global.chemistry",
-        "plasma_global.cli",
-        "plasma_global.experimental",
-        "plasma_global.input",
-        "plasma_global.output",
-        "plasma_global.postprocess",
-    },
-    "plasma_global.chemistry": {
-        "plasma_global.api",
-        "plasma_global.audit",
-        "plasma_global.build",
-        "plasma_global.cli",
-        "plasma_global.core",
-        "plasma_global.experimental",
-        "plasma_global.input",
-        "plasma_global.models",
-        "plasma_global.output",
-        "plasma_global.postprocess",
-    },
-    "plasma_global.models": {
-        "plasma_global.api",
-        "plasma_global.audit",
-        "plasma_global.build",
-        "plasma_global.cli",
-        "plasma_global.core",
-        "plasma_global.experimental",
-        "plasma_global.input",
-        "plasma_global.output",
-        "plasma_global.postprocess",
-    },
-    "plasma_global.input.schema": {
-        "plasma_global.api",
-        "plasma_global.audit",
-        "plasma_global.build",
-        "plasma_global.chemistry",
-        "plasma_global.cli",
-        "plasma_global.core",
-        "plasma_global.experimental",
-        "plasma_global.models",
-        "plasma_global.output",
-        "plasma_global.postprocess",
-    },
 }
 
 
@@ -343,24 +300,6 @@ def _coverage_violations(tool: Mapping[str, Any]) -> list[str]:
     return violations
 
 
-def _forbidden_by_source(contracts: object) -> dict[str, set[str]]:
-    forbidden = {source: set() for source in REQUIRED_IMPORT_DIRECTIONS}
-    if not isinstance(contracts, list):
-        return forbidden
-    for value in contracts:
-        contract = _table(value)
-        if contract.get("type") != "forbidden" or contract.get("ignore_imports"):
-            continue
-        sources = _strings(contract.get("source_modules")) or set()
-        modules = _strings(contract.get("forbidden_modules")) or set()
-        for source in sources & REQUIRED_IMPORT_DIRECTIONS.keys():
-            expected_packages = source != "plasma_global.input.schema"
-            if contract.get("as_packages", True) is not expected_packages:
-                continue
-            forbidden[source].update(modules)
-    return forbidden
-
-
 def _import_contract_option_violations(contracts: object) -> list[str]:
     if not isinstance(contracts, list):
         return ["import-linter contracts must be an array"]
@@ -381,8 +320,48 @@ def _import_contract_option_violations(contracts: object) -> list[str]:
     ]
 
 
-def _import_violations(tool: Mapping[str, Any]) -> list[str]:
+def _indirect_requirements(allows_indirect: bool) -> tuple[bool, ...]:
+    return (False,) if allows_indirect else (False, True)
+
+
+def _forbidden_edges(contracts: object) -> set[tuple[str, str, bool, bool]]:
+    """Return direct and indirect requirements for each forbidden edge."""
+
+    if not isinstance(contracts, list):
+        return set()
+    edges: set[tuple[str, str, bool, bool]] = set()
+    for value in contracts:
+        contract = _table(value)
+        if contract.get("type") != "forbidden" or contract.get("ignore_imports"):
+            continue
+        sources = _strings(contract.get("source_modules")) or set()
+        targets = _strings(contract.get("forbidden_modules")) or set()
+        as_packages = contract.get("as_packages", True) is True
+        allows_indirect = contract.get("allow_indirect_imports", False) is True
+        edges.update(
+            (source, target, as_packages, indirect)
+            for source in sources
+            for target in targets
+            for indirect in _indirect_requirements(allows_indirect)
+        )
+    return edges
+
+
+def _missing_edge_identities(
+    current: set[tuple[str, str, bool, bool]],
+    reference: set[tuple[str, str, bool, bool]],
+) -> set[tuple[str, str, bool]]:
+    return {
+        (source, target, as_packages)
+        for source, target, as_packages, _ in reference - current
+    }
+
+
+def _import_violations(
+    tool: Mapping[str, Any], reference_tool: Mapping[str, Any]
+) -> list[str]:
     import_linter = _table(tool.get("importlinter"))
+    reference = _table(reference_tool.get("importlinter"))
     violations = _unexpected_keys(
         import_linter, {"root_package", "contracts"}, "import-linter"
     )
@@ -391,14 +370,14 @@ def _import_violations(tool: Mapping[str, Any]) -> list[str]:
     )
     if import_linter.get("root_package") != "plasma_global":
         violations.append("import-linter root_package must remain plasma_global")
-    actual = _forbidden_by_source(import_linter.get("contracts"))
-    for source, required in REQUIRED_IMPORT_DIRECTIONS.items():
-        missing = required - actual[source]
-        if missing:
-            description = ", ".join(sorted(missing))
-            violations.append(
-                f"import-linter {source} contract is missing: {description}"
-            )
+    current_edges = _forbidden_edges(import_linter.get("contracts"))
+    reference_edges = _forbidden_edges(reference.get("contracts"))
+    missing = _missing_edge_identities(current_edges, reference_edges)
+    if missing:
+        description = ", ".join(
+            f"{source} -> {target}" for source, target, _ in sorted(missing)
+        )
+        violations.append(f"import-linter contracts were weakened: {description}")
     return violations
 
 
@@ -423,14 +402,17 @@ def _mutmut_violations(tool: Mapping[str, Any]) -> list[str]:
     return violations
 
 
-def _config_violations(config: Mapping[str, Any]) -> list[str]:
+def _config_violations(
+    config: Mapping[str, Any], reference: Mapping[str, Any]
+) -> list[str]:
     tool = _table(config.get("tool"))
+    reference_tool = _table(reference.get("tool"))
     return [
         *_ruff_violations(tool),
         *_pyrefly_violations(tool),
         *_pytest_violations(tool),
         *_coverage_violations(tool),
-        *_import_violations(tool),
+        *_import_violations(tool, reference_tool),
         *_mutmut_violations(tool),
     ]
 
@@ -463,8 +445,9 @@ def _check_quality_config(path: Path | None = None) -> None:
         config = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
         raise QualityFailure(f"Cannot read quality configuration: {exc}") from exc
+    reference = _reference_config(config_path, config)
     alternates = _alternate_config_paths(config_path)
-    violations = _config_violations(config)
+    violations = _config_violations(config, reference)
     if alternates:
         violations.append(
             "alternate quality configuration files are forbidden: "
@@ -473,3 +456,23 @@ def _check_quality_config(path: Path | None = None) -> None:
     if violations:
         details = "\n".join(f"- {violation}" for violation in violations)
         raise QualityFailure(f"Quality configuration was weakened:\n{details}")
+
+
+def _reference_config(
+    config_path: Path, current: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Load the comparison config used for monotonic import contracts."""
+
+    primary = (ROOT / "pyproject.toml").resolve()
+    if config_path.resolve() != primary:
+        source = primary.read_text(encoding="utf-8")
+    else:
+        source = _source_for_path("pyproject.toml", source_ref=_base_ref())
+        if source is None:
+            return current
+    try:
+        return tomllib.loads(source)
+    except tomllib.TOMLDecodeError as exc:
+        raise QualityFailure(
+            f"Cannot read reference quality configuration: {exc}"
+        ) from exc

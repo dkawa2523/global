@@ -91,6 +91,9 @@ mobility、absorbed power の全 residual を相対許容誤差 `1e-6`、最大 
 収束判定後は返却する最終E/Nでもう一度kineticsとportを評価するため、artifactのE/N、rate、mobility、
 powerは同じiterateに対応します。正のfieldだけを持つprepared tableをoffにした場合だけcold-electron
 boundaryを使い、明示0-field nodeがあるtableの物理値は上書きしません。
+external-tableのdefaultとstep overrideでE/N列の有無が変わる場合は、現在のcommandの能力を優先します。
+off commandは停止対象がE/N sourceだったかを明示し、power-only portの停止で別のprescribed E/Nを
+0へ上書きしません。
 
 RF/CCPのpower commandはsourceへの皮相電力ではなくplasma吸収実電力です。RFのsource-side実電力は
 吸収電力をcoupling efficiencyで割って求めます。lossless-sheath CCPでは実電力は (I_{rms}^2R)、
@@ -120,6 +123,10 @@ H_g=U_g+p=U_g+k_BT_g\sum_s n_s
 です。したがって、定容・断熱容器の充填と排気を第一法則どおり扱います。evolved gas と
 transport を組み合わせる場合、transport は同じ species 順の `cv_over_kb` を必須とし、内部
 エネルギーをそのまま移流する fallback はありません。
+wallとsurfaceによるgas species sourceは、同じ評価済みparticle fluxに
+\((c_{v,s}/k_B)k_BT_g\)を掛けたinternal-energy sourceを運びます。これにより明示的な
+reaction heatingがない粒子交換だけでは、densityとenergy closureから戻すgas temperatureが
+人工的に変化しません。
 
 ## Wall と surface
 

@@ -156,12 +156,22 @@ runtime rate ID は `electron_impact`, `arrhenius`, `constant`, `first_order`, `
 `experimental.electron_temperature_power_law` と明示します。各 kind の必須 parameter と未知
 parameter は厳格に検証されます。
 
+`arrhenius`, `constant`, `tabulated_1d`, `experimental.electron_temperature_power_law`
+の係数は canonical SI です。反応物総次数を (q) とすると係数単位は
+(m^{3(q-1)}s^{-1}) です。`overall_order` を指定した場合は反応式から求めた次数とcompile時に
+照合します。省略した従来入力も、同じrate modelを参照する全反応の次数が一意ならその次数を
+採用します。異なる次数で1つの従来modelを共有する入力は、同じ数値を `s^-1` と `m3/s` 等へ
+同時解釈することになるため拒否し、次数ごとのmodel分割を要求します。
+
 cross-section manifest は `kind`, `target`, `threshold_eV`, `file` と、電子energy移送を表す
 `electron_energy_transfer_eV` または互換入力 `energy_loss_eV` のどちらか一方を必須とします。
 前者は正値が電子加熱、負値が電子冷却です。後者は従来どおり非負の電子energy損失で、内部で
 符号付きtransferへ変換されます。両方を同時指定できません。
 gas reaction CSVでも同じ2 fieldを任意overrideとして使え、未指定時は参照cross sectionの
-transferを継承します。
+transferを継承します。非zero transferは反応物または生成物にelectronを含む反応だけで使用
+できます。boundary/surface reactionでは非zero electron energy fieldを受理しません。従来CSV
+との互換用にexact zeroは許可しますが、物理項としては使用しません。surfaceの重粒子加熱には
+専用の`gas_heating_eV`を使用し、boundaryではこのfieldも非zeroなら拒否します。
 現行result artifactは互換性のためledger名 `reaction_energy_loss_J_m3_s` を維持します。この値は
 符号付きtransferの負値なので、superelastic反応による電子加熱では負になります。
 curve CSV は exact header `energy_eV,sigma_m2`、有限・非負断面積、厳密昇順 energy を要求します。
@@ -173,6 +183,11 @@ sort、負値 clip、非有限行の黙殺はしません。LXCat / BOLSIG / ZDP
 `(threshold_eV, 0)` を補います。`momentum_transfer` と `attachment` のthresholdは同じ
 zero-onset契約を持たず、実データのsupportをそのまま使います。
 
+この低energy正規化はMaxwellian積分とexperimental EEDF準備で同じpure policyを共有します。
+onset curveはthreshold未満をzeroとします。momentum curveは0 eVまでの明示nodeを必須とし、
+有限な先頭値を低energy側へ定数外挿しません。EEDF kernelへ直接渡すcurveもenergy grid下限
+までのsupportを必須とし、欠落区間を`np.interp(left=0)`で黙ってmomentum消失へ変換しません。
+
 surface thermal rateは、desorptionを
 `ν exp(-Ea/kTs) Ns θ [m^-2 s^-1]`、Langmuir-Hinshelwood二体反応を
 `A exp(-Ea/kTs) Ns^2 θa θb [m^-2 s^-1]` と評価します。前者のreactant総次数は1、
@@ -182,10 +197,11 @@ Maxwellian rate の事前 table は、CSV 最終energyより上を外挿しま�
 energy-weighted Maxwellian tailが `1e-6` 以下となるmean-energy範囲だけを生成し、その範囲外は
 `ModelDomainError` です。高いelectron energyを扱う場合は、rateをclipするのではなく断面積CSVを
 十分高いenergyまで延長する必要があります。
-低energy側は積分時だけ0 eVまで補います。正のonset thresholdを持つ非弾性curveでは、未収録の
-threshold nodeを0として補い、それ未満の区間も0とします。threshold契約を持たないcurveが
-有限の先頭値を明示している場合は、その先頭値を0 eVまで保持します。source CSVやruntimeの
-断面積補間は書き換えません。
+低energy側では、正のonset thresholdを持つ非弾性curveに未収録のthreshold nodeを0として補い、
+それ未満の区間も0とします。先頭断面積が0の非onset curveは0 eVまでzero supportを補えますが、
+非zero momentum supportはsource CSVに0 eV nodeが必要です。source CSV自体は書き換えません。
+v2 migratorもこの欠落区間を推測・外挿せず、legacy sourceに明示0 eV nodeがなければ
+`MigrationError`としてdata補完を要求します。
 
 ## 固定 `result.h5` layout
 
@@ -207,6 +223,11 @@ threshold nodeを0として補い、それ未満の区間も0とします。thre
     ├── status_message
     └── statistics_yaml
 ```
+
+`time_s` のunit属性は `s` です。`state/values` の `column_units` 属性は
+`state/labels` と同じ順で各列の単位を保持し、各observable datasetも `unit` 属性を持ちます。
+canonicalな単位を宣言していないextension labelには `unspecified` を保存し、reader側で推測
+しません。
 
 未知 group/dataset は reader が拒否します。`summary.yaml` は status、期間、solver 統計、model
 IDs、指定 final 値、最大保存則残差だけを含みます。CSV は `plasma-global export` による明示的な

@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from hashlib import sha256
-from pathlib import Path
-from types import MappingProxyType
 from typing import Any
 
 from plasma_global._audit_result import audit_result
@@ -22,84 +19,6 @@ _DYNAMIC_LEDGER_NAMES = (
 
 def _normalized_balance(delta: float, before: float) -> float:
     return abs(delta) / max(abs(before), 1.0)
-
-
-def _file_sha256(path: Path) -> tuple[str, int]:
-    digest = sha256()
-    size = 0
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-            size += len(chunk)
-    return digest.hexdigest(), size
-
-
-def _add_input_role(
-    roles: dict[Path, set[str]], path: Path | str | None, role: str
-) -> None:
-    if path is not None:
-        roles.setdefault(Path(path).resolve(), set()).add(role)
-
-
-def _input_roles(case: Any, chemistry_data: Any) -> dict[Path, set[str]]:
-    roles: dict[Path, set[str]] = {}
-    _add_input_role(roles, case.source_path, "case")
-    for path in case.included_files:
-        _add_input_role(roles, path, "case_include")
-    for path in chemistry_data.source_files:
-        _add_input_role(roles, path, "chemistry_input")
-
-    _add_input_role(
-        roles,
-        getattr(case.models.electrons, "file", None),
-        "electron_kinetics_table",
-    )
-    _add_input_role(
-        roles,
-        getattr(case.models.electron_density, "file", None),
-        "electron_density_profile",
-    )
-    for port in case.reactor.power_ports:
-        _add_input_role(
-            roles, getattr(port.model, "file", None), f"power_port:{port.port_id}"
-        )
-    for step in case.recipe.steps:
-        for port_id, command in step.commands.power_ports.items():
-            _add_input_role(
-                roles,
-                getattr(command, "file", None),
-                f"recipe_power_override:{step.step_id}:{port_id}",
-            )
-    return roles
-
-
-def collect_file_provenance(case: Any, chemistry_data: Any) -> Mapping[str, Any]:
-    """Return deterministic SHA-256 provenance for every runtime input file."""
-
-    from plasma_global.input.schema import CaseSpec
-
-    if not isinstance(case, CaseSpec):
-        raise TypeError("case must be a schema-v3 CaseSpec")
-
-    files: dict[str, Any] = {}
-    roles = _input_roles(case, chemistry_data)
-
-    def normalized_path(path: Path) -> str:
-        return str(path).casefold()
-
-    for path in sorted(roles, key=normalized_path):
-        digest, size = _file_sha256(path)
-        files[str(path)] = {
-            "sha256": digest,
-            "size_bytes": size,
-            "roles": sorted(roles[path]),
-        }
-    return MappingProxyType(
-        {
-            "algorithm": "sha256",
-            "files": MappingProxyType(files),
-        }
-    )
 
 
 def _heavy_ions(chemistry_data: Any) -> tuple[Any, ...]:
@@ -439,7 +358,6 @@ def audit_case(case: Any) -> CaseAuditReport:
     issues.extend(_missing_momentum_issues(compiled_provenance))
 
     provenance = dict(compiled_provenance)
-    provenance["input_files"] = collect_file_provenance(case, chemistry_data)
     dynamic = dict(provenance["runtime_diagnostics"]["conservation_max_abs_residual"])
     static = _static_balance_maxima(chemistry_data)
     issues.extend(_balance_issues(case, static, dynamic))

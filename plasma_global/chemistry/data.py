@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -370,11 +370,34 @@ def _load_species(path: Path) -> tuple[SpeciesData, ...]:
     return tuple(result)
 
 
+def _validate_reaction_energy_fields(
+    *,
+    family: Literal["gas", "boundary", "surface"],
+    where: str,
+    legacy_loss_eV: float | None,
+    signed_transfer_eV: float | None,
+    gas_heating_eV: float,
+) -> None:
+    nonzero_electron_transfer = any(
+        value is not None and value != 0.0
+        for value in (legacy_loss_eV, signed_transfer_eV)
+    )
+    if family != "gas" and nonzero_electron_transfer:
+        raise ChemistryError(
+            f"{where}: {family} reactions do not support electron-energy fields"
+        )
+    if family == "boundary" and gas_heating_eV != 0.0:
+        raise ChemistryError(
+            f"{where}: boundary reactions do not support gas_heating_eV"
+        )
+
+
 def _load_reactions(
-    path: Path | None, *, boundary: bool = False
+    path: Path | None, *, family: Literal["gas", "boundary", "surface"] = "gas"
 ) -> tuple[ReactionData, ...]:
     if path is None:
         return ()
+    boundary = family == "boundary"
     required = {"id", "equation"} if boundary else {"id", "equation", "rate_model"}
     rows = _csv_rows(
         path,
@@ -398,6 +421,13 @@ def _load_reactions(
             raise ChemistryError(
                 f"{path}:{line}: gas_heating_eV must be finite and nonnegative"
             )
+        _validate_reaction_energy_fields(
+            family=family,
+            where=f"{path}:{line}",
+            legacy_loss_eV=loss,
+            signed_transfer_eV=transfer,
+            gas_heating_eV=gas_heating,
+        )
         result.append(
             ReactionData(
                 id=row["id"],
@@ -417,15 +447,16 @@ def _load_reactions(
 
 _RATE_KEYS: dict[str, set[str]] = {
     "electron_impact": {"cross_section", "branching_yield"},
-    "arrhenius": {"A", "beta", "activation_eV"},
-    "constant": {"value"},
+    "arrhenius": {"A", "beta", "activation_eV", "overall_order"},
+    "constant": {"value", "overall_order"},
     "first_order": {"rate_s_inv"},
     "experimental.electron_temperature_power_law": {
         "A",
         "reference_temperature_K",
         "exponent",
+        "overall_order",
     },
-    "tabulated_1d": {"axis", "file", "bounds"},
+    "tabulated_1d": {"axis", "file", "bounds", "overall_order"},
     "sticking": {"value", "coverage"},
     "ion_assisted": {
         "yield",
@@ -563,6 +594,7 @@ def _validate_rate_parameters(kind: str, model: Mapping[str, Any], where: str) -
     missing = sorted(_RATE_REQUIRED[kind] - set(model))
     if missing:
         raise ChemistryError(f"{where} is missing: {', '.join(missing)}")
+    _validate_optional_rate_order(model, where)
     if kind in {
         "electron_impact",
         "arrhenius",
@@ -574,6 +606,11 @@ def _validate_rate_parameters(kind: str, model: Mapping[str, Any], where: str) -
         _validate_gas_rate_parameters(kind, model, where)
     else:
         _validate_surface_rate_parameters(kind, model, where)
+
+
+def _validate_optional_rate_order(model: Mapping[str, Any], where: str) -> None:
+    if "overall_order" in model:
+        _finite_number(model, "overall_order", where, minimum=0.0)
 
 
 def _load_rate_models(
@@ -787,8 +824,8 @@ def load_chemistry(path: str | Path) -> ChemistryData:
         source=source,
         species=_load_species(species_path),
         gas_reactions=_load_reactions(gas_path),
-        boundary_reactions=_load_reactions(boundary_path, boundary=True),
-        surface_reactions=_load_reactions(surface_path),
+        boundary_reactions=_load_reactions(boundary_path, family="boundary"),
+        surface_reactions=_load_reactions(surface_path, family="surface"),
         rate_models=_load_rate_models(rate_path, source_files),
         cross_sections=_load_cross_sections(cross_section_path, source_files),
         experimental=MappingProxyType(experimental),

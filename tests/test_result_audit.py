@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import yaml
 
+from plasma_global import _provenance as provenance_module
 from plasma_global import audit as audit_module
 from plasma_global import load_case, simulate
 from plasma_global.audit import audit_case, audit_result, collect_file_provenance
@@ -311,17 +312,44 @@ def test_case_audit_closes_evolved_heavy_and_electron_energy_ledgers() -> None:
     assert report.conservation_max_abs_residual["particle_ledger_normalized"] < 1.0e-12
 
 
-def test_normal_simulation_does_not_reopen_inputs_for_audit_checksums(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_normal_simulation_records_input_and_software_provenance() -> None:
     fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
-
-    def forbidden_checksum(_path: Path) -> tuple[str, int]:
-        raise AssertionError("normal simulation must not read files for audit checksum")
-
-    monkeypatch.setattr(audit_module, "_file_sha256", forbidden_checksum)
 
     result = simulate(load_case(fixture))
 
     assert result.status.success
-    assert "input_files" not in result.metadata["provenance"]
+    provenance = result.metadata["provenance"]
+    input_files = provenance["input_files"]
+    assert input_files["algorithm"] == "sha256"
+    case_record = input_files["files"][str(fixture.resolve())]
+    assert len(case_record["sha256"]) == 64
+    assert case_record["size_bytes"] == fixture.stat().st_size
+    assert case_record["roles"] == ("case",)
+
+    software = provenance["software"]
+    assert software["package"]["name"] == "plasma-global-model"
+    assert software["package"]["version"]
+    assert set(software["runtime"]) == {"python", "numpy", "scipy", "h5py"}
+    assert software["git"]["revision"] is None or len(software["git"]["revision"]) == 40
+    assert software["git"]["dirty"] in {True, False, None}
+
+
+def test_normal_simulation_does_not_reopen_inputs_for_audit_checksums(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+    calls: list[Path] = []
+    checksum = provenance_module._file_sha256
+
+    def recorded_checksum(path: Path) -> tuple[str, int]:
+        calls.append(path)
+        return checksum(path)
+
+    monkeypatch.setattr(provenance_module, "_file_sha256", recorded_checksum)
+    result = simulate(load_case(fixture))
+    compilation_calls = tuple(calls)
+
+    assert compilation_calls
+    assert len(compilation_calls) == len(set(compilation_calls))
+    assert audit_result(result).passed
+    assert tuple(calls) == compilation_calls

@@ -16,6 +16,7 @@ from typing import Any, Literal, SupportsFloat, SupportsIndex
 
 import numpy as np
 
+from plasma_global.chemistry._contracts import normalized_cross_section_curve
 from plasma_global.chemistry.data import ChemistryData, CrossSectionData, SpeciesData
 from plasma_global.errors import CaseValidationError
 from plasma_global.experimental.eedf import ApproximateTwoTermEEDF, ElectronCollision
@@ -70,6 +71,15 @@ def _is_neutral_gas_target(target: SpeciesData | None) -> bool:
     return target is not None and target.phase == "gas" and target.charge == 0
 
 
+def _normalized_collision_curve(
+    cross_section: CrossSectionData,
+) -> tuple[np.ndarray, np.ndarray]:
+    try:
+        return normalized_cross_section_curve(cross_section)
+    except ValueError as exc:
+        raise CaseValidationError(str(exc)) from exc
+
+
 def _compile_collision(cross_section: CrossSectionData) -> ElectronCollision:
     """Translate one validated-target cross section to the EEDF contract."""
 
@@ -80,12 +90,13 @@ def _compile_collision(cross_section: CrossSectionData) -> ElectronCollision:
             "experimental.approximate_two_term does not support superelastic "
             f"electron heating from cross section {cross_section.id!r}"
         )
+    energy_eV, sigma_m2 = _normalized_collision_curve(cross_section)
     return ElectronCollision(
         collision_id=cross_section.id,
         target_species=cross_section.target,
         kind=kind,
-        energy_eV=cross_section.energy_eV,
-        cross_section_m2=cross_section.sigma_m2,
+        energy_eV=energy_eV,
+        cross_section_m2=sigma_m2,
         energy_loss_eV=0.0 if kind == "momentum" else -electron_transfer,
     )
 

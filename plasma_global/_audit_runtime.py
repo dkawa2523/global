@@ -150,6 +150,8 @@ def _heavy_energy_residual(
         ledger.surface_reaction_heating_J_m3_s,
         ledger.wall_heavy_energy_exchange_J_m3_s,
         ledger.elastic_heating_J_m3_s,
+        ledger.wall_species_energy_J_m3_s,
+        ledger.surface_species_energy_J_m3_s,
         ledger.transport_heavy_energy_J_m3_s,
     )
     rhs = float(evaluation.derivative[model.layout.heavy_energy_indices[zone_id]])

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import inspect
+import pickle
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import get_type_hints
 
 import h5py
 import numpy as np
@@ -17,6 +20,7 @@ from plasma_global.core.result import (
     to_plain_mapping,
 )
 from plasma_global.output import (
+    ResultPaths,
     audit_result_h5,
     build_summary,
     export_result_csv,
@@ -26,7 +30,40 @@ from plasma_global.output import (
     write_result,
     write_result_csv,
     write_result_h5,
+    write_summary_yaml,
 )
+
+
+@pytest.mark.parametrize(
+    "public_object",
+    [
+        ResultPaths,
+        build_summary,
+        read_result_csv,
+        read_result_h5,
+        write_result_csv,
+        write_result_h5,
+        write_summary_yaml,
+    ],
+)
+def test_public_output_objects_keep_their_module_identity(
+    public_object: object,
+) -> None:
+    assert public_object.__module__ == "plasma_global.output"
+    assert get_type_hints(public_object) is not None
+    assert public_object.__name__ in inspect.getsource(public_object)
+
+
+def test_result_paths_keeps_its_public_pickle_identity(tmp_path: Path) -> None:
+    paths = ResultPaths(
+        directory=tmp_path,
+        result_h5=tmp_path / "result.h5",
+        summary_yaml=tmp_path / "summary.yaml",
+    )
+
+    payload = pickle.dumps(paths)
+
+    assert b"plasma_global.output" in payload
 
 
 def test_plotting_reports_the_missing_optional_dependency(
@@ -136,6 +173,11 @@ def test_result_h5_has_only_the_fixed_public_layout_and_round_trips(
         }
         assert h5["state/values"].shape == (3, 2)
         assert h5["state/labels"].asstr()[...].tolist() == list(result.state_labels)
+        assert h5["state/values"].attrs["column_units"].tolist() == [
+            "m^-3",
+            "eV",
+        ]
+        assert h5["observables/absorbed_power_W"].attrs["unit"] == "W"
         assert set(h5["observables"]) == set(result.observables)
         assert (
             h5["metadata/effective_case_yaml"]
@@ -190,6 +232,19 @@ def test_result_h5_round_trips_bohm_closure_provenance(tmp_path: Path) -> None:
         to_plain_mapping(loaded.metadata)["provenance"]["wall_transport_closure"]
         == metadata["provenance"]["wall_transport_closure"]
     )
+
+
+def test_result_h5_round_trips_input_and_software_provenance(tmp_path: Path) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+    result = simulate(load_case(fixture))
+
+    loaded = read_result_h5(write_result_h5(tmp_path / "result.h5", result))
+
+    provenance = to_plain_mapping(loaded.metadata)["provenance"]
+    case_record = provenance["input_files"]["files"][str(fixture.resolve())]
+    assert len(case_record["sha256"]) == 64
+    assert case_record["size_bytes"] == fixture.stat().st_size
+    assert provenance["software"]["runtime"]["numpy"] == np.__version__
 
 
 def test_write_result_always_writes_exactly_h5_and_summary(tmp_path: Path) -> None:

@@ -51,6 +51,33 @@ def _validate_terminal_bin_probability(
         )
 
 
+def _validate_collision_energy_support(
+    collisions: Sequence[ElectronCollision],
+    energy_min_eV: float,
+    energy_max_eV: float,
+) -> None:
+    uncovered_lower = tuple(
+        collision.collision_id
+        for collision in collisions
+        if float(collision.energy_eV[0]) > energy_min_eV
+    )
+    if uncovered_lower:
+        raise ValueError(
+            "collision cross sections do not cover the EEDF lower bound: "
+            + ", ".join(uncovered_lower)
+        )
+    uncovered_upper = tuple(
+        collision.collision_id
+        for collision in collisions
+        if float(collision.energy_eV[-1]) < energy_max_eV
+    )
+    if uncovered_upper:
+        raise ValueError(
+            "collision cross sections do not cover the EEDF energy grid: "
+            + ", ".join(uncovered_upper)
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ElectronCollision:
     """One tabulated electron-neutral collision cross section."""
@@ -173,16 +200,9 @@ class ApproximateTwoTermEEDF:
             raise ValueError("elastic_loss_eV must be finite and nonnegative")
         if self.max_iterations < 1:
             raise ValueError("max_iterations must be positive")
-        uncovered = tuple(
-            collision.collision_id
-            for collision in collisions
-            if float(collision.energy_eV[-1]) < self.energy_max_eV
+        _validate_collision_energy_support(
+            collisions, self.energy_min_eV, self.energy_max_eV
         )
-        if uncovered:
-            raise ValueError(
-                "collision cross sections do not cover the EEDF energy grid: "
-                + ", ".join(uncovered)
-            )
 
         energy = np.geomspace(
             self.energy_min_eV, self.energy_max_eV, self.energy_points

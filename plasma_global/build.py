@@ -11,6 +11,7 @@ import yaml
 from pydantic import ValidationError
 
 from plasma_global._audit_runtime import runtime_diagnostic_maxima
+from plasma_global._provenance import build_artifact_provenance
 from plasma_global.chemistry.compile import CompiledChemistry, compile_chemistry
 from plasma_global.chemistry.data import ChemistryData, load_chemistry
 from plasma_global.core.compiled import CompiledGlobalModel
@@ -294,12 +295,13 @@ def _model_ids(
 
 def _metadata(
     case: CaseSpec,
+    chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
     missing_momentum_targets: tuple[str, ...],
     electron_kinetics_provenance: Mapping[str, Any],
     experimental_features: tuple[str, ...],
 ) -> Mapping[str, Any]:
-    provenance: dict[str, Any] = {
+    domain_provenance: dict[str, Any] = {
         "case_source": None if case.source_path is None else str(case.source_path),
         "included_files": [str(path) for path in case.included_files],
         "chemistry_manifest": str(case.chemistry.manifest),
@@ -308,9 +310,14 @@ def _metadata(
     }
     wall_transport_closure = _wall_transport_closure_provenance(case)
     if wall_transport_closure is not None:
-        provenance["wall_transport_closure"] = wall_transport_closure
+        domain_provenance["wall_transport_closure"] = wall_transport_closure
     if electron_kinetics_provenance:
-        provenance["electron_kinetics"] = dict(electron_kinetics_provenance)
+        domain_provenance["electron_kinetics"] = dict(electron_kinetics_provenance)
+    provenance = build_artifact_provenance(
+        case,
+        chemistry_data,
+        domain_provenance,
+    )
     return MappingProxyType(
         {
             "effective_case_yaml": _effective_case_yaml(case),
@@ -411,6 +418,7 @@ def compile_case(case: CaseSpec) -> CompiledCase:
         solver_settings=solver_settings,
         metadata=_metadata(
             case,
+            chemistry_data,
             chemistry,
             missing_momentum_targets,
             electron_kinetics_provenance,

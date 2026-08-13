@@ -11,6 +11,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 
 from plasma_global.core._compiled_chemistry import (
+    ChemistrySource,
     CompiledChemistryData,
     compile_chemistry_data,
 )
@@ -18,6 +19,7 @@ from plasma_global.core._compiled_domain import DomainValidator
 from plasma_global.core._compiled_jacobian import JacobianBuilder
 from plasma_global.core._compiled_runtime import RuntimeEvaluator
 from plasma_global.core._initial_state import build_initial_state
+from plasma_global.core._runtime_assembly import RuntimeEvaluation, RuntimeZoneLedger
 from plasma_global.core.domain import InitialState, RecipeSegment, Zone
 from plasma_global.core.exceptions import ModelConfigurationError
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
@@ -38,49 +40,13 @@ from plasma_global.models.walls import (
 )
 
 
-class CompiledChemistryLike(Protocol):
+class CompiledChemistryLike(ChemistrySource, Protocol):
     """Narrow interface expected from an input or chemistry compiler.
 
     Species arrays contain only evolved heavy species.  Electron reactant
     orders are separate because electron density is imposed by quasineutrality.
     Stoichiometry is indexed ``[reaction, species]``.
     """
-
-    @property
-    def species_ids(self) -> Sequence[str]: ...
-
-    @property
-    def charges(self) -> Any: ...
-
-    @property
-    def masses_kg(self) -> Any: ...
-
-    @property
-    def reaction_ids(self) -> Sequence[str]: ...
-
-    @property
-    def stoichiometry(self) -> Any: ...
-
-    @property
-    def reactant_orders(self) -> Any: ...
-
-    @property
-    def electron_orders(self) -> Any: ...
-
-    @property
-    def rate_evaluators(self) -> Sequence[Any]: ...
-
-    @property
-    def energy_loss_eV(self) -> Any: ...
-
-    @property
-    def gas_heating_eV(self) -> Any: ...
-
-    @property
-    def reaction_zones(self) -> Sequence[Sequence[str]]: ...
-
-    @property
-    def jacobian_species_pattern(self) -> Any: ...
 
 
 class ElectronDensityProvider(Protocol):
@@ -214,6 +180,8 @@ class ZoneTermLedger:
     inlet_heavy_energy_J_m3_s: float
     surface_rates_m2_s: Mapping[str, float]
     wall_fluxes: tuple[WallFluxRecord, ...]
+    wall_species_energy_J_m3_s: float = 0.0
+    surface_species_energy_J_m3_s: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -266,6 +234,48 @@ class ModelEvaluation:
         object.__setattr__(
             self, "ledger_by_zone", MappingProxyType(dict(self.ledger_by_zone))
         )
+
+
+def _public_zone_ledger(payload: RuntimeZoneLedger) -> ZoneTermLedger:
+    """Materialize the stable public ledger at the facade boundary."""
+
+    return ZoneTermLedger(
+        zone_id=payload.zone_id,
+        reaction_rates_m3_s=payload.reaction_rates_m3_s,
+        absorbed_power_J_m3_s=payload.absorbed_power_J_m3_s,
+        reaction_energy_loss_J_m3_s=payload.reaction_energy_loss_J_m3_s,
+        wall_energy_loss_J_m3_s=payload.wall_energy_loss_J_m3_s,
+        gas_power_J_m3_s=payload.gas_power_J_m3_s,
+        gas_reaction_heating_J_m3_s=payload.gas_reaction_heating_J_m3_s,
+        surface_reaction_heating_J_m3_s=payload.surface_reaction_heating_J_m3_s,
+        wall_heavy_energy_exchange_J_m3_s=(payload.wall_heavy_energy_exchange_J_m3_s),
+        elastic_heating_J_m3_s=payload.elastic_heating_J_m3_s,
+        transport_species_source_m3_s=payload.transport_species_source_m3_s,
+        transport_electron_energy_J_m3_s=(payload.transport_electron_energy_J_m3_s),
+        transport_heavy_energy_J_m3_s=payload.transport_heavy_energy_J_m3_s,
+        inlet_heavy_energy_J_m3_s=payload.inlet_heavy_energy_J_m3_s,
+        surface_rates_m2_s=payload.surface_rates_m2_s,
+        wall_fluxes=payload.wall_fluxes,
+        wall_species_energy_J_m3_s=payload.wall_species_energy_J_m3_s,
+        surface_species_energy_J_m3_s=payload.surface_species_energy_J_m3_s,
+    )
+
+
+def _public_model_evaluation(payload: RuntimeEvaluation) -> ModelEvaluation:
+    """Convert private runtime data to the documented diagnostic object."""
+
+    return ModelEvaluation(
+        derivative=payload.derivative,
+        electron_states=payload.electron_states,
+        kinetics_by_zone=payload.kinetics_by_zone,
+        gas_temperature_K_by_zone=payload.gas_temperature_K_by_zone,
+        charge_residual_m3_by_zone=payload.charge_residual_m3_by_zone,
+        ledger_by_zone={
+            zone_id: _public_zone_ledger(ledger)
+            for zone_id, ledger in payload.ledger_by_zone.items()
+        },
+        power_coupling=payload.power_coupling,
+    )
 
 
 @dataclass
@@ -609,11 +619,13 @@ class CompiledGlobalModel:
     ) -> ModelEvaluation:
         """Evaluate the full diagnostic view used by output and audit paths."""
 
-        return RuntimeEvaluator(self).evaluate(
-            time_s,
-            state,
-            segment,
-            collect_ledger=collect_ledger,
+        return _public_model_evaluation(
+            RuntimeEvaluator(self).evaluate(
+                time_s,
+                state,
+                segment,
+                collect_ledger=collect_ledger,
+            )
         )
 
     def evaluate_derivative(

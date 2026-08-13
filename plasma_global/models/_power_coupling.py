@@ -101,6 +101,19 @@ def group_ports(
     return {zone_id: tuple(zone_ports) for zone_id, zone_ports in grouped.items()}
 
 
+def command_field_capability(
+    port: _IdentifiedPort, command: _CommandLike | None
+) -> bool:
+    """Resolve one port's effective E/N capability for the current command."""
+
+    command_capability = None if command is None else command.produces_reduced_field
+    return (
+        port.produces_reduced_field
+        if command_capability is None
+        else command_capability
+    )
+
+
 def validate_field_sources(
     zone_id: str,
     ports: tuple[_IdentifiedPort, ...],
@@ -109,10 +122,7 @@ def validate_field_sources(
     field_ports: list[str] = []
     for port in ports:
         command = commands.get(normalize_id(port.port_id))
-        produces_field = None if command is None else command.produces_reduced_field
-        if produces_field is None:
-            produces_field = port.produces_reduced_field
-        if produces_field:
+        if command_field_capability(port, command):
             field_ports.append(normalize_id(port.port_id))
     if len(field_ports) > 1:
         raise CaseValidationError(

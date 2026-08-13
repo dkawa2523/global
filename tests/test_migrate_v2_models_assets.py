@@ -7,12 +7,12 @@ import yaml
 
 from plasma_global.errors import MigrationError
 from plasma_global.input._legacy_v2 import load_legacy_v2_case
+from plasma_global.input._migrate_v2_bundle import stage_case_assets
 from plasma_global.input.load import load_case
 from plasma_global.input.migrate_v2 import (
     MigrationReport,
     MigrationResult,
     _electron_models,
-    _stage_case_assets,
     migrate_v2,
     write_v3_case,
 )
@@ -139,7 +139,7 @@ def test_external_assets_are_deduplicated_copied_and_written_relative(
     bundle = tmp_path / "bundle"
     published_assets = bundle / "case_assets"
 
-    staged_case, warnings = _stage_case_assets(case, staging, published_assets)
+    staged_case, warnings = stage_case_assets(case, staging, published_assets)
 
     staged_files = tuple(staging.iterdir())
     assert [path.name for path in staged_files] == ["00_power_model_0_source.csv"]
@@ -173,7 +173,7 @@ def test_electron_table_staging_preserves_conversion_warning_order(
 ) -> None:
     case = migrate_v2(V2_CONFIGS / "case_zdplaskin_example2.yaml").case
 
-    staged_case, warnings = _stage_case_assets(
+    staged_case, warnings = stage_case_assets(
         case,
         tmp_path / "staging",
         tmp_path / "published",
@@ -206,7 +206,7 @@ def test_prescribed_density_asset_is_copied_with_stable_label(tmp_path: Path) ->
     staging = tmp_path / "staging"
     published = tmp_path / "published"
 
-    staged_case, warnings = _stage_case_assets(case, staging, published)
+    staged_case, warnings = stage_case_assets(case, staging, published)
 
     staged_path = staging / "00_models_electron_density.csv"
     assert staged_path.read_bytes() == profile_bytes
@@ -222,7 +222,7 @@ def test_prescribed_density_asset_is_copied_with_stable_label(tmp_path: Path) ->
         MigrationError,
         match=r"models_electron_density does not exist: .*missing\.csv",
     ):
-        _stage_case_assets(
+        stage_case_assets(
             CaseSpec.model_validate(missing_data),
             tmp_path / "unused-staging",
             tmp_path / "unused-published",

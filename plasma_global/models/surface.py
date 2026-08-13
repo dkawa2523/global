@@ -12,6 +12,10 @@ import numpy as np
 
 from plasma_global.chemistry._contracts import surface_reaction_shape_error
 from plasma_global.chemistry.data import ChemistryData, RateModelData, ReactionData
+from plasma_global.chemistry.surface_roles import (
+    SurfaceSpeciesRoles,
+    surface_species_roles,
+)
 from plasma_global.errors import CaseValidationError, ModelDomainError
 
 BOLTZMANN_J_K = 1.380649e-23
@@ -53,6 +57,39 @@ class SurfaceGeometry:
                 "initial surface coverages must be finite and nonnegative"
             )
         object.__setattr__(self, "initial_coverages", MappingProxyType(coverages))
+
+
+def _validated_surface_state_species(
+    surface: SurfaceGeometry,
+    roles: SurfaceSpeciesRoles,
+) -> tuple[str, tuple[str, ...]]:
+    """Validate one surface and return its algebraic and evolved species IDs."""
+
+    if len(roles.free_site_ids) != 1:
+        raise CaseValidationError(
+            f"surface {surface.surface_id!r} requires exactly one free-site species"
+        )
+    free_id = roles.free_site_ids[0]
+    if free_id in surface.initial_coverages:
+        raise CaseValidationError(
+            f"surface {surface.surface_id!r} must not initialize algebraic "
+            f"free site {free_id!r}"
+        )
+    unknown = set(surface.initial_coverages) - set(roles.independent_ids)
+    if unknown:
+        raise CaseValidationError(
+            f"surface {surface.surface_id!r} initializes "
+            f"unknown/nonindependent coverages {sorted(unknown)}"
+        )
+    occupied = sum(
+        roles.occupancy_by_species[species_id] * coverage
+        for species_id, coverage in surface.initial_coverages.items()
+    )
+    if occupied > 1.0 + 1.0e-12:
+        raise CaseValidationError(
+            f"surface {surface.surface_id!r} initial site occupancy exceeds one"
+        )
+    return free_id, roles.independent_ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,58 +339,25 @@ class CompiledSurfaceModel:
         labels: list[str] = []
         indexes: dict[tuple[str, str], int] = {}
         free: dict[str, str] = {}
-        occupancy: dict[str, float] = {}
-        surface_species = [
-            item for item in self.chemistry.species if item.phase == "surface"
-        ]
-        for species in surface_species:
-            occupancy[species.id] = _python_float(species.elements.get("site", 1.0))
+        catalog = surface_species_roles(self.chemistry.species, None)
         for surface in self.surfaces:
-            applicable = [
-                item
-                for item in surface_species
-                if not item.surfaces or surface.surface_id in item.surfaces
-            ]
-            free_candidates = [item for item in applicable if "site" in item.state_tags]
-            if len(free_candidates) != 1:
-                raise CaseValidationError(
-                    f"surface {surface.surface_id!r} requires exactly one "
-                    "free-site species"
-                )
-            free_id = free_candidates[0].id
-            if free_id in surface.initial_coverages:
-                raise CaseValidationError(
-                    f"surface {surface.surface_id!r} must not initialize algebraic "
-                    f"free site {free_id!r}"
-                )
-            free[surface.surface_id] = free_id
-            for species in applicable:
-                if species.id == free_id or "film_fragment" in species.state_tags:
-                    continue
-                indexes[(surface.surface_id, species.id)] = len(labels)
-                labels.append(f"coverage[{surface.surface_id},{species.id}]")
-            unknown = set(surface.initial_coverages) - {
-                species_id for sid, species_id in indexes if sid == surface.surface_id
-            }
-            if unknown:
-                raise CaseValidationError(
-                    f"surface {surface.surface_id!r} initializes "
-                    f"unknown/nonindependent coverages {sorted(unknown)}"
-                )
-            occupied = sum(
-                occupancy[species_id] * surface.initial_coverages.get(species_id, 0.0)
-                for sid, species_id in indexes
-                if sid == surface.surface_id
+            roles = surface_species_roles(
+                self.chemistry.species,
+                surface.surface_id,
             )
-            if occupied > 1.0 + 1.0e-12:
-                raise CaseValidationError(
-                    f"surface {surface.surface_id!r} initial site occupancy exceeds one"
-                )
+            free_id, independent_ids = _validated_surface_state_species(
+                surface,
+                roles,
+            )
+            free[surface.surface_id] = free_id
+            for species_id in independent_ids:
+                indexes[(surface.surface_id, species_id)] = len(labels)
+                labels.append(f"coverage[{surface.surface_id},{species_id}]")
         return SurfaceStateLayout(
             labels=tuple(labels),
             state_index=MappingProxyType(indexes),
             free_species_by_surface=MappingProxyType(free),
-            occupancy_by_species=MappingProxyType(occupancy),
+            occupancy_by_species=catalog.occupancy_by_species,
         )
 
     def _compile_free_site_balances(

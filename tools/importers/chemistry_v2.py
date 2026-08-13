@@ -152,6 +152,7 @@ def _write_canonical_cross_section(
     destination: Path,
     *,
     segment_index: int | None = None,
+    require_zero_energy: bool = False,
 ) -> None:
     """Convert a legacy SI curve to the runtime's strict two-column form.
 
@@ -162,7 +163,20 @@ def _write_canonical_cross_section(
 
     segments = _read_cross_section_segments(source)
     converted = _canonical_cross_section_rows(source, segments, segment_index)
+    _validate_zero_energy_support(source, converted, require_zero_energy)
     _write_rows(destination, ["energy_eV", "sigma_m2"], converted)
+
+
+def _validate_zero_energy_support(
+    source: Path,
+    converted: list[dict[str, float]],
+    required: bool,
+) -> None:
+    if required and converted[0]["energy_eV"] != 0.0:
+        raise MigrationError(
+            f"momentum cross section {source} must explicitly cover 0 eV; "
+            "migration does not extrapolate missing low-energy data"
+        )
 
 
 def _convert_surface_rate_model(backend: str, raw: dict[str, Any]) -> dict[str, Any]:
@@ -463,6 +477,7 @@ def _publish_cross_sections(
             original,
             destination,
             segment_index=segment_index,
+            require_zero_energy=kind == "momentum_transfer",
         )
         converted.append(
             {
