@@ -43,6 +43,7 @@ from plasma_global.models._power_ports import (
 )
 from plasma_global.models._power_types import (
     _empty_observables,
+    finite_observables,
     frozen_mapping,
     validate_compiled_power_command,
     validate_power_port_result,
@@ -124,7 +125,7 @@ class PowerPortResult:
             self.gas_power_W,
             self.reduced_field_Td,
         )
-        object.__setattr__(self, "observables", frozen_mapping(self.observables))
+        object.__setattr__(self, "observables", finite_observables(self.observables))
 
 
 class PowerPort(Protocol):
@@ -208,6 +209,54 @@ def _power_port_result(
         reduced_field_Td=evaluated.reduced_field_Td,
         observables=evaluated.observables,
     )
+
+
+def _kinetics_for_power_state(
+    zone_id: str,
+    inputs: _ZonePowerInputs,
+    reduced_field_Td: float | None,
+) -> ElectronKineticsResult | None:
+    """Evaluate the configured kinetics table at the iteration coordinate."""
+
+    kinetics = inputs.kinetics
+    if kinetics is None:
+        return None
+    if kinetics.lookup == "local_field":
+        if reduced_field_Td is None:
+            raise ModelDomainError(f"Zone {zone_id!r} local-field table needs E/N")
+        if reduced_field_Td == 0.0 and kinetics.axis[0] > 0.0:
+            return kinetics.zero_field_result()
+        return kinetics.evaluate(reduced_field_Td=reduced_field_Td)
+    if kinetics.lookup == "mean_energy":
+        if inputs.mean_energy_eV is None:
+            raise ModelDomainError(
+                f"Zone {zone_id!r} mean-energy table needs mean_energy_eV"
+            )
+        return kinetics.evaluate(mean_energy_eV=inputs.mean_energy_eV)
+    raise CaseValidationError(f"Unsupported kinetics lookup {kinetics.lookup!r}")
+
+
+def _mean_energy_from_inputs(
+    zone_id: str,
+    inputs: _ZonePowerInputs,
+    reduced_field_Td: float | None,
+) -> float:
+    """Resolve direct or local-field mean energy when no table is configured."""
+
+    if inputs.mean_energy_eV is not None:
+        return python_float(inputs.mean_energy_eV)
+    if reduced_field_Td is None or inputs.mean_energy_from_field is None:
+        raise ModelDomainError(
+            f"Zone {zone_id!r} needs a local-field mean-energy model"
+        )
+    return python_float(inputs.mean_energy_from_field(reduced_field_Td))
+
+
+def _zone_iteration_is_terminal(
+    exact_zero_field: bool,
+    iteration: _ZonePowerIteration[PowerState, PowerPortResult],
+) -> bool:
+    return exact_zero_field or not iteration.field_is_coupled
 
 
 @dataclass(frozen=True, slots=True)
@@ -426,6 +475,20 @@ class PowerCoordinator:
 
         return commands_are_time_dependent(self.ports, commands)
 
+    def has_reduced_field_source(
+        self, zone_id: str, commands: Mapping[str, CompiledPowerCommand]
+    ) -> bool:
+        """Return whether one segment guarantees E/N for the requested zone."""
+
+        for port in self._ports_by_zone[normalize_id(zone_id)]:
+            command = commands.get(normalize_id(port.port_id))
+            produces_field = None if command is None else command.produces_reduced_field
+            if produces_field is None:
+                produces_field = port.produces_reduced_field
+            if produces_field:
+                return True
+        return False
+
     @staticmethod
     def _evaluate_port(
         port: PowerPort,
@@ -470,6 +533,18 @@ class PowerCoordinator:
             command=command,
         )
 
+    def _has_exact_zero_field_command(
+        self, zone_id: str, commands: Mapping[str, CompiledPowerCommand]
+    ) -> bool:
+        """Return whether an off command fixes this zone's field at zero."""
+
+        return any(
+            port.produces_reduced_field
+            and (command := commands.get(normalize_id(port.port_id))) is not None
+            and command.kind == "off"
+            for port in self._ports_by_zone[zone_id]
+        )
+
     @staticmethod
     def _require_energy_source(
         zone_id: str,
@@ -492,39 +567,13 @@ class PowerCoordinator:
         inputs: _ZonePowerInputs,
         reduced_field_Td: float | None,
     ) -> tuple[PowerState, ElectronKineticsResult | None]:
-        kinetics_result: ElectronKineticsResult | None = None
-        kinetics = inputs.kinetics
-        if kinetics is not None:
-            if kinetics.lookup == "local_field":
-                if reduced_field_Td is None:
-                    raise ModelDomainError(
-                        f"Zone {zone_id!r} local-field table needs E/N"
-                    )
-                kinetics_result = kinetics.evaluate(reduced_field_Td=reduced_field_Td)
-            elif kinetics.lookup == "mean_energy":
-                if inputs.mean_energy_eV is None:
-                    raise ModelDomainError(
-                        f"Zone {zone_id!r} mean-energy table needs mean_energy_eV"
-                    )
-                kinetics_result = kinetics.evaluate(
-                    mean_energy_eV=inputs.mean_energy_eV
-                )
-            else:
-                raise CaseValidationError(
-                    f"Unsupported kinetics lookup {kinetics.lookup!r}"
-                )
+        kinetics_result = _kinetics_for_power_state(zone_id, inputs, reduced_field_Td)
+        if kinetics_result is not None:
             local_mean_energy_eV = python_float(kinetics_result.mean_energy_eV)
             mobility_m2_V_s = kinetics_result.mobility_m2_V_s
-        elif inputs.mean_energy_eV is not None:
-            local_mean_energy_eV = python_float(inputs.mean_energy_eV)
-            mobility_m2_V_s = None
         else:
-            if reduced_field_Td is None or inputs.mean_energy_from_field is None:
-                raise ModelDomainError(
-                    f"Zone {zone_id!r} needs a local-field mean-energy model"
-                )
-            local_mean_energy_eV = python_float(
-                inputs.mean_energy_from_field(reduced_field_Td)
+            local_mean_energy_eV = _mean_energy_from_inputs(
+                zone_id, inputs, reduced_field_Td
             )
             mobility_m2_V_s = None
 
@@ -599,6 +648,21 @@ class PowerCoordinator:
             field_is_coupled=port_produced_field and local_field_kinetics,
         )
 
+    def _zone_iteration_start(
+        self,
+        zone_id: str,
+        commands: Mapping[str, CompiledPowerCommand],
+        inputs: _ZonePowerInputs,
+    ) -> tuple[bool, float | None]:
+        exact_zero_field = self._has_exact_zero_field_command(zone_id, commands)
+        reduced_field_Td = (
+            0.0
+            if exact_zero_field
+            else self._initial_reduced_field(zone_id, commands, inputs)
+        )
+        self._require_energy_source(zone_id, inputs, reduced_field_Td)
+        return exact_zero_field, reduced_field_Td
+
     def _evaluate_zone(
         self,
         zone_id: str,
@@ -606,8 +670,9 @@ class PowerCoordinator:
         commands: Mapping[str, CompiledPowerCommand],
         inputs: _ZonePowerInputs,
     ) -> _ZonePowerResult[PowerState, PowerPortResult]:
-        reduced_field_Td = self._initial_reduced_field(zone_id, commands, inputs)
-        self._require_energy_source(zone_id, inputs, reduced_field_Td)
+        exact_zero_field, reduced_field_Td = self._zone_iteration_start(
+            zone_id, commands, inputs
+        )
 
         previous_mobility: float | None = None
         previous_power: float | None = None
@@ -616,7 +681,7 @@ class PowerCoordinator:
             iteration = self._evaluate_iteration(
                 zone_id, time_s, commands, inputs, reduced_field_Td
             )
-            if not iteration.field_is_coupled:
+            if _zone_iteration_is_terminal(exact_zero_field, iteration):
                 break
             mobility = iteration.power_state.electron_mobility_m2_V_s
             reduced_field_Td, last_residual = advance_coupled_field(
@@ -627,6 +692,12 @@ class PowerCoordinator:
                 previous_electron_power_W=previous_power,
             )
             if iteration_count > 1 and last_residual <= self.coupling_rtol:
+                # Re-evaluate every coupled quantity at the field we return.
+                # The converged iteration above was evaluated at the preceding
+                # fixed-point proposal.
+                iteration = self._evaluate_iteration(
+                    zone_id, time_s, commands, inputs, reduced_field_Td
+                )
                 break
             previous_mobility = mobility
             previous_power = iteration.electron_power_W

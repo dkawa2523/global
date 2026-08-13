@@ -88,6 +88,13 @@ experimental 分類の `local_field` は electron energy state と緩和時間�
 mean energy、rate coefficient、mobility を代数評価します。電気―輸送―EEDF coupling は E/N、
 mobility、absorbed power の全 residual を相対許容誤差 `1e-6`、最大 12 iteration で判定し、
 非収束時は時刻・step・port を含む明示エラーにします。
+収束判定後は返却する最終E/Nでもう一度kineticsとportを評価するため、artifactのE/N、rate、mobility、
+powerは同じiterateに対応します。正のfieldだけを持つprepared tableをoffにした場合だけcold-electron
+boundaryを使い、明示0-field nodeがあるtableの物理値は上書きしません。
+
+RF/CCPのpower commandはsourceへの皮相電力ではなくplasma吸収実電力です。RFのsource-side実電力は
+吸収電力をcoupling efficiencyで割って求めます。lossless-sheath CCPでは実電力は (I_{rms}^2R)、
+(V_{rms}I_{rms}) は `apparent_power_VA` でありelectron-energy ledgerへ加えません。
 
 ## Heavy-particle internal energy
 
@@ -221,3 +228,6 @@ Boltzmann solver の代替ではありません。`experimental.rf_envelope` / `
 electron profile、film、wall inventory、generic extension state も、有限性、保存則、単調傾向を
 基本契約とし、production 精度を主張しません。すべて composition root に接続済みですが、
 使用には明示 model ID が必要です。
+approximate two-term preparationはpower-balance residualに加え、最終energy binの確率質量を
+`1e-3`以下に要求します。既定field gridは `1..100 Td` とし、高fieldではenergy-domain convergenceを
+満たすようcross-section supportとenergy上限をcaseごとに検証します。

@@ -13,7 +13,7 @@ from plasma_global.core.domain import RecipeSegment
 from plasma_global.core.transport import SCCM_TO_PARTICLES_PER_S, SegmentTransport
 from plasma_global.errors import CaseValidationError
 from plasma_global.experimental.profile import PrescribedElectronProfile
-from plasma_global.input.compile_reactor import compile_external_binding
+from plasma_global.input._compile_power import compile_external_binding
 from plasma_global.input.schema import (
     CaseSpec,
     ContinuousWaveform,

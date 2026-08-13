@@ -46,11 +46,12 @@ _SOLVER_DATASETS = (
 
 @dataclass(frozen=True, slots=True)
 class ResultPaths:
-    """The two canonical artifacts written for every simulation."""
+    """The canonical artifacts and their result-level audit outcome."""
 
     directory: Path
     result_h5: Path
     summary_yaml: Path
+    audit_passed: bool = True
 
 
 def _ensure_parent(path: Path) -> None:
@@ -419,7 +420,12 @@ def write_result(result: SimulationResult, output_dir: str | Path) -> ResultPath
                 else:
                     os.replace(backup, target)
             raise
-    return ResultPaths(directory, result_h5, summary_yaml)
+    return ResultPaths(
+        directory,
+        result_h5,
+        summary_yaml,
+        audit_passed=report.passed,
+    )
 
 
 def _result_csv_columns(

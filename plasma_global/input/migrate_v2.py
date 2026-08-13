@@ -15,6 +15,8 @@ import yaml
 from plasma_global.errors import MigrationError
 from plasma_global.input.schema import CaseSpec
 
+_LEGACY_APPROXIMATE_FIELD_GRID = (0.2, 2500.0, 48)
+
 
 @dataclass(frozen=True, slots=True)
 class MigrationReport:
@@ -853,10 +855,9 @@ def _table_electron_model(
     )
 
 
-def _approximate_two_term_electron_model(
-    run: Any, warnings: list[str]
-) -> tuple[dict[str, Any], str]:
-    cfg = run.swarm.boltzmann_2term
+def _warn_approximate_closure_migration(run: Any, warnings: list[str]) -> None:
+    """Record when v2 requested a closure unavailable to the prepared model."""
+
     requested_closure = str(run.swarm.closure or "auto").lower()
     if requested_closure not in {"auto", "local_field"}:
         warnings.append(
@@ -864,26 +865,64 @@ def _approximate_two_term_electron_model(
             "v3 approximate model is compile-time prepared and has no "
             "electron-energy RHS coupling"
         )
-    return (
-        {
-            "kind": "experimental.approximate_two_term",
-            "mixture_key_species": list(run.swarm.mixture_key_species),
-            "cache": {
-                "max_entries": int(run.swarm.cache.max_entries),
-                "fraction_decimals": int(run.swarm.cache.fraction_decimals),
-            },
-            "energy_grid": {
-                "min_eV": float(cfg.energy_grid.min_eV),
-                "max_eV": float(cfg.energy_grid.max_eV),
-                "n": int(cfg.energy_grid.n),
-            },
-            "reduced_field_grid": {
-                "min_Td": float(cfg.reduced_field_grid_Td.min),
-                "max_Td": float(cfg.reduced_field_grid_Td.max),
-                "n": int(cfg.reduced_field_grid_Td.n),
-            },
-            "max_shape_iterations": int(cfg.max_shape_iterations),
+
+
+def _approximate_reduced_field_grid(
+    cfg: Any,
+    warnings: list[str],
+) -> dict[str, float | int] | None:
+    """Preserve an explicit v2 field grid and safely replace legacy defaults."""
+
+    requested_min = float(cfg.reduced_field_grid_Td.min)
+    requested_max = float(cfg.reduced_field_grid_Td.max)
+    requested_count = int(cfg.reduced_field_grid_Td.n)
+    uses_legacy_defaults = (
+        not cfg.reduced_field_grid_was_explicit
+        and (
+            requested_min,
+            requested_max,
+            requested_count,
+        )
+        == _LEGACY_APPROXIMATE_FIELD_GRID
+    )
+    if uses_legacy_defaults:
+        warnings.append(
+            "boltzmann_2term used the legacy default reduced-field grid; migration "
+            "selected the current v3 defaults because the strict approximate "
+            "closure validates a power-balance root at every requested point"
+        )
+        return None
+    return {
+        "min_Td": requested_min,
+        "max_Td": requested_max,
+        "n": requested_count,
+    }
+
+
+def _approximate_two_term_electron_model(
+    run: Any, warnings: list[str]
+) -> tuple[dict[str, Any], str]:
+    cfg = run.swarm.boltzmann_2term
+    _warn_approximate_closure_migration(run, warnings)
+    reduced_field_grid = _approximate_reduced_field_grid(cfg, warnings)
+    electron_model: dict[str, Any] = {
+        "kind": "experimental.approximate_two_term",
+        "mixture_key_species": list(run.swarm.mixture_key_species),
+        "cache": {
+            "max_entries": int(run.swarm.cache.max_entries),
+            "fraction_decimals": int(run.swarm.cache.fraction_decimals),
         },
+        "energy_grid": {
+            "min_eV": float(cfg.energy_grid.min_eV),
+            "max_eV": float(cfg.energy_grid.max_eV),
+            "n": int(cfg.energy_grid.n),
+        },
+        "max_shape_iterations": int(cfg.max_shape_iterations),
+    }
+    if reduced_field_grid is not None:
+        electron_model["reduced_field_grid"] = reduced_field_grid
+    return (
+        electron_model,
         "local_field",
     )
 

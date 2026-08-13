@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from plasma_global._yaml import YamlLoadError, load_unique_yaml
+from plasma_global.chemistry._contracts import cross_section_support_error
 from plasma_global.errors import ChemistryError
 
 AMU_TO_KG = 1.66053906660e-27
@@ -39,6 +40,32 @@ def _yaml_mapping(path: Path) -> dict[str, Any]:
             f"cannot read canonical chemistry YAML {path}: {exc}"
         ) from exc
     return _mapping(document or {}, str(path))
+
+
+def _resolved_reaction_electron_energy_transfer(
+    reaction: ReactionData,
+) -> float | None:
+    """Return signed electron gain, migrating legacy positive loss to a sink."""
+
+    if reaction.electron_energy_transfer_eV is not None:
+        return reaction.electron_energy_transfer_eV
+    if reaction.energy_loss_eV is None:
+        return None
+    return -reaction.energy_loss_eV
+
+
+def _resolved_cross_section_electron_energy_transfer(
+    cross_section: CrossSectionData,
+) -> float:
+    """Return signed electron gain, migrating legacy positive loss to a sink."""
+
+    if cross_section.electron_energy_transfer_eV is not None:
+        return cross_section.electron_energy_transfer_eV
+    if cross_section.energy_loss_eV is None:
+        raise ChemistryError(
+            f"cross section {cross_section.id!r} has no electron-energy transfer"
+        )
+    return -cross_section.energy_loss_eV
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +96,11 @@ class ReactionData:
     zones: tuple[str, ...] = ()
     surfaces: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
+    electron_energy_transfer_eV: float | None = None
+
+    resolved_electron_energy_transfer_eV = property(
+        _resolved_reaction_electron_energy_transfer
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,10 +116,15 @@ class CrossSectionData:
     kind: str
     target: str
     threshold_eV: float
-    energy_loss_eV: float
+    energy_loss_eV: float | None
     energy_eV: np.ndarray
     sigma_m2: np.ndarray
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
+    electron_energy_transfer_eV: float | None = None
+
+    resolved_electron_energy_transfer_eV = property(
+        _resolved_cross_section_electron_energy_transfer
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +261,66 @@ def _metadata(row: Mapping[str, str]) -> Mapping[str, Any]:
     return MappingProxyType(result)
 
 
+_ELECTRON_ENERGY_FIELDS = (
+    "energy_loss_eV",
+    "electron_energy_transfer_eV",
+)
+
+
+def _electron_energy_field(
+    values: Mapping[str, Any],
+    where: str,
+    *,
+    required: bool,
+) -> str | None:
+    """Select the only populated legacy or signed energy field."""
+
+    present = tuple(
+        name for name in _ELECTRON_ENERGY_FIELDS if values.get(name) not in {None, ""}
+    )
+    if len(present) > 1 or (required and len(present) != 1):
+        raise ChemistryError(
+            f"{where} must define exactly one of energy_loss_eV or "
+            "electron_energy_transfer_eV"
+        )
+    return present[0] if present else None
+
+
+def _finite_electron_energy_value(
+    values: Mapping[str, Any], where: str, name: str
+) -> float:
+    """Parse one selected energy field without changing its sign convention."""
+
+    try:
+        value = float(values[name])
+    except (TypeError, ValueError) as exc:
+        raise ChemistryError(f"{where}.{name} must be a finite number") from exc
+    if not np.isfinite(value):
+        raise ChemistryError(f"{where}.{name} must be a finite number")
+    return value
+
+
+def _electron_energy_values(
+    values: Mapping[str, Any],
+    where: str,
+    *,
+    required: bool,
+) -> tuple[float | None, float | None]:
+    """Parse the legacy loss or canonical signed electron-energy transfer."""
+
+    name = _electron_energy_field(values, where, required=required)
+    if name is None:
+        return None, None
+    value = _finite_electron_energy_value(values, where, name)
+    if name == "energy_loss_eV":
+        if value < 0.0:
+            raise ChemistryError(
+                f"{where}.energy_loss_eV must be finite and nonnegative"
+            )
+        return value, None
+    return None, value
+
+
 def _load_species(path: Path) -> tuple[SpeciesData, ...]:
     rows = _csv_rows(
         path,
@@ -284,6 +381,7 @@ def _load_reactions(
         required=required,
         optional={
             "energy_loss_eV",
+            "electron_energy_transfer_eV",
             "gas_heating_eV",
             "zones",
             "surfaces",
@@ -294,11 +392,7 @@ def _load_reactions(
     result: list[ReactionData] = []
     for line, row in enumerate(rows, start=2):
         reactants, products = parse_equation(row["equation"])
-        loss = float(row["energy_loss_eV"]) if row.get("energy_loss_eV") else None
-        if loss is not None and (not np.isfinite(loss) or loss < 0.0):
-            raise ChemistryError(
-                f"{path}:{line}: energy_loss_eV must be finite and nonnegative"
-            )
+        loss, transfer = _electron_energy_values(row, f"{path}:{line}", required=False)
         gas_heating = float(row["gas_heating_eV"]) if row.get("gas_heating_eV") else 0.0
         if not np.isfinite(gas_heating) or gas_heating < 0.0:
             raise ChemistryError(
@@ -315,6 +409,7 @@ def _load_reactions(
                 zones=_split(row.get("zones")),
                 surfaces=_split(row.get("surfaces")),
                 metadata=_metadata(row),
+                electron_energy_transfer_eV=transfer,
             )
         )
     return tuple(result)
@@ -495,14 +590,14 @@ def _load_rate_models(
             raise ChemistryError(
                 f"{path}: rate model {model_id!r} has unsupported kind {kind!r}"
             )
-        _only_keys(model, _RATE_KEYS[str(kind)], f"{path}.rate_models.{model_id}")
-        _validate_rate_parameters(str(kind), model, f"{path}.rate_models.{model_id}")
+        _only_keys(model, _RATE_KEYS[kind], f"{path}.rate_models.{model_id}")
+        _validate_rate_parameters(kind, model, f"{path}.rate_models.{model_id}")
         if "file" in model:
             model["file"] = _required_path(
                 path.parent, model["file"], f"rate model {model_id}.file"
             )
             source_files.append(model["file"])
-        result[model_id] = RateModelData(model_id, str(kind), MappingProxyType(model))
+        result[model_id] = RateModelData(model_id, kind, MappingProxyType(model))
     return MappingProxyType(result)
 
 
@@ -545,6 +640,34 @@ def _strict_curve(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return energy, sigma
 
 
+_CROSS_SECTION_KINDS = frozenset(
+    {
+        "momentum_transfer",
+        "attachment",
+        "dissociation",
+        "deexcitation",
+        "excitation",
+        "ionization",
+    }
+)
+
+
+def _cross_section_kind(entry: Mapping[str, Any], cross_section_id: str) -> str:
+    kind = str(entry["kind"])
+    if kind not in _CROSS_SECTION_KINDS:
+        raise ChemistryError(
+            f"cross section {cross_section_id} has unsupported kind {kind!r}"
+        )
+    return kind
+
+
+def _cross_section_threshold(entry: Mapping[str, Any], cross_section_id: str) -> float:
+    threshold = float(entry["threshold_eV"])
+    if threshold < 0.0 or not np.isfinite(threshold):
+        raise ChemistryError(f"cross section {cross_section_id} has invalid threshold")
+    return threshold
+
+
 def _load_cross_sections(
     path: Path | None, source_files: list[Path]
 ) -> Mapping[str, CrossSectionData]:
@@ -562,6 +685,7 @@ def _load_cross_sections(
         "target",
         "threshold_eV",
         "energy_loss_eV",
+        "electron_energy_transfer_eV",
         "file",
         "metadata",
     }
@@ -575,7 +699,6 @@ def _load_cross_sections(
                 "kind",
                 "target",
                 "threshold_eV",
-                "energy_loss_eV",
                 "file",
             )
             if key not in entry or entry[key] in {None, ""}
@@ -592,28 +715,15 @@ def _load_cross_sections(
         )
         source_files.append(curve_path)
         energy, sigma = _strict_curve(curve_path)
-        kind = str(entry["kind"])
-        if kind not in {
-            "momentum_transfer",
-            "attachment",
-            "dissociation",
-            "deexcitation",
-            "excitation",
-            "ionization",
-        }:
-            raise ChemistryError(
-                f"cross section {cross_section_id} has unsupported kind {kind!r}"
-            )
-        threshold = float(entry["threshold_eV"])
-        loss = float(entry["energy_loss_eV"])
-        if min(threshold, loss) < 0.0 or not np.isfinite([threshold, loss]).all():
-            raise ChemistryError(
-                f"cross section {cross_section_id} has invalid threshold/loss"
-            )
+        kind = _cross_section_kind(entry, cross_section_id)
+        threshold = _cross_section_threshold(entry, cross_section_id)
+        loss, transfer = _electron_energy_values(
+            entry, f"cross section {cross_section_id}", required=True
+        )
         metadata = _mapping(
             entry.get("metadata", {}), f"cross section {cross_section_id}.metadata"
         )
-        result[cross_section_id] = CrossSectionData(
+        cross_section = CrossSectionData(
             id=cross_section_id,
             kind=kind,
             target=str(entry["target"]),
@@ -622,7 +732,12 @@ def _load_cross_sections(
             energy_eV=energy,
             sigma_m2=sigma,
             metadata=MappingProxyType(metadata),
+            electron_energy_transfer_eV=transfer,
         )
+        support_error = cross_section_support_error(cross_section)
+        if support_error is not None:
+            raise ChemistryError(support_error)
+        result[cross_section_id] = cross_section
     return MappingProxyType(result)
 
 

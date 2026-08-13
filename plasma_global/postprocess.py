@@ -12,23 +12,42 @@ from plasma_global.errors import CaseValidationError
 from plasma_global.models.electrons import ElectronState
 
 
+def _has_reduced_field_series(model: CompiledGlobalModel, zone_id: str) -> bool:
+    coordinator = model.power_coordinator
+    return all(
+        zone_id in segment.reduced_field_Td_by_zone
+        or (
+            coordinator is not None
+            and coordinator.has_reduced_field_source(zone_id, segment.port_commands)
+        )
+        for segment in model.segments
+    )
+
+
+def _zone_observable_names(model: CompiledGlobalModel, zone_id: str) -> tuple[str, ...]:
+    names = [
+        f"electron_density_m3[{zone_id}]",
+        f"mean_energy_eV[{zone_id}]",
+        f"electron_temperature_eV[{zone_id}]",
+    ]
+    if _has_reduced_field_series(model, zone_id):
+        names.append(f"reduced_field_Td[{zone_id}]")
+    names.extend(
+        (
+            f"gas_temperature_K[{zone_id}]",
+            f"charge_residual_m3[{zone_id}]",
+            f"absorbed_power_W[{zone_id}]",
+        )
+    )
+    return tuple(names)
+
+
 def available_observables(model: CompiledGlobalModel) -> tuple[str, ...]:
     """Return the finite catalog determined by one compiled model."""
 
     names: list[str] = []
     for zone in model.zones:
-        zone_id = zone.zone_id
-        names.extend(
-            (
-                f"electron_density_m3[{zone_id}]",
-                f"mean_energy_eV[{zone_id}]",
-                f"electron_temperature_eV[{zone_id}]",
-                f"reduced_field_Td[{zone_id}]",
-                f"gas_temperature_K[{zone_id}]",
-                f"charge_residual_m3[{zone_id}]",
-                f"absorbed_power_W[{zone_id}]",
-            )
-        )
+        names.extend(_zone_observable_names(model, zone.zone_id))
     if model.surface_model is not None:
         for surface in model.surface_model.surfaces:
             free_species = model.surface_model.layout.free_species_by_surface[
@@ -123,14 +142,13 @@ def _zone_observable_values(
         f"electron_density_m3[{zone_id}]": electrons.density_m3,
         f"mean_energy_eV[{zone_id}]": electrons.mean_energy_eV,
         f"electron_temperature_eV[{zone_id}]": electrons.temperature_eV,
-        f"reduced_field_Td[{zone_id}]": (
-            np.nan if electrons.reduced_field_Td is None else electrons.reduced_field_Td
-        ),
         f"gas_temperature_K[{zone_id}]": evaluated.gas_temperature_K_by_zone[zone_id],
         f"charge_residual_m3[{zone_id}]": (
             evaluated.charge_residual_m3_by_zone[zone_id]
         ),
     }
+    if electrons.reduced_field_Td is not None:
+        values[f"reduced_field_Td[{zone_id}]"] = electrons.reduced_field_Td
     if needs_power_ledger:
         ledger = evaluated.ledger_by_zone[zone_id]
         values[f"absorbed_power_W[{zone_id}]"] = (
@@ -239,9 +257,12 @@ def derive_observables_and_diagnostics(
         diagnostics["charge_closure_normalized"] = max(
             diagnostics["charge_closure_normalized"], normalized_residual
         )
-        for name, value in values_by_name.items():
-            if name in output:
-                output[name][time_index] = value
+        for name, values in output.items():
+            if name not in values_by_name:
+                raise ValueError(
+                    f"observable {name!r} is undefined at saved time {float(time):g}"
+                )
+            values[time_index] = values_by_name[name]
     return output, diagnostics
 
 

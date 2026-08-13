@@ -26,7 +26,7 @@ cross_sections:
   kind: deexcitation
   target: Ar_star
   threshold_eV: 0.0
-  energy_loss_eV: 0.0
+  electron_energy_transfer_eV: 11.5
   file: cross_sections/xs_zdp_ar_star_deexcitation.csv
   metadata:
     source_repo: https://github.com/Hemadityamalla/ZDPlaskin

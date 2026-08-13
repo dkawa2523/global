@@ -61,6 +61,47 @@ def test_cli_run_uses_three_public_operations(tmp_path, monkeypatch) -> None:
     assert calls == [(result, output)]
 
 
+def test_cli_run_returns_failure_when_result_audit_has_errors(
+    tmp_path, monkeypatch
+) -> None:
+    output = tmp_path / "run"
+    result = _result()
+    monkeypatch.setattr(cli, "load_case", lambda _path: object())
+    monkeypatch.setattr(cli, "simulate", lambda _case: result)
+    monkeypatch.setattr(
+        cli,
+        "write_result",
+        lambda _result, directory: ResultPaths(
+            directory,
+            directory / "result.h5",
+            directory / "summary.yaml",
+            audit_passed=False,
+        ),
+    )
+
+    assert cli.main(["run", "case.yaml", "--output", str(output)]) == 1
+
+
+def test_cli_run_preserves_failed_solver_status_with_legacy_writer(
+    tmp_path, monkeypatch
+) -> None:
+    output = tmp_path / "run"
+    result = _result(success=False)
+    monkeypatch.setattr(cli, "load_case", lambda _path: object())
+    monkeypatch.setattr(cli, "simulate", lambda _case: result)
+    monkeypatch.setattr(
+        cli,
+        "write_result",
+        lambda _result, directory: ResultPaths(
+            directory,
+            directory / "result.h5",
+            directory / "summary.yaml",
+        ),
+    )
+
+    assert cli.main(["run", "case.yaml", "--output", str(output)]) == 1
+
+
 def test_cli_audit_export_and_plot_use_canonical_syntax(tmp_path, monkeypatch) -> None:
     case_path = tmp_path / "case.yaml"
     result_path = tmp_path / "result.h5"

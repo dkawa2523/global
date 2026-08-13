@@ -155,6 +155,23 @@ class _ZonePowerResult(Generic[StateT, ResultT]):
     iterations: int
 
 
+def _effective_result_field(
+    *,
+    current_field_Td: float | None,
+    next_field_Td: float | None,
+    field_is_coupled: bool,
+    kinetics: ElectronKineticsResult | None,
+) -> float | None:
+    """Return the field paired with the iteration's transport and rate data."""
+
+    effective_field_Td = current_field_Td
+    if not field_is_coupled and next_field_Td is not None:
+        effective_field_Td = next_field_Td
+    if effective_field_Td is None and kinetics is not None:
+        effective_field_Td = python_float(kinetics.effective_field_Td)
+    return effective_field_Td
+
+
 @dataclass(frozen=True, slots=True)
 class _ZonePowerIteration(Generic[StateT, ResultT]):
     power_state: StateT
@@ -167,11 +184,15 @@ class _ZonePowerIteration(Generic[StateT, ResultT]):
     def as_zone_result(
         self, current_field_Td: float | None, iterations: int
     ) -> _ZonePowerResult[StateT, ResultT]:
-        effective_field_Td = (
-            self.next_field_Td if self.next_field_Td is not None else current_field_Td
+        # Coupled kinetics and ports were evaluated at ``current_field_Td``.
+        # ``next_field_Td`` is only the next fixed-point proposal and must not
+        # be paired with transport/rate data from the preceding iterate.
+        effective_field_Td = _effective_result_field(
+            current_field_Td=current_field_Td,
+            next_field_Td=self.next_field_Td,
+            field_is_coupled=self.field_is_coupled,
+            kinetics=self.kinetics,
         )
-        if effective_field_Td is None and self.kinetics is not None:
-            effective_field_Td = python_float(self.kinetics.effective_field_Td)
         return _ZonePowerResult(
             electron_power_W=self.electron_power_W,
             gas_power_W=sum(item.gas_power_W for item in self.port_results),

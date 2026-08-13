@@ -11,7 +11,11 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from plasma_global.chemistry._contracts import surface_reaction_shape_error
+from plasma_global.chemistry._contracts import (
+    cross_section_support_error,
+    has_onset_threshold,
+    surface_reaction_shape_error,
+)
 from plasma_global.chemistry.data import (
     ChemistryData,
     CrossSectionData,
@@ -67,6 +71,24 @@ class RateContextLike(Protocol):
 RateEvaluator = Callable[[RateContextLike], float]
 
 
+def _readonly(values: np.ndarray) -> np.ndarray:
+    result = np.asarray(values, dtype=float)
+    result.setflags(write=False)
+    return result
+
+
+def _readonly_bool(values: np.ndarray) -> np.ndarray:
+    result = np.asarray(values, dtype=bool)
+    result.setflags(write=False)
+    return result
+
+
+def _legacy_energy_loss_view(chemistry: CompiledChemistry) -> np.ndarray:
+    """Expose the historic nonnegative loss array without mutable storage."""
+
+    return _readonly(np.maximum(-chemistry.electron_energy_transfer_eV, 0.0))
+
+
 @dataclass(frozen=True, slots=True)
 class CompiledBoundaryReaction:
     id: str
@@ -88,7 +110,7 @@ class CompiledChemistry:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[RateEvaluator, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
     jacobian_species_pattern: np.ndarray
@@ -99,6 +121,8 @@ class CompiledChemistry:
     cross_sections: Mapping[str, CrossSectionData]
     provenance: Mapping[str, Any]
 
+    energy_loss_eV = property(_legacy_energy_loss_view)
+
 
 @dataclass(frozen=True, slots=True)
 class _CompiledGasReactions:
@@ -106,20 +130,8 @@ class _CompiledGasReactions:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[RateEvaluator, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
-
-
-def _readonly(values: np.ndarray) -> np.ndarray:
-    result = np.asarray(values, dtype=float)
-    result.setflags(write=False)
-    return result
-
-
-def _readonly_bool(values: np.ndarray) -> np.ndarray:
-    result = np.asarray(values, dtype=bool)
-    result.setflags(write=False)
-    return result
 
 
 def _unique(values: list[str], kind: str) -> None:
@@ -240,24 +252,36 @@ def _bounded_interp(
     return float(np.interp(x, axis, values))
 
 
-def _maxwell_quadrature_curve(
+def _onset_quadrature_curve(
     cross_section: CrossSectionData,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Resolve the physical lower tail without changing the source curve."""
-
     energy = cross_section.energy_eV
     sigma = cross_section.sigma_m2
-    first_energy = float(energy[0])
     threshold = cross_section.threshold_eV
+    threshold_index = int(np.searchsorted(energy, threshold))
+    tolerance = max(abs(float(np.spacing(threshold))), np.finfo(float).tiny)
+    has_threshold_node = threshold_index < energy.size and math.isclose(
+        float(energy[threshold_index]), threshold, rel_tol=0.0, abs_tol=tolerance
+    )
+    if not has_threshold_node:
+        energy = np.insert(energy, threshold_index, threshold)
+        sigma = np.insert(sigma, threshold_index, 0.0)
+    elif float(sigma[threshold_index]) != 0.0:
+        lower_edge = np.nextafter(float(energy[threshold_index]), 0.0)
+        energy = np.insert(energy, threshold_index, lower_edge)
+        sigma = np.insert(sigma, threshold_index, 0.0)
+    if float(energy[0]) > 0.0:
+        energy = np.insert(energy, 0, 0.0)
+        sigma = np.insert(sigma, 0, 0.0)
+    return energy, sigma
+
+
+def _continuous_low_energy_curve(
+    energy: np.ndarray, sigma: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    first_energy = float(energy[0])
     if first_energy == 0.0:
         return energy, sigma
-    begins_at_threshold = threshold > 0.0 and first_energy >= threshold
-    if begins_at_threshold:
-        zero_tail_end = np.nextafter(first_energy, 0.0)
-        return (
-            np.concatenate(([0.0, zero_tail_end], energy)),
-            np.concatenate(([0.0, 0.0], sigma)),
-        )
     if sigma[0] == 0.0:
         return np.insert(energy, 0, 0.0), np.insert(sigma, 0, 0.0)
 
@@ -271,11 +295,22 @@ def _maxwell_quadrature_curve(
     return np.concatenate((lower_energy, energy)), np.concatenate((lower_sigma, sigma))
 
 
-def maxwell_rate_table(
+def _maxwell_quadrature_curve(
     cross_section: CrossSectionData,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Precompute Maxwellian ``<sigma v>`` on a tail-safe mean-energy range."""
+    """Resolve the physical lower tail without changing the source curve."""
 
+    if has_onset_threshold(cross_section):
+        return _onset_quadrature_curve(cross_section)
+    return _continuous_low_energy_curve(cross_section.energy_eV, cross_section.sigma_m2)
+
+
+def _maxwell_mean_energy_axis(cross_section: CrossSectionData) -> np.ndarray:
+    """Validate support and construct the tail-safe mean-energy axis."""
+
+    support_error = cross_section_support_error(cross_section)
+    if support_error is not None:
+        raise ChemistryError(support_error)
     maximum_cross_section_energy = float(cross_section.energy_eV[-1])
     maximum_mean_energy = 1.5 * maximum_cross_section_energy / _MAXWELL_TAIL_CUTOFF
     if maximum_mean_energy <= _MAXWELL_MIN_MEAN_ENERGY_EV:
@@ -285,18 +320,33 @@ def maxwell_rate_table(
             f"Maxwellian mean energy {_MAXWELL_MIN_MEAN_ENERGY_EV:g} eV with "
             f"unresolved tail <= {_MAXWELL_UNRESOLVED_TAIL_FRACTION:g}"
         )
-    mean_energy = np.geomspace(
+    return np.geomspace(
         _MAXWELL_MIN_MEAN_ENERGY_EV,
         maximum_mean_energy,
         _MAXWELL_TABLE_POINTS,
     )
+
+
+def _integrate_maxwell_rates(
+    mean_energy: np.ndarray, energy: np.ndarray, sigma: np.ndarray
+) -> np.ndarray:
     temperature = 2.0 * mean_energy / 3.0
-    energy, sigma = _maxwell_quadrature_curve(cross_section)
     prefactor = 2.0 / np.sqrt(np.pi) * np.sqrt(2.0 * E_CHARGE / ELECTRON_MASS_KG)
     rates = np.empty_like(mean_energy)
     for index, te_eV in enumerate(temperature):
         integrand = sigma * energy * np.exp(-energy / te_eV)
         rates[index] = prefactor * np.trapezoid(integrand, energy) / te_eV**1.5
+    return rates
+
+
+def maxwell_rate_table(
+    cross_section: CrossSectionData,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Precompute Maxwellian ``<sigma v>`` on a tail-safe mean-energy range."""
+
+    mean_energy = _maxwell_mean_energy_axis(cross_section)
+    energy, sigma = _maxwell_quadrature_curve(cross_section)
+    rates = _integrate_maxwell_rates(mean_energy, energy, sigma)
     mean_energy.setflags(write=False)
     rates.setflags(write=False)
     return mean_energy, rates
@@ -328,7 +378,7 @@ def _electron_impact_evaluator(
             name="mean_energy_eV (Maxwellian tail-safe range)",
         )
 
-    return electron_impact, cross_section.energy_loss_eV
+    return electron_impact, cross_section.resolved_electron_energy_transfer_eV
 
 
 def _arrhenius_evaluator(model: RateModelData) -> RateEvaluator:
@@ -456,17 +506,55 @@ def _compile_boundary(
     )
 
 
+def _validate_cross_section_energy(cross_section: CrossSectionData) -> None:
+    legacy_loss = cross_section.energy_loss_eV
+    signed_transfer = cross_section.electron_energy_transfer_eV
+    has_legacy_loss = legacy_loss is not None
+    has_signed_transfer = signed_transfer is not None
+    if has_legacy_loss == has_signed_transfer:
+        raise ChemistryError(
+            f"cross section {cross_section.id!r} must define exactly one of "
+            "energy_loss_eV or electron_energy_transfer_eV"
+        )
+    if legacy_loss is not None and (
+        not math.isfinite(legacy_loss) or legacy_loss < 0.0
+    ):
+        raise ChemistryError(
+            f"cross section {cross_section.id!r} has invalid energy_loss_eV"
+        )
+    if signed_transfer is not None and not math.isfinite(signed_transfer):
+        raise ChemistryError(
+            f"cross section {cross_section.id!r} has invalid "
+            "electron_energy_transfer_eV"
+        )
+
+
+def _validate_cross_section_support(cross_section: CrossSectionData) -> None:
+    support_error = cross_section_support_error(cross_section)
+    if support_error is not None:
+        raise ChemistryError(support_error)
+
+
+def _validate_cross_section_target(
+    cross_section: CrossSectionData,
+    species_by_id: Mapping[str, SpeciesData],
+) -> None:
+    target = species_by_id.get(cross_section.target)
+    if target is None or target.phase != "gas" or target.id == "e":
+        raise ChemistryError(
+            f"cross section {cross_section.id} target {cross_section.target!r} "
+            "must be a declared heavy gas species"
+        )
+
+
 def _validate_cross_section_targets(
     cross_sections: Mapping[str, CrossSectionData],
     species_by_id: Mapping[str, SpeciesData],
 ) -> None:
     for cross_section in cross_sections.values():
-        target = species_by_id.get(cross_section.target)
-        if target is None or target.phase != "gas" or target.id == "e":
-            raise ChemistryError(
-                f"cross section {cross_section.id} target {cross_section.target!r} "
-                "must be a declared heavy gas species"
-            )
+        _validate_cross_section_energy(cross_section)
+        _validate_cross_section_support(cross_section)
+        _validate_cross_section_target(cross_section, species_by_id)
 
 
 def _validate_species(
@@ -551,6 +639,35 @@ def _validated_gas_rate_model(
     return rate_model
 
 
+def _reaction_electron_energy_transfer(
+    reaction: ReactionData,
+    default_transfer_eV: float | None,
+) -> float:
+    """Resolve positive electron gain while retaining legacy positive loss."""
+
+    legacy_loss = reaction.energy_loss_eV
+    signed_transfer = reaction.electron_energy_transfer_eV
+    if legacy_loss is not None and signed_transfer is not None:
+        raise ChemistryError(
+            f"reaction {reaction.id!r} must define at most one of "
+            "energy_loss_eV or electron_energy_transfer_eV"
+        )
+    if signed_transfer is not None:
+        if not math.isfinite(signed_transfer):
+            raise ChemistryError(
+                f"reaction {reaction.id!r} electron_energy_transfer_eV must be finite"
+            )
+        return signed_transfer
+    if legacy_loss is not None:
+        if not math.isfinite(legacy_loss) or legacy_loss < 0.0:
+            raise ChemistryError(
+                f"reaction {reaction.id!r} energy_loss_eV must be finite and "
+                "nonnegative"
+            )
+        return -legacy_loss
+    return 0.0 if default_transfer_eV is None else default_transfer_eV
+
+
 def _compile_gas_reactions(
     data: ChemistryData,
     species_by_id: Mapping[str, SpeciesData],
@@ -564,7 +681,7 @@ def _compile_gas_reactions(
     electron_orders = np.zeros(reaction_count)
     evaluators: list[RateEvaluator] = []
     evaluator_by_model_id: dict[str, tuple[RateEvaluator, float | None]] = {}
-    energy_losses = np.zeros(reaction_count)
+    electron_energy_transfers = np.zeros(reaction_count)
     gas_heating = np.zeros(reaction_count)
 
     for row, reaction in enumerate(data.gas_reactions):
@@ -573,12 +690,11 @@ def _compile_gas_reactions(
         if compiled_rate is None:
             compiled_rate = _rate_evaluator(rate_model, data.cross_sections)
             evaluator_by_model_id[rate_model.id] = compiled_rate
-        evaluator, default_loss = compiled_rate
+        evaluator, default_transfer = compiled_rate
         evaluators.append(evaluator)
-        energy_losses[row] = (
-            reaction.energy_loss_eV
-            if reaction.energy_loss_eV is not None
-            else default_loss or 0.0
+        electron_energy_transfers[row] = _reaction_electron_energy_transfer(
+            reaction,
+            default_transfer,
         )
         gas_heating[row] = reaction.gas_heating_eV
         electron_orders[row] = reaction.reactants.get("e", 0.0)
@@ -593,7 +709,7 @@ def _compile_gas_reactions(
         reactant_orders=reactant_orders,
         electron_orders=electron_orders,
         rate_evaluators=tuple(evaluators),
-        energy_loss_eV=energy_losses,
+        electron_energy_transfer_eV=electron_energy_transfers,
         gas_heating_eV=gas_heating,
     )
 
@@ -681,7 +797,7 @@ def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
         reactant_orders=_readonly(gas.reactant_orders),
         electron_orders=_readonly(gas.electron_orders),
         rate_evaluators=gas.rate_evaluators,
-        energy_loss_eV=_readonly(gas.energy_loss_eV),
+        electron_energy_transfer_eV=_readonly(gas.electron_energy_transfer_eV),
         gas_heating_eV=_readonly(gas.gas_heating_eV),
         reaction_zones=tuple(item.zones for item in data.gas_reactions),
         jacobian_species_pattern=_readonly_bool(jacobian_species_pattern),

@@ -46,6 +46,16 @@ electron-energy closure、prescribed absorbed power、単一一価正イオン�
 local-field、evolved gas、surface kinetics、複数イオン・負イオン、RF/CCP/ICP、拡張状態は
 変換後も `experimental` 分類です。
 
+旧 `boltzmann_2term` が明示gridを持たずlegacy既定値 `0.2..2500 Td` を使っていた場合、migratorは
+現在のv3既定gridを省略形で選び、warningを残します。これは全chemistryに普遍的な有効範囲を仮定する
+処理ではありません。compile時に実際の断面積・混合比で全grid点のpower-balance rootを検証し、
+一つでも未収束ならcaseは失敗します。明示された旧gridは勝手にclipせず、そのまま検証します。
+
+`experimental.rf_envelope` / `experimental.ccp` の `absorbed_power_W` はv3では文字どおりplasma吸収
+実電力です。旧runtimeがこれをsource-side電力としてefficiencyやimpedanceを再乗算していた結果とは
+数値互換にしません。移行後はabsorbed-power ledgerを基準に再実行し、RFのsource-side real powerと
+CCPの`apparent_power_VA`を別々に確認してください。
+
 ## Chemistry 変換
 
 旧 chemistry の変換器は runtime 外の `tools/importers` にあります。通常は `migrate-v2` が

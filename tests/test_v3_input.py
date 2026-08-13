@@ -471,6 +471,43 @@ def test_v2_migration_refactor_is_deterministic() -> None:
     assert first.report == second.report
 
 
+def test_v2_migration_preserves_an_explicit_legacy_field_grid(
+    tmp_path: Path,
+) -> None:
+    source = _yaml_mapping(V2_CONFIGS / "case_argon_lxcat.yaml")
+    source["include"] = str((V2_CONFIGS / "base_case.yaml").resolve())
+    source["files"] = {
+        "chamber": str((V2_CONFIGS / "chamber_argon_icp.yaml").resolve()),
+        "recipe": str((V2_CONFIGS / "recipe_argon_lxcat.yaml").resolve()),
+        "chemistry": {
+            "manifest": str(
+                (
+                    V2_FIXTURES / "chemistry_argon_lxcat" / "chemistry_manifest.yaml"
+                ).resolve()
+            )
+        },
+    }
+    swarm = dict(source["swarm"])
+    swarm["boltzmann_2term"] = {
+        "reduced_field_grid_Td": {"min": 0.2, "max": 2500.0, "n": 48}
+    }
+    source["swarm"] = swarm
+    explicit = tmp_path / "explicit-grid.yaml"
+    explicit.write_text(yaml.safe_dump(source), encoding="utf-8")
+
+    result = migrate_v2(explicit)
+    electrons = result.case.models.electrons
+
+    assert electrons.kind == "experimental.approximate_two_term"
+    assert electrons.reduced_field_grid.min_Td == 0.2
+    assert electrons.reduced_field_grid.max_Td == 2500.0
+    assert electrons.reduced_field_grid.n == 48
+    assert not any(
+        "legacy default reduced-field grid" in warning
+        for warning in result.report.warnings
+    )
+
+
 def test_v2_initial_density_migration_preserves_explicit_and_derived_paths() -> None:
     derived = migrate_v2(V2_CONFIGS / "case_smoke.yaml")
     densities_by_zone = {
@@ -712,6 +749,14 @@ def test_all_v2_examples_migrate_to_standalone_compilable_v3_bundles(
     assert restored.state_labels == simulated.state_labels
     assert restored.time_s.tolist() == simulated.time_s.tolist()
     assert restored.state.tolist() == simulated.state.tolist()
+    if electron_kind == "experimental.approximate_two_term":
+        field_grid = reloaded.models.electrons.reduced_field_grid
+        assert field_grid.min_Td == 1.0
+        assert field_grid.max_Td == 100.0
+        assert any(
+            "validates a power-balance root" in warning
+            for warning in result.report.warnings
+        )
     if case_name == "experimental_smoke_maxwell":
         assert any("cv_over_kb" in warning for warning in result.report.warnings)
         assert any(

@@ -96,6 +96,7 @@ def test_core_exception_imports_are_compatibility_aliases() -> None:
 def test_compiled_power_path_has_no_dynamic_configuration_contract() -> None:
     for relative_path in (
         "plasma_global/core/domain.py",
+        "plasma_global/input/_compile_power.py",
         "plasma_global/input/compile_reactor.py",
         "plasma_global/input/compile_recipe.py",
         "plasma_global/models/power.py",

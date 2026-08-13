@@ -575,6 +575,7 @@ def test_local_field_table_and_dc_series_are_bound_to_the_core(
             "lookup": "local_field",
         }
         data["models"]["electron_closure"] = {"kind": "local_field"}
+        data["output"]["observables"] = ["reduced_field_Td[plasma]"]
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
     state = compiled.model.initial_state(compiled.initial_state)
@@ -632,6 +633,16 @@ def test_unknown_observable_is_a_compile_error() -> None:
         data["output"]["observables"] = ["legacy_everything"]
 
     with pytest.raises(ValueError, match="unknown output observables"):
+        compile_case(_updated_case(load_case(FIXTURE), update))
+
+
+def test_reduced_field_observable_without_a_field_source_is_a_compile_error() -> None:
+    def update(data: dict[str, object]) -> None:
+        data["output"]["observables"] = ["reduced_field_Td[plasma]"]
+
+    with pytest.raises(
+        ValueError, match=r"unknown output observables.*reduced_field_Td"
+    ):
         compile_case(_updated_case(load_case(FIXTURE), update))
 
 

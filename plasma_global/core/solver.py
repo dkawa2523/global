@@ -161,30 +161,35 @@ def _domain_failure(
     )
 
 
-def _state_scale(model: CompiledGlobalModel, initial_state: np.ndarray) -> np.ndarray:
-    """Build one immutable reference scale for the complete integration."""
+def _state_scale(initial_state: np.ndarray) -> np.ndarray:
+    """Build one immutable, component-wise scale for the integration."""
 
     scale = np.maximum(np.abs(initial_state), 1.0)
-    for zone_id in model.layout.zone_ids:
-        density_slice = model.layout.density_slices[zone_id]
-        density_reference = max(
-            float(np.max(np.abs(initial_state[density_slice]), initial=0.0)),
-            1.0,
-        )
-        scale[density_slice] = density_reference
     scale.setflags(write=False)
     return scale
 
 
 class _ScaledSegmentRHS:
-    """Map the dimensionless BDF state to and from physical model units."""
+    """Evaluate a continuous lower-bound extension without projecting BDF state."""
 
-    def __init__(self, physical_rhs: BoundSegmentRHS, scale: np.ndarray) -> None:
+    def __init__(
+        self,
+        physical_rhs: BoundSegmentRHS,
+        scale: np.ndarray,
+        lower_bounds: np.ndarray,
+    ) -> None:
         self.physical_rhs = physical_rhs
         self.scale = scale
+        self.lower_bounds = lower_bounds
 
     def __call__(self, time_s: float, scaled_state: np.ndarray) -> np.ndarray:
         state = np.asarray(scaled_state, dtype=float) * self.scale
+        # solve_ivp does not label Newton trials separately from accepted-state
+        # callbacks.  Continue every RHS evaluation at the nearest lower bound
+        # so rejected probes do not become false integration failures.  The
+        # solver state is never projected: initial and saved states are validated
+        # independently.
+        np.maximum(state, self.lower_bounds, out=state)
         return self.physical_rhs(time_s, state) / self.scale
 
     @property
@@ -351,32 +356,51 @@ def _validate_solver_settings_for_model(
         )
 
 
+def _initial_state_array(
+    model: CompiledGlobalModel,
+    initial: InitialState | np.ndarray,
+) -> np.ndarray:
+    """Materialize either public initial-state representation as one array."""
+
+    if isinstance(initial, InitialState):
+        return model.initial_state(initial)
+    current_state = np.array(initial, dtype=float, copy=True)
+    if current_state.shape != (model.layout.size,):
+        raise ValueError(
+            f"Initial state has shape {current_state.shape}, "
+            f"expected {(model.layout.size,)}"
+        )
+    return current_state
+
+
 def _prepare_initial_state(
     model: CompiledGlobalModel,
     initial: InitialState | np.ndarray,
     dimensionless_atol: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if isinstance(initial, InitialState):
-        current_state = model.initial_state(initial)
-    else:
-        current_state = np.array(initial, dtype=float, copy=True)
-        if current_state.shape != (model.layout.size,):
-            raise ValueError(
-                f"Initial state has shape {current_state.shape}, "
-                f"expected {(model.layout.size,)}"
-            )
+) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
+    current_state = _initial_state_array(model, initial)
     if not np.all(np.isfinite(current_state)):
         raise ModelConfigurationError("Initial state must contain only finite values")
-    state_scale = _state_scale(model, current_state)
+    below_bound = current_state < model.state_lower_bounds
+    if np.any(below_bound):
+        index = int(np.flatnonzero(below_bound)[0])
+        raise ModelConfigurationError(
+            "Initial state violates its compiled lower bound: "
+            f"state[{index}]={current_state[index]:.6e} < "
+            f"{model.state_lower_bounds[index]:.6e}"
+        )
+    state_scale = _state_scale(current_state)
+    solver_atol = dimensionless_atol
     physical_domain_atol = dimensionless_atol * state_scale
     physical_domain_atol.setflags(write=False)
-    return current_state, state_scale, physical_domain_atol
+    return current_state, state_scale, solver_atol, physical_domain_atol
 
 
 def _segment_solver_options(
     scaled_rhs: _ScaledSegmentRHS,
     segment: RecipeSegment,
     scaled_initial_state: np.ndarray,
+    solver_atol: float,
     controls: SolverSettings,
     sample_times: np.ndarray | None,
 ) -> dict[str, object]:
@@ -386,7 +410,7 @@ def _segment_solver_options(
         "y0": scaled_initial_state,
         "method": "BDF",
         "rtol": controls.rtol,
-        "atol": controls.atol,
+        "atol": solver_atol,
         "jac_sparsity": scaled_rhs.jac_sparsity,
     }
     if sample_times is not None:
@@ -560,13 +584,14 @@ def _result_metadata(
             "accepted_state_negative_policy": (
                 "At solver-to-result construction, states with zero lower bound store "
                 "-10*domain_atol <= y < 0 as zero; values materially below each finite "
-                "lower bound fail. Signed extension states remain signed. "
-                "ODE state and RHS are not clipped."
+                "lower bound fail. Signed extension states remain signed. Every BDF "
+                "RHS callback evaluates a continuous nearest-lower-bound extension; "
+                "initial and saved solver states are validated and never projected."
             ),
             "state_scaling_policy": (
-                "BDF integrates y/state_scale with scalar dimensionless atol; density "
-                "components share their zone's initial maximum-density scale and all "
-                "other components use max(abs(initial), 1)."
+                "BDF integrates y/state_scale with a component-wise dimensionless atol "
+                "vector; every component independently uses max(abs(initial), 1) as "
+                "its immutable scale."
             ),
             "accepted_state_zeroed_negative_count": zeroed_negative_count,
         },
@@ -593,10 +618,8 @@ def solve_compiled_model(
     _validate_solver_settings_for_model(model, controls)
     stop_threshold = controls.experimental_quasi_steady_threshold_s_inv
     global_sample_times = _global_sample_times(model, controls)
-    current_state, state_scale, physical_domain_atol = _prepare_initial_state(
-        model,
-        initial,
-        controls.atol,
+    current_state, state_scale, solver_atol, physical_domain_atol = (
+        _prepare_initial_state(model, initial, controls.atol)
     )
     history = _IntegrationHistory()
 
@@ -604,12 +627,14 @@ def solve_compiled_model(
         scaled_rhs = _ScaledSegmentRHS(
             model.bind_segment(segment, domain_atol=physical_domain_atol),
             state_scale,
+            model.state_lower_bounds,
         )
         sample_times = _segment_sample_times(global_sample_times, segment)
         options = _segment_solver_options(
             scaled_rhs,
             segment,
             current_state / state_scale,
+            solver_atol,
             controls,
             sample_times,
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import pickle
+from dataclasses import dataclass
 from pathlib import Path
 from typing import get_type_hints
 
@@ -174,7 +175,112 @@ def test_coupling_waits_until_electron_power_also_converges() -> None:
 
     assert result.iterations_by_zone["plasma"] == 3
     assert result.electron_power_W_by_zone["plasma"] == 2.0
-    assert port.calls == 3
+    assert port.calls == 4
+
+
+@dataclass
+class _IncrementingFieldPort:
+    port_id: str = "field"
+    zone_id: str = "plasma"
+    time_dependent: bool = False
+    produces_reduced_field: bool = True
+
+    def evaluate(
+        self,
+        _time_s: float,
+        state: PowerState,
+        _command: CompiledPowerCommand | None,
+    ) -> PowerPortResult:
+        mobility = float(state.electron_mobility_m2_V_s)
+        return PowerPortResult(
+            self.port_id,
+            self.zone_id,
+            electron_power_W=0.0,
+            reduced_field_Td=mobility + 1.0e-6,
+        )
+
+
+def test_coupled_field_reports_the_field_used_for_final_kinetics() -> None:
+    table = TabulatedElectronKinetics(
+        source=Path("sharp-rate.h5"),
+        lookup="local_field",
+        bounds="error",
+        axis=np.array([1.0, 2.0, 3.0]),
+        mean_energy_eV=np.array([1.0, 2.0, 3.0]),
+        mobility_m2_V_s=np.array([1.0, 2.0, 3.0]),
+        effective_field_Td=np.array([1.0, 2.0, 3.0]),
+        rate_tables={"sharp": np.array([0.0, 0.0, 1.0e12])},
+    )
+    coordinator = PowerCoordinator((_IncrementingFieldPort(),), ("plasma",))
+
+    result = _evaluate(coordinator, mean_energy_eV=None, kinetics=table)
+    field = result.reduced_field_Td_by_zone["plasma"]
+    kinetics = result.kinetics_by_zone["plasma"]
+
+    assert kinetics.effective_field_Td == field
+    assert (
+        kinetics.rate_coefficients
+        == table.evaluate(reduced_field_Td=field).rate_coefficients
+    )
+
+
+def test_local_field_off_uses_explicit_zero_field_kinetics() -> None:
+    table = TabulatedElectronKinetics(
+        source=Path("positive-field-only.h5"),
+        lookup="local_field",
+        bounds="clip",
+        axis=np.array([1.0, 2.0]),
+        mean_energy_eV=np.array([1.0, 2.0]),
+        mobility_m2_V_s=np.array([1.0, 2.0]),
+        effective_field_Td=np.array([1.0, 2.0]),
+        rate_tables={"ionization": np.array([1.0e-15, 2.0e-15])},
+    )
+    coordinator = PowerCoordinator(
+        (_IncrementingFieldPort(),), ("plasma",), max_iterations=1
+    )
+
+    result = coordinator.evaluate(
+        time_s=0.0,
+        commands={"field": CompiledPowerCommand(kind="off")},
+        electron_density_m3_by_zone={"plasma": 1.0e15},
+        neutral_density_m3_by_zone={"plasma": 1.0e20},
+        mean_energy_eV_by_zone={"plasma": None},
+        kinetics_by_zone={"plasma": table},
+    )
+
+    kinetics = result.kinetics_by_zone["plasma"]
+    assert result.reduced_field_Td_by_zone["plasma"] == 0.0
+    assert kinetics.effective_field_Td == 0.0
+    assert kinetics.mean_energy_eV == 0.0
+    assert kinetics.rate_coefficients == {"ionization": 0.0}
+    assert result.iterations_by_zone["plasma"] == 1
+
+
+def test_local_field_off_preserves_an_explicit_zero_field_table_node() -> None:
+    table = TabulatedElectronKinetics(
+        source=Path("explicit-zero-field.h5"),
+        lookup="local_field",
+        bounds="error",
+        axis=np.array([0.0, 1.0]),
+        mean_energy_eV=np.array([0.1, 1.0]),
+        mobility_m2_V_s=np.array([0.5, 1.0]),
+        effective_field_Td=np.array([0.0, 1.0]),
+        rate_tables={"attachment": np.array([3.0e-15, 1.0e-15])},
+    )
+    coordinator = PowerCoordinator((_IncrementingFieldPort(),), ("plasma",))
+
+    result = coordinator.evaluate(
+        time_s=0.0,
+        commands={"field": CompiledPowerCommand(kind="off")},
+        electron_density_m3_by_zone={"plasma": 1.0e15},
+        neutral_density_m3_by_zone={"plasma": 1.0e20},
+        mean_energy_eV_by_zone={"plasma": None},
+        kinetics_by_zone={"plasma": table},
+    )
+
+    kinetics = result.kinetics_by_zone["plasma"]
+    assert kinetics.mean_energy_eV == pytest.approx(0.1)
+    assert kinetics.rate_coefficients == {"attachment": 3.0e-15}
 
 
 @pytest.mark.parametrize(

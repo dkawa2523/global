@@ -12,6 +12,8 @@ from plasma_global.core.result import SimulationResult
 
 
 def _nonfinite_count(values: np.ndarray) -> int:
+    """Count corrupt values in an already-materialized legacy result."""
+
     return int(values.size - np.count_nonzero(np.isfinite(values)))
 
 
@@ -130,6 +132,7 @@ def _series_issues(
                     name,
                 )
             )
+
     return issues
 
 

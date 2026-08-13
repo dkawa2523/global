@@ -42,10 +42,8 @@ def validate_prescribed_power_port(
     fractions = electron_fraction, gas_fraction
     if not np.isfinite(fractions).all() or min(fractions) < 0.0:
         raise CaseValidationError("power fractions must be finite and nonnegative")
-    if sum(fractions) > 1.0 + 1.0e-12:
-        raise CaseValidationError(
-            "electron_fraction + gas_fraction must not exceed one"
-        )
+    if abs(sum(fractions) - 1.0) > 1.0e-12:
+        raise CaseValidationError("electron_fraction + gas_fraction must equal one")
     if default_power_W is not None and (
         not math.isfinite(default_power_W) or default_power_W < 0.0
     ):

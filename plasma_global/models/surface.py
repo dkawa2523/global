@@ -146,9 +146,14 @@ class _IonAssistedRate:
         )
 
 
+def _arrhenius_factor(activation_temperature_K: float, temperature_K: float) -> float:
+    return math.exp(-activation_temperature_K / temperature_K)
+
+
 @dataclass(frozen=True, slots=True)
-class _ThermalRate:
-    prefactor_m2_s: float
+class _DesorptionRate:
+    frequency_s_inv: float
+    site_density_m2: float
     activation_temperature_K: float
 
     def evaluate(
@@ -160,8 +165,32 @@ class _ThermalRate:
         surface_temperature_K: float,
     ) -> float:
         del gas, gas_temperature_K, ion_fluxes, ion_energy_eV
-        return self.prefactor_m2_s * math.exp(
-            -self.activation_temperature_K / surface_temperature_K
+        return (
+            self.frequency_s_inv
+            * self.site_density_m2
+            * _arrhenius_factor(self.activation_temperature_K, surface_temperature_K)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _LangmuirHinshelwoodRate:
+    coefficient_m2_s: float
+    site_density_m2: float
+    activation_temperature_K: float
+
+    def evaluate(
+        self,
+        gas: np.ndarray,
+        gas_temperature_K: float,
+        ion_fluxes: Mapping[tuple[str, str], float],
+        ion_energy_eV: float,
+        surface_temperature_K: float,
+    ) -> float:
+        del gas, gas_temperature_K, ion_fluxes, ion_energy_eV
+        return (
+            self.coefficient_m2_s
+            * self.site_density_m2**2
+            * _arrhenius_factor(self.activation_temperature_K, surface_temperature_K)
         )
 
 
@@ -587,17 +616,21 @@ class CompiledSurfaceModel:
                 inverse_energy_span_eV_inv=1.0 / (reference - threshold),
                 exponent=self._numeric_parameter(model, "exponent"),
             )
-        if model.kind == "desorption":
-            amplitude = self._numeric_parameter(model, "frequency_s_inv")
-        elif model.kind == "langmuir_hinshelwood":
-            amplitude = self._numeric_parameter(model, "A_m2_s_inv")
-        else:
-            raise CaseValidationError(f"unsupported surface rate model {model.kind!r}")
         activation_eV = self._numeric_parameter(model, "activation_eV")
-        return _ThermalRate(
-            prefactor_m2_s=amplitude * surface.site_density_m2,
-            activation_temperature_K=activation_eV * E_CHARGE / BOLTZMANN_J_K,
-        )
+        activation_temperature_K = activation_eV * E_CHARGE / BOLTZMANN_J_K
+        if model.kind == "desorption":
+            return _DesorptionRate(
+                frequency_s_inv=self._numeric_parameter(model, "frequency_s_inv"),
+                site_density_m2=surface.site_density_m2,
+                activation_temperature_K=activation_temperature_K,
+            )
+        if model.kind == "langmuir_hinshelwood":
+            return _LangmuirHinshelwoodRate(
+                coefficient_m2_s=self._numeric_parameter(model, "A_m2_s_inv"),
+                site_density_m2=surface.site_density_m2,
+                activation_temperature_K=activation_temperature_K,
+            )
+        raise CaseValidationError(f"unsupported surface rate model {model.kind!r}")
 
     def initial_state(self) -> np.ndarray:
         values = np.zeros(len(self.layout.labels))

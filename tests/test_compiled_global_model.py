@@ -38,6 +38,7 @@ class ChemistryFixture:
     energy_loss_eV: np.ndarray
     gas_heating_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
+    electron_energy_transfer_eV: np.ndarray | None = None
 
     @property
     def jacobian_species_pattern(self) -> np.ndarray:
@@ -176,6 +177,48 @@ def test_local_field_is_algebraic_and_rejects_out_of_table_domain() -> None:
             energy_density_J_m3=None,
             reduced_field_Td=31.0,
         )
+
+
+def test_explicit_zero_field_uses_the_same_cold_boundary_as_an_off_port() -> None:
+    kinetics = TabulatedElectronKinetics(
+        source=Path("positive-field-only.h5"),
+        lookup="local_field",
+        bounds="error",
+        axis=np.array([1.0, 2.0]),
+        mean_energy_eV=np.array([1.0, 2.0]),
+        mobility_m2_V_s=np.array([0.1, 0.2]),
+        effective_field_Td=np.array([1.0, 2.0]),
+        rate_tables={"ionization": np.array([1.0e-15, 2.0e-15])},
+    )
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("plasma", 1.0),),
+        segments=(
+            RecipeSegment(
+                "off",
+                0.0,
+                1.0,
+                reduced_field_Td_by_zone={"plasma": 0.0},
+            ),
+        ),
+        electron_closure=LocalFieldClosure(
+            TabulatedMeanEnergy(
+                reduced_field_Td=(0.0, 2.0),
+                mean_energy_eV=(0.0, 2.0),
+            )
+        ),
+        electron_kinetics_by_zone={"plasma": kinetics},
+    )
+    state = model.initial_state(
+        InitialState(densities_m3_by_zone={"plasma": {"Ar": 1.0e20, "Ar_plus": 1.0e15}})
+    )
+
+    evaluated = model.evaluate(0.0, state, model.segments[0])
+    cold = evaluated.kinetics_by_zone["plasma"]
+
+    assert cold.effective_field_Td == 0.0
+    assert cold.mean_energy_eV == 0.0
+    assert cold.rate_coefficients == {"ionization": 0.0}
 
 
 def test_initial_state_packs_zone_blocks_in_layout_order() -> None:
@@ -479,6 +522,57 @@ def test_evaluation_ledger_reconstructs_energy_derivative() -> None:
     assert evaluated.derivative[energy_index] == pytest.approx(reconstructed)
 
 
+def test_excitation_deexcitation_pair_conserves_electron_and_internal_energy() -> None:
+    energy_gap_eV = 11.5
+    chemistry = ChemistryFixture(
+        species_ids=("Ar", "Ar_star", "Ar_plus"),
+        charges=np.array([0.0, 0.0, 1.0]),
+        masses_kg=np.full(3, ARGON_MASS_KG),
+        reaction_ids=("excite", "superelastic"),
+        stoichiometry=np.array([[-1.0, 1.0, 0.0], [1.0, -1.0, 0.0]]),
+        reactant_orders=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+        electron_orders=np.ones(2),
+        rate_evaluators=(1.0e-16, 1.0e-16),
+        # The canonical signed transfer takes precedence.  The legacy view
+        # remains nonnegative for old chemistry sources.
+        energy_loss_eV=np.array([energy_gap_eV, 0.0]),
+        electron_energy_transfer_eV=np.array([-energy_gap_eV, energy_gap_eV]),
+        gas_heating_eV=np.zeros(2),
+        reaction_zones=((), ()),
+    )
+    model = CompiledGlobalModel(
+        chemistry=chemistry,
+        zones=(Zone("z", 1.0),),
+        segments=(RecipeSegment("afterglow", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={
+                "z": {"Ar": 2.0e18, "Ar_star": 5.0e17, "Ar_plus": 1.0e15}
+            },
+            mean_energy_eV_by_zone={"z": 3.0},
+        )
+    )
+
+    evaluated = model.evaluate(0.0, state, model.segments[0])
+    density_start = model.layout.density_slices["z"].start
+    excited_derivative = evaluated.derivative[density_start + 1]
+    electron_energy_derivative = evaluated.derivative[
+        model.layout.electron_energy_indices["z"]
+    ]
+    excitation_energy_J = energy_gap_eV * ELEMENTARY_CHARGE_C
+
+    assert excited_derivative > 0.0
+    assert electron_energy_derivative < 0.0
+    assert electron_energy_derivative == pytest.approx(
+        -excitation_energy_J * excited_derivative
+    )
+    assert evaluated.ledger_by_zone["z"].reaction_energy_loss_J_m3_s == (
+        pytest.approx(excitation_energy_J * excited_derivative)
+    )
+
+
 def test_jacobian_sparsity_uses_chemistry_dependencies_with_no_cross_zone_fill() -> (
     None
 ):
@@ -498,6 +592,24 @@ def test_jacobian_sparsity_uses_chemistry_dependencies_with_no_cross_zone_fill()
     assert np.all(pattern[second, second][2])
     assert not np.any(pattern[first, second])
     assert not np.any(pattern[second, first])
+
+
+def test_jacobian_sparsity_cannot_mutate_the_compiled_model() -> None:
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("plasma", 1.0),),
+        segments=(RecipeSegment("step", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+    )
+    expected = model.jac_sparsity.toarray()
+
+    caller_copy = model.jac_sparsity
+    caller_copy.data[:] = 0
+
+    np.testing.assert_array_equal(model.jac_sparsity.toarray(), expected)
+    np.testing.assert_array_equal(
+        model.bind_segment(model.segments[0]).jac_sparsity.toarray(), expected
+    )
 
 
 def test_wall_flux_and_boundary_return_share_one_ledger() -> None:

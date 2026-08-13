@@ -65,6 +65,7 @@ class CompiledChemistryData:
     stoichiometry: np.ndarray
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     energy_loss_eV: np.ndarray
     gas_heating_eV: np.ndarray
     jacobian_species_pattern: np.ndarray
@@ -79,7 +80,7 @@ class _ChemistryArrays:
     stoichiometry: np.ndarray
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
     jacobian_pattern: np.ndarray
 
@@ -107,6 +108,36 @@ def _readonly_jacobian_pattern(values: object, species_count: int) -> np.ndarray
             f"{pattern.shape}, expected {expected_shape}"
         )
     result = np.array(pattern, dtype=bool, copy=True)
+    result.setflags(write=False)
+    return result
+
+
+def _electron_energy_transfer(
+    source: ChemistrySource, reaction_count: int
+) -> np.ndarray:
+    signed = getattr(source, "electron_energy_transfer_eV", None)
+    if signed is not None:
+        return _readonly_float_array(
+            signed,
+            shape=(reaction_count,),
+            name="electron_energy_transfer_eV",
+        )
+    legacy_loss = _readonly_float_array(
+        source.energy_loss_eV,
+        shape=(reaction_count,),
+        name="energy_loss_eV",
+    )
+    if np.any(legacy_loss < 0.0):
+        raise ModelConfigurationError("Electron energy losses must be non-negative")
+    result = -legacy_loss
+    result.setflags(write=False)
+    return result
+
+
+def _legacy_energy_loss(electron_energy_transfer_eV: np.ndarray) -> np.ndarray:
+    """Build the immutable positive-loss compatibility view once."""
+
+    result = np.maximum(-electron_energy_transfer_eV, 0.0)
     result.setflags(write=False)
     return result
 
@@ -168,11 +199,7 @@ def _compiled_arrays(
             shape=(reaction_count,),
             name="electron_orders",
         ),
-        energy_loss_eV=_readonly_float_array(
-            source.energy_loss_eV,
-            shape=(reaction_count,),
-            name="energy_loss_eV",
-        ),
+        electron_energy_transfer_eV=_electron_energy_transfer(source, reaction_count),
         gas_heating_eV=_readonly_float_array(
             source.gas_heating_eV,
             shape=(reaction_count,),
@@ -195,8 +222,6 @@ def _validate_physical_arrays(arrays: _ChemistryArrays) -> None:
         raise ModelConfigurationError(
             "Mass-action reaction orders must be non-negative"
         )
-    if np.any(arrays.energy_loss_eV < 0.0):
-        raise ModelConfigurationError("Electron energy losses must be non-negative")
     if np.any(arrays.gas_heating_eV < 0.0):
         raise ModelConfigurationError("Gas reaction heating must be non-negative")
 
@@ -224,6 +249,7 @@ def compile_chemistry_data(source: ChemistrySource) -> CompiledChemistryData:
         reaction_count=reaction_count,
     )
 
+    electron_transfer = arrays.electron_energy_transfer_eV
     return CompiledChemistryData(
         species_ids=species_ids,
         species_index=MappingProxyType(
@@ -235,7 +261,8 @@ def compile_chemistry_data(source: ChemistrySource) -> CompiledChemistryData:
         stoichiometry=arrays.stoichiometry,
         reactant_orders=arrays.reactant_orders,
         electron_orders=arrays.electron_orders,
-        energy_loss_eV=arrays.energy_loss_eV,
+        electron_energy_transfer_eV=electron_transfer,
+        energy_loss_eV=_legacy_energy_loss(electron_transfer),
         gas_heating_eV=arrays.gas_heating_eV,
         jacobian_species_pattern=arrays.jacobian_pattern,
         reaction_zones=_compiled_reaction_zones(source, reaction_count),

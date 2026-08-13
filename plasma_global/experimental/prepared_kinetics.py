@@ -16,7 +16,7 @@ from typing import Any, Literal, SupportsFloat, SupportsIndex
 
 import numpy as np
 
-from plasma_global.chemistry.data import ChemistryData, CrossSectionData
+from plasma_global.chemistry.data import ChemistryData, CrossSectionData, SpeciesData
 from plasma_global.errors import CaseValidationError
 from plasma_global.experimental.eedf import ApproximateTwoTermEEDF, ElectronCollision
 from plasma_global.models.kinetics import TabulatedElectronKinetics
@@ -66,33 +66,35 @@ def _collision_kind(
     )
 
 
-def _compile_collisions(chemistry: ChemistryData) -> tuple[ElectronCollision, ...]:
-    if not chemistry.cross_sections:
+def _is_neutral_gas_target(target: SpeciesData | None) -> bool:
+    return target is not None and target.phase == "gas" and target.charge == 0
+
+
+def _compile_collision(cross_section: CrossSectionData) -> ElectronCollision:
+    """Translate one validated-target cross section to the EEDF contract."""
+
+    kind = _collision_kind(cross_section)
+    electron_transfer = cross_section.resolved_electron_energy_transfer_eV
+    if kind == "inelastic" and electron_transfer > 0.0:
         raise CaseValidationError(
-            "experimental.approximate_two_term requires electron-neutral cross sections"
+            "experimental.approximate_two_term does not support superelastic "
+            f"electron heating from cross section {cross_section.id!r}"
         )
-    species = {item.id: item for item in chemistry.species}
-    invalid_targets: list[str] = []
-    collisions: list[ElectronCollision] = []
-    for cross_section in chemistry.cross_sections.values():
-        target = species.get(cross_section.target)
-        if target is None or target.phase != "gas" or target.charge != 0:
-            invalid_targets.append(cross_section.target)
-            continue
-        collisions.append(
-            ElectronCollision(
-                collision_id=cross_section.id,
-                target_species=cross_section.target,
-                kind=_collision_kind(cross_section),
-                energy_eV=cross_section.energy_eV,
-                cross_section_m2=cross_section.sigma_m2,
-                energy_loss_eV=(
-                    0.0
-                    if _collision_kind(cross_section) == "momentum"
-                    else cross_section.energy_loss_eV
-                ),
-            )
-        )
+    return ElectronCollision(
+        collision_id=cross_section.id,
+        target_species=cross_section.target,
+        kind=kind,
+        energy_eV=cross_section.energy_eV,
+        cross_section_m2=cross_section.sigma_m2,
+        energy_loss_eV=0.0 if kind == "momentum" else -electron_transfer,
+    )
+
+
+def _validate_collision_set(
+    collisions: Sequence[ElectronCollision], invalid_targets: Sequence[str]
+) -> None:
+    """Report deferred target errors before checking the required kernel."""
+
     if invalid_targets:
         raise CaseValidationError(
             "experimental.approximate_two_term only accepts neutral gas targets; "
@@ -103,6 +105,23 @@ def _compile_collisions(chemistry: ChemistryData) -> tuple[ElectronCollision, ..
             "experimental.approximate_two_term requires a momentum-transfer "
             "cross section"
         )
+
+
+def _compile_collisions(chemistry: ChemistryData) -> tuple[ElectronCollision, ...]:
+    if not chemistry.cross_sections:
+        raise CaseValidationError(
+            "experimental.approximate_two_term requires electron-neutral cross sections"
+        )
+    species = {item.id: item for item in chemistry.species}
+    invalid_targets: list[str] = []
+    collisions: list[ElectronCollision] = []
+    for cross_section in chemistry.cross_sections.values():
+        target = species.get(cross_section.target)
+        if not _is_neutral_gas_target(target):
+            invalid_targets.append(cross_section.target)
+            continue
+        collisions.append(_compile_collision(cross_section))
+    _validate_collision_set(collisions, invalid_targets)
     return tuple(collisions)
 
 
@@ -199,10 +218,9 @@ def _prepare_table(
     return TabulatedElectronKinetics(
         source=source,
         lookup="local_field",
-        # Experimental power ports return E/N=0 while switched off.  The
-        # configured positive grid represents the lowest resolved swarm state,
-        # so endpoint clipping is explicit in provenance instead of extrapolation.
-        bounds="clip",
+        # A positive-field swarm state is not a valid substitute for E/N=0.
+        # Ports outside the prepared domain therefore fail explicitly.
+        bounds="error",
         axis=_readonly(field_grid_Td),
         mean_energy_eV=_readonly([result.mean_energy_eV for result in results]),
         mobility_m2_V_s=_readonly([result.mobility_m2_V_s for result in results]),
@@ -350,8 +368,8 @@ def prepare_approximate_two_term_kinetics(
     energy_min_eV: float = 1.0e-3,
     energy_max_eV: float = 160.0,
     energy_points: int = 360,
-    field_min_Td: float = 0.2,
-    field_max_Td: float = 2500.0,
+    field_min_Td: float = 1.0,
+    field_max_Td: float = 100.0,
     field_points: int = 48,
     max_iterations: int = 48,
 ) -> PreparedApproximateTwoTermKinetics:
@@ -408,7 +426,8 @@ def prepare_approximate_two_term_kinetics(
         "runtime_eedf_solve": False,
         "closure": "local_field",
         "preparation": "compile_time_strict_geometric_grid",
-        "bounds_policy": "clip_to_prepared_grid",
+        "bounds_policy": "error_outside_prepared_grid",
+        "zero_field_policy": "cold_electron_zero_rates",
         "chemistry_manifest": str(chemistry.source),
         "cross_section_ids": tuple(collision.collision_id for collision in collisions),
         "mixture_key_species": requested_key or targets,

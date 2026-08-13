@@ -8,6 +8,7 @@ Those are separate stages of the application.
 from __future__ import annotations
 
 import math
+from itertools import pairwise
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self, assert_never
 
@@ -96,7 +97,8 @@ class ZoneConfig(StrictModel):
         if densities is not None:
             if self.initial_seed_densities_m3:
                 raise ValueError(
-                    "initial_seed_densities_m3 is only valid with initial_mole_fractions"
+                    "initial_seed_densities_m3 is only valid with "
+                    "initial_mole_fractions"
                 )
             if not densities or not any(value > 0.0 for value in densities.values()):
                 raise ValueError("initial_densities_m3 must contain a positive density")
@@ -524,8 +526,12 @@ class EnergyGridConfig(StrictModel):
 
 
 class ReducedFieldGridConfig(StrictModel):
-    min_Td: PositiveFloat = 0.2
-    max_Td: PositiveFloat = 2500.0
+    # The approximate closure only publishes states whose power-balance root
+    # is bracketed.  These conservative defaults cover the validated argon
+    # examples; users may narrow or extend them when their own collision set
+    # demonstrates a root at every requested point.
+    min_Td: PositiveFloat = 1.0
+    max_Td: PositiveFloat = 100.0
     n: Annotated[int, Field(ge=2)] = 48
 
     @model_validator(mode="after")
@@ -642,9 +648,7 @@ class SolverConfig(StrictModel):
         if self.save_at_s is not None:
             if not self.save_at_s:
                 raise ValueError("solver.save_at_s must not be empty")
-            if any(
-                right <= left for left, right in zip(self.save_at_s, self.save_at_s[1:])
-            ):
+            if any(right <= left for left, right in pairwise(self.save_at_s)):
                 raise ValueError("solver.save_at_s must be strictly increasing")
         if (
             self.first_step_s is not None

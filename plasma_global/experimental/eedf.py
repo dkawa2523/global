@@ -18,6 +18,37 @@ import numpy as np
 ELECTRON_CHARGE_C = 1.602176634e-19
 ELECTRON_MASS_KG = 9.1093837015e-31
 TD_TO_V_M2 = 1.0e-21
+_MAX_TERMINAL_BIN_PROBABILITY = 1.0e-3
+
+
+def _validate_energy_grid(
+    energy_min_eV: float, energy_max_eV: float, energy_points: int
+) -> None:
+    """Validate the finite energy interval before constructing its grid."""
+
+    if (
+        not math.isfinite(energy_min_eV)
+        or not math.isfinite(energy_max_eV)
+        or energy_min_eV <= 0.0
+        or energy_max_eV <= energy_min_eV
+    ):
+        raise ValueError("energy grid bounds must be finite, positive, and increasing")
+    if energy_points < 32:
+        raise ValueError("energy_points must be at least 32")
+
+
+def _validate_terminal_bin_probability(
+    energy_eV: np.ndarray, distribution_eV_inv: np.ndarray
+) -> None:
+    """Reject a solved EEDF whose final energy bin still carries material mass."""
+
+    terminal_mass = float(np.trapezoid(distribution_eV_inv[-2:], energy_eV[-2:]))
+    if terminal_mass > _MAX_TERMINAL_BIN_PROBABILITY:
+        raise ValueError(
+            "approximate two-term EEDF energy_max_eV is too low: "
+            f"terminal-bin probability mass {terminal_mass:.3e} exceeds "
+            f"{_MAX_TERMINAL_BIN_PROBABILITY:.1e}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,21 +166,23 @@ class ApproximateTwoTermEEDF:
         ids = tuple(collision.collision_id for collision in collisions)
         if len(set(ids)) != len(ids):
             raise ValueError("collision IDs must be unique")
-        if (
-            not math.isfinite(self.energy_min_eV)
-            or not math.isfinite(self.energy_max_eV)
-            or self.energy_min_eV <= 0.0
-            or self.energy_max_eV <= self.energy_min_eV
-        ):
-            raise ValueError(
-                "energy grid bounds must be finite, positive, and increasing"
-            )
-        if self.energy_points < 32:
-            raise ValueError("energy_points must be at least 32")
+        _validate_energy_grid(
+            self.energy_min_eV, self.energy_max_eV, self.energy_points
+        )
         if not math.isfinite(self.elastic_loss_eV) or self.elastic_loss_eV < 0.0:
             raise ValueError("elastic_loss_eV must be finite and nonnegative")
         if self.max_iterations < 1:
             raise ValueError("max_iterations must be positive")
+        uncovered = tuple(
+            collision.collision_id
+            for collision in collisions
+            if float(collision.energy_eV[-1]) < self.energy_max_eV
+        )
+        if uncovered:
+            raise ValueError(
+                "collision cross sections do not cover the EEDF energy grid: "
+                + ", ".join(uncovered)
+            )
 
         energy = np.geomspace(
             self.energy_min_eV, self.energy_max_eV, self.energy_points
@@ -277,6 +310,47 @@ class ApproximateTwoTermEEDF:
         mismatch = math.log(max(heating_W, 1.0e-300) / max(total_loss_W, 1.0e-300))
         return mismatch, distribution
 
+    def _balanced_distribution(
+        self,
+        reduced_field_Td: float,
+        total_density_m3: float,
+        momentum: np.ndarray,
+        loss_sigma_eV: np.ndarray,
+    ) -> np.ndarray:
+        if reduced_field_Td == 0.0:
+            raise ValueError(
+                "approximate two-term power-balance root is undefined at E/N=0 Td"
+            )
+        lower, upper = 0.02, 220.0
+        lower_mismatch, _ = self._power_balance(
+            lower, reduced_field_Td, total_density_m3, momentum, loss_sigma_eV
+        )
+        upper_mismatch, distribution = self._power_balance(
+            upper, reduced_field_Td, total_density_m3, momentum, loss_sigma_eV
+        )
+        if lower_mismatch * upper_mismatch > 0.0:
+            raise ValueError(
+                "approximate two-term power-balance root is not bracketed "
+                f"at E/N={reduced_field_Td:g} Td "
+                f"(endpoint residuals {lower_mismatch:.3e}, {upper_mismatch:.3e})"
+            )
+        for _ in range(self.max_iterations):
+            middle = math.sqrt(lower * upper)
+            mismatch, distribution = self._power_balance(
+                middle, reduced_field_Td, total_density_m3, momentum, loss_sigma_eV
+            )
+            if abs(mismatch) < 5.0e-4:
+                return distribution
+            if lower_mismatch * mismatch <= 0.0:
+                upper = middle
+            else:
+                lower = middle
+                lower_mismatch = mismatch
+        raise ValueError(
+            "approximate two-term power-balance root did not converge "
+            f"after {self.max_iterations} iterations at E/N={reduced_field_Td:g} Td"
+        )
+
     def evaluate(
         self,
         reduced_field_Td: float,
@@ -291,33 +365,10 @@ class ApproximateTwoTermEEDF:
             target_densities_m3
         )
 
-        lower, upper = 0.02, 220.0
-        lower_mismatch, lower_distribution = self._power_balance(
-            lower, field_value, total_density, momentum, loss_sigma_eV
+        distribution = self._balanced_distribution(
+            field_value, total_density, momentum, loss_sigma_eV
         )
-        upper_mismatch, upper_distribution = self._power_balance(
-            upper, field_value, total_density, momentum, loss_sigma_eV
-        )
-        if lower_mismatch * upper_mismatch > 0.0:
-            distribution = (
-                lower_distribution
-                if abs(lower_mismatch) <= abs(upper_mismatch)
-                else upper_distribution
-            )
-        else:
-            distribution = upper_distribution
-            for _ in range(self.max_iterations):
-                middle = math.sqrt(lower * upper)
-                mismatch, distribution = self._power_balance(
-                    middle, field_value, total_density, momentum, loss_sigma_eV
-                )
-                if abs(mismatch) < 5.0e-4:
-                    break
-                if lower_mismatch * mismatch <= 0.0:
-                    upper = middle
-                else:
-                    lower = middle
-                    lower_mismatch = mismatch
+        _validate_terminal_bin_probability(self.energy_eV, distribution)
 
         mobility, diffusion, mean_energy = self._transport(
             distribution, momentum, total_density

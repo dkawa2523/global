@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from plasma_global.errors import ModelDomainError
 from plasma_global.experimental.power import (
     CCPPowerPort,
     ICPPowerPort,
@@ -43,6 +45,43 @@ def test_rf_envelope_is_finite_conservative_and_obeys_square_pulse() -> None:
     assert off.reduced_field_Td == 0.0
 
 
+def test_rf_power_command_is_absorbed_power_not_delivered_power() -> None:
+    port = RFEnvelopePort(
+        port_id="source",
+        zone_id="plasma",
+        frequency_Hz=13.56e6,
+        coupling_efficiency=0.65,
+        effective_impedance_ohm=50.0,
+    )
+
+    result = port.evaluate(
+        0.0,
+        _state(),
+        CompiledPowerCommand(kind="power", power_W=100.0),
+    )
+
+    assert result.electron_power_W == pytest.approx(100.0)
+    assert result.observables["absorbed_power_W"] == pytest.approx(100.0)
+    assert result.observables["delivered_power_W"] == pytest.approx(100.0 / 0.65)
+
+
+def test_rf_rejects_nonfinite_source_side_diagnostics() -> None:
+    port = RFEnvelopePort(
+        port_id="source",
+        zone_id="plasma",
+        frequency_Hz=13.56e6,
+        coupling_efficiency=1.0e-320,
+        effective_impedance_ohm=50.0,
+    )
+
+    with pytest.raises(ModelDomainError, match="observables must be finite"):
+        port.evaluate(
+            0.0,
+            _state(),
+            CompiledPowerCommand(kind="power", power_W=100.0),
+        )
+
+
 def test_ccp_power_and_ion_energy_increase_with_voltage() -> None:
     port = CCPPowerPort(
         port_id="ccp",
@@ -67,7 +106,41 @@ def test_ccp_power_and_ion_energy_increase_with_voltage() -> None:
     )
     assert high.observables["self_bias_V"] < 0.0
     assert high.electron_power_W <= high.observables["delivered_power_W"]
+    assert high.electron_power_W == high.observables["delivered_power_W"]
+    assert high.observables["apparent_power_VA"] >= high.electron_power_W
     assert np.isfinite([high.electron_power_W, *high.observables.values()]).all()
+
+
+def test_ccp_power_command_is_absorbed_power_not_delivered_power() -> None:
+    port = CCPPowerPort(
+        port_id="ccp",
+        zone_id="plasma",
+        frequency_Hz=13.56e6,
+        zone_volume_m3=0.02,
+        powered_area_m2=0.02,
+        grounded_area_m2=0.10,
+        electrode_gap_m=0.04,
+        dominant_ion_mass_kg=6.63e-26,
+    )
+
+    result = port.evaluate(
+        0.0,
+        _state(),
+        CompiledPowerCommand(kind="power", power_W=100.0),
+    )
+
+    assert result.electron_power_W == pytest.approx(100.0)
+    assert result.observables["absorbed_power_W"] == pytest.approx(100.0)
+    assert result.observables["delivered_power_W"] == pytest.approx(100.0)
+    assert result.observables["apparent_power_VA"] >= 100.0
+    impedance = np.hypot(
+        result.observables["bulk_resistance_ohm"],
+        result.observables["sheath_reactance_ohm"],
+    )
+    assert result.observables["rf_voltage_rms_V"] == pytest.approx(
+        result.observables["rf_current_rms_A"] * impedance,
+        rel=1.0e-9,
+    )
 
 
 def test_icp_coupling_trend_and_zone_split_conserve_absorbed_power() -> None:

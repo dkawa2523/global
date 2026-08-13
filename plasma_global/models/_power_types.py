@@ -135,3 +135,14 @@ def validate_power_port_result(
 
 def frozen_mapping(values: Mapping[_K, _V]) -> Mapping[_K, _V]:
     return MappingProxyType(dict(values))
+
+
+def finite_observables(values: Mapping[str, float]) -> Mapping[str, float]:
+    """Freeze diagnostic scalars and reject nonfinite artifact content early."""
+
+    normalized = dict(values)
+    if any(not name for name in normalized):
+        raise ModelDomainError("power observable names must not be empty")
+    if not np.isfinite(tuple(normalized.values())).all():
+        raise ModelDomainError("power observables must be finite")
+    return MappingProxyType(normalized)

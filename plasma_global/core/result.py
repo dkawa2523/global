@@ -25,25 +25,46 @@ def _readonly_float_array(value: Any, *, name: str) -> np.ndarray:
     return array
 
 
+def _finite_float_array(value: Any, *, name: str) -> np.ndarray:
+    array = _readonly_float_array(value, name=name)
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} must contain only finite values")
+    return array
+
+
+def _validated_metadata_float(value: float, *, path: str) -> float:
+    if not np.isfinite(value):
+        raise ValueError(f"{path} must contain only finite numeric values")
+    return value
+
+
+def _freeze_metadata_mapping(
+    value: Mapping[Any, Any], *, path: str
+) -> Mapping[str, Any]:
+    normalized: dict[str, Any] = {}
+    for raw_key, item in value.items():
+        key = str(raw_key).strip()
+        if not key:
+            raise ValueError(f"{path} contains an empty key")
+        normalized[key] = _freeze_metadata_value(item, path=f"{path}.{key}")
+    return MappingProxyType(normalized)
+
+
 def _freeze_metadata_value(value: Any, *, path: str) -> Any:
     if isinstance(value, np.generic):
         value = value.item()
     if isinstance(value, Path):
         return str(value)
-    if value is None or isinstance(value, (str, bool, int, float)):
+    if isinstance(value, float):
+        return _validated_metadata_float(value, path=path)
+    if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, np.ndarray):
         return _freeze_metadata_value(value.tolist(), path=path)
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_metadata_value(item, path=f"{path}[]") for item in value)
     if isinstance(value, Mapping):
-        normalized: dict[str, Any] = {}
-        for raw_key, item in value.items():
-            key = str(raw_key).strip()
-            if not key:
-                raise ValueError(f"{path} contains an empty key")
-            normalized[key] = _freeze_metadata_value(item, path=f"{path}.{key}")
-        return MappingProxyType(normalized)
+        return _freeze_metadata_mapping(value, path=path)
     raise TypeError(f"{path} contains unsupported value type {type(value).__name__}")
 
 
@@ -55,11 +76,9 @@ def _freeze_mapping(value: Mapping[str, Any] | None, *, name: str) -> Mapping[st
 
 
 def _validated_time(value: Any) -> np.ndarray:
-    time_s = _readonly_float_array(value, name="time_s")
+    time_s = _finite_float_array(value, name="time_s")
     if time_s.ndim != 1:
         raise ValueError(f"time_s must be one-dimensional, got shape {time_s.shape}")
-    if not np.all(np.isfinite(time_s)):
-        raise ValueError("time_s must contain only finite values")
     if time_s.size > 1 and np.any(np.diff(time_s) <= 0.0):
         raise ValueError("time_s must be strictly increasing")
     return time_s
@@ -75,7 +94,7 @@ def _validated_labels(values: tuple[object, ...]) -> tuple[str, ...]:
 
 
 def _validated_state(value: Any, expected_shape: tuple[int, int]) -> np.ndarray:
-    state = _readonly_float_array(value, name="state")
+    state = _finite_float_array(value, name="state")
     if state.ndim != 2:
         raise ValueError(
             f"state must be two-dimensional and time-major, got shape {state.shape}"
@@ -109,7 +128,7 @@ def _validated_observables(
     observables: dict[str, np.ndarray] = {}
     for raw_name, raw_values in dict(values or {}).items():
         name = _validated_observable_name(raw_name, state_labels)
-        observable = _readonly_float_array(raw_values, name=f"observables[{name!r}]")
+        observable = _finite_float_array(raw_values, name=f"observables[{name!r}]")
         if observable.ndim == 1 and observable.shape != (time_count,):
             raise ValueError(
                 f"observable {name!r} must have shape ({time_count},) or be scalar, "

@@ -83,6 +83,16 @@ def test_prescribed_power_only_partitions_power() -> None:
     assert "self_bias_V" not in result.observables
 
 
+def test_prescribed_power_rejects_an_unaccounted_partition() -> None:
+    with pytest.raises(CaseValidationError, match="must equal one"):
+        PrescribedPowerPort(
+            "source",
+            "plasma",
+            electron_fraction=0.2,
+            gas_fraction=0.2,
+        )
+
+
 def test_prescribed_power_coordinator_does_not_require_mobility() -> None:
     port = PrescribedPowerPort(
         "source", "plasma", electron_fraction=1.0, gas_fraction=0.0
@@ -154,7 +164,8 @@ def test_dc_series_obeys_voltage_and_power_balance() -> None:
     current = result.observables["current_A"]
     voltage = result.observables["plasma_voltage_V"]
     assert result.electron_power_W == pytest.approx(current * voltage)
-    assert result.reduced_field_Td is not None and result.reduced_field_Td > 0.0
+    assert result.reduced_field_Td is not None
+    assert result.reduced_field_Td > 0.0
 
 
 @pytest.mark.parametrize(

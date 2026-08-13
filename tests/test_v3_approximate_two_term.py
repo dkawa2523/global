@@ -104,8 +104,8 @@ def _approximate_case(manifest: Path) -> CaseSpec:
         "mixture_key_species": ["Ar"],
         "cache": {"max_entries": 2, "fraction_decimals": 4},
         "energy_grid": {"min_eV": 1.0e-3, "max_eV": 100.0, "n": 32},
-        "reduced_field_grid": {"min_Td": 1.0, "max_Td": 100.0, "n": 4},
-        "max_shape_iterations": 8,
+        "reduced_field_grid": {"min_Td": 5.0, "max_Td": 100.0, "n": 4},
+        "max_shape_iterations": 48,
     }
     data["models"]["electron_closure"] = {"kind": "local_field"}
     return CaseSpec.model_validate(data)
@@ -164,11 +164,12 @@ def test_distinct_initial_neutral_mixtures_get_distinct_immutable_tables(
         },
         mixture_key_species=("Ar",),
         cache_max_entries=2,
+        energy_max_eV=100.0,
         energy_points=32,
-        field_min_Td=1.0,
+        field_min_Td=5.0,
         field_max_Td=10.0,
         field_points=2,
-        max_iterations=2,
+        max_iterations=48,
     )
 
     same_a = prepared.by_zone["same_a"]
@@ -186,11 +187,98 @@ def test_distinct_initial_neutral_mixtures_get_distinct_immutable_tables(
             chemistry,
             {"a": {"Ar": 2.0e20}, "b": {"Ar": 1.0e20}},
             cache_max_entries=1,
+            energy_max_eV=100.0,
             energy_points=32,
-            field_min_Td=1.0,
+            field_min_Td=5.0,
             field_max_Td=10.0,
             field_points=2,
-            max_iterations=2,
+            max_iterations=48,
+        )
+
+
+def test_approximate_two_term_rejects_superelastic_energy_gain(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_chemistry(tmp_path / "chemistry")
+    path = manifest.parent / "cross_sections.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8") + "  - id: xs_superelastic\n"
+        "    kind: deexcitation\n"
+        "    target: Ar\n"
+        "    threshold_eV: 0.0\n"
+        "    electron_energy_transfer_eV: 11.5\n"
+        "    file: ionization.csv\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CaseValidationError, match="does not support superelastic"):
+        prepare_approximate_two_term_kinetics(
+            load_chemistry(manifest),
+            {"plasma": {"Ar": 1.0e20}},
+            energy_max_eV=100.0,
+            energy_points=32,
+            field_min_Td=5.0,
+            field_max_Td=10.0,
+            field_points=2,
+            max_iterations=48,
+        )
+
+
+def test_superelastic_error_precedes_deferred_invalid_target_error(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_chemistry(tmp_path / "chemistry")
+    path = manifest.parent / "cross_sections.yaml"
+    contents = path.read_text(encoding="utf-8").replace(
+        "    target: Ar\n",
+        "    target: Ar_plus\n",
+        1,
+    )
+    path.write_text(
+        contents + "  - id: xs_superelastic\n"
+        "    kind: deexcitation\n"
+        "    target: Ar\n"
+        "    threshold_eV: 0.0\n"
+        "    electron_energy_transfer_eV: 11.5\n"
+        "    file: ionization.csv\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CaseValidationError, match="does not support superelastic"):
+        prepare_approximate_two_term_kinetics(
+            load_chemistry(manifest),
+            {"plasma": {"Ar": 1.0e20}},
+            energy_max_eV=100.0,
+            energy_points=32,
+            field_min_Td=5.0,
+            field_max_Td=10.0,
+            field_points=2,
+            max_iterations=48,
+        )
+
+
+def test_invalid_target_error_precedes_missing_momentum_error(tmp_path: Path) -> None:
+    manifest = _write_chemistry(tmp_path / "chemistry")
+    path = manifest.parent / "cross_sections.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "    target: Ar\n",
+            "    target: Ar_plus\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CaseValidationError, match="invalid targets: Ar_plus"):
+        prepare_approximate_two_term_kinetics(
+            load_chemistry(manifest),
+            {"plasma": {"Ar": 1.0e20}},
+            energy_max_eV=100.0,
+            energy_points=32,
+            field_min_Td=5.0,
+            field_max_Td=10.0,
+            field_points=2,
+            max_iterations=48,
         )
 
 
@@ -208,10 +296,10 @@ def test_preparation_normalizes_numpy_scalars_and_plain_provenance(
         energy_min_eV=np.float32(1.0e-3),
         energy_max_eV=np.float32(10.0),
         energy_points=np.int64(32),
-        field_min_Td=np.float32(1.0),
+        field_min_Td=np.float32(5.0),
         field_max_Td=np.float32(10.0),
         field_points=np.int64(2),
-        max_iterations=np.int64(2),
+        max_iterations=np.int64(48),
     )
 
     document = yaml.safe_load(yaml.safe_dump(dict(prepared.provenance)))

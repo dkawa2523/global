@@ -17,7 +17,10 @@ from plasma_global.models.electrons import (
     ElectronState,
     resolved_electron_density,
 )
-from plasma_global.models.kinetics import ElectronKineticsResult
+from plasma_global.models.kinetics import (
+    ElectronKineticsResult,
+    TabulatedElectronKinetics,
+)
 from plasma_global.models.power import PowerCouplingResult
 from plasma_global.models.rates import DensityView, RateContext, RateEvaluator
 from plasma_global.models.surface import SurfaceEvaluation
@@ -87,7 +90,7 @@ class _TransportEvaluation:
 @dataclass(frozen=True, slots=True)
 class _ReactionWallEvaluation:
     reaction_rates_by_zone: np.ndarray
-    reaction_energy_loss: np.ndarray
+    electron_energy_transfer: np.ndarray
     gas_reaction_heating: np.ndarray
     wall_species_rhs: np.ndarray
     wall_energy_loss: np.ndarray
@@ -96,10 +99,42 @@ class _ReactionWallEvaluation:
     ion_energy_eV: dict[str, float]
 
 
+def _evaluate_uncoordinated_table(
+    table: TabulatedElectronKinetics,
+    *,
+    zone_id: str,
+    electron_density_m3: float,
+    mean_energy_eV: float | None,
+    reduced_field_Td: float | None,
+) -> tuple[ElectronKineticsResult | None, float | None]:
+    """Evaluate one table without a power port and report any inferred field."""
+
+    if table.lookup == "mean_energy":
+        if mean_energy_eV is None:
+            raise StateDomainError(
+                f"Zone {zone_id!r} has no mean energy for table lookup"
+            )
+        if electron_density_m3 == 0.0 and mean_energy_eV == 0.0:
+            # No electron property or electron-driven rate is defined or needed.
+            return None, None
+        result = table.evaluate(mean_energy_eV=mean_energy_eV)
+        return result, result.effective_field_Td
+    if reduced_field_Td is None:
+        raise StateDomainError(
+            f"Zone {zone_id!r} has no E/N for local-field table lookup"
+        )
+    result = (
+        table.zero_field_result()
+        if reduced_field_Td == 0.0 and table.axis[0] > 0.0
+        else table.evaluate(reduced_field_Td=reduced_field_Td)
+    )
+    return result, None
+
+
 @dataclass(frozen=True, slots=True)
 class _ZoneReactionWallEvaluation:
     rates: np.ndarray
-    reaction_energy_loss: float
+    electron_energy_transfer: float
     gas_reaction_heating: float
     wall_species_rhs: np.ndarray
     wall_energy_loss: float
@@ -485,31 +520,20 @@ class RuntimeEvaluator:
             table = self.model.electron_kinetics_by_zone.get(zone.zone_id)
             if table is None:
                 continue
-            if table.lookup == "mean_energy":
-                mean_energy = prepared.mean_energy_for_power[zone.zone_id]
-                if mean_energy is None:
-                    raise StateDomainError(
-                        f"Zone {zone.zone_id!r} has no mean energy for table lookup"
-                    )
-                if (
-                    prepared.electron_density_by_zone[zone.zone_id] == 0.0
-                    and mean_energy == 0.0
-                ):
-                    # No electron property or electron-driven rate is defined or
-                    # needed in this state.  In particular, do not force zero onto
-                    # a positive, tail-safe mean-energy lookup axis.
-                    continue
-                result = table.evaluate(mean_energy_eV=mean_energy)
+            result, inferred_field = _evaluate_uncoordinated_table(
+                table,
+                zone_id=zone.zone_id,
+                electron_density_m3=prepared.electron_density_by_zone[zone.zone_id],
+                mean_energy_eV=prepared.mean_energy_for_power[zone.zone_id],
+                reduced_field_Td=reduced_field_by_zone.get(zone.zone_id),
+            )
+            if result is None:
+                continue
+            if inferred_field is not None:
                 reduced_field_by_zone.setdefault(
-                    zone.zone_id, result.effective_field_Td
+                    zone.zone_id,
+                    inferred_field,
                 )
-            else:
-                field_value = reduced_field_by_zone.get(zone.zone_id)
-                if field_value is None:
-                    raise StateDomainError(
-                        f"Zone {zone.zone_id!r} has no E/N for local-field table lookup"
-                    )
-                result = table.evaluate(reduced_field_Td=field_value)
             results[zone.zone_id] = result
         return results
 
@@ -605,7 +629,7 @@ class RuntimeEvaluator:
     ) -> _ReactionWallEvaluation:
         zone_count = len(self.model.zones)
         reaction_rates = np.zeros((zone_count, len(self.model.reaction_ids)))
-        reaction_energy_loss = np.zeros(zone_count)
+        electron_energy_transfer = np.zeros(zone_count)
         gas_reaction_heating = np.zeros(zone_count)
         wall_species_rhs = np.zeros_like(prepared.density_by_zone)
         wall_energy_loss = np.zeros(zone_count)
@@ -622,7 +646,7 @@ class RuntimeEvaluator:
                 collect_ledger=collect_ledger,
             )
             reaction_rates[zone_index] = result.rates
-            reaction_energy_loss[zone_index] = result.reaction_energy_loss
+            electron_energy_transfer[zone_index] = result.electron_energy_transfer
             gas_reaction_heating[zone_index] = result.gas_reaction_heating
             wall_species_rhs[zone_index] = result.wall_species_rhs
             wall_energy_loss[zone_index] = result.wall_energy_loss
@@ -632,7 +656,7 @@ class RuntimeEvaluator:
             ion_energy_eV.update(result.ion_energy_eV)
         return _ReactionWallEvaluation(
             reaction_rates_by_zone=reaction_rates,
-            reaction_energy_loss=reaction_energy_loss,
+            electron_energy_transfer=electron_energy_transfer,
             gas_reaction_heating=gas_reaction_heating,
             wall_species_rhs=wall_species_rhs,
             wall_energy_loss=wall_energy_loss,
@@ -702,7 +726,9 @@ class RuntimeEvaluator:
             self._record_wall_ion_flux(compiled_wall, wall, ion_flux, ion_energy)
         return _ZoneReactionWallEvaluation(
             rates=rates,
-            reaction_energy_loss=float(self.model.energy_loss_eV @ rates)
+            electron_energy_transfer=float(
+                self.model.electron_energy_transfer_eV @ rates
+            )
             * ELEMENTARY_CHARGE_C,
             gas_reaction_heating=float(self.model.gas_heating_eV @ rates)
             * ELEMENTARY_CHARGE_C,
@@ -1022,7 +1048,7 @@ class RuntimeAssembly:
         if model.layout.evolves_electron_energy:
             derivative[model.layout.electron_energy_indices[zone.zone_id]] = (
                 power_density
-                - self.reactions.reaction_energy_loss[zone_index]
+                + self.reactions.electron_energy_transfer[zone_index]
                 - self.reactions.wall_energy_loss[zone_index]
                 - self.energy.elastic_heating[zone_index]
                 + electron_transport
@@ -1077,7 +1103,7 @@ class RuntimeAssembly:
             },
             absorbed_power_J_m3_s=power_density,
             reaction_energy_loss_J_m3_s=float(
-                self.reactions.reaction_energy_loss[zone_index]
+                -self.reactions.electron_energy_transfer[zone_index]
             ),
             wall_energy_loss_J_m3_s=float(self.reactions.wall_energy_loss[zone_index]),
             gas_power_J_m3_s=gas_power_density,

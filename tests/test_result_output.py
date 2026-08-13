@@ -89,6 +89,32 @@ def test_simulation_result_is_time_major_immutable_and_named() -> None:
         )
 
 
+@pytest.mark.parametrize("nonfinite", [np.nan, np.inf, -np.inf])
+def test_simulation_result_rejects_nonfinite_numeric_content(nonfinite: float) -> None:
+    with pytest.raises(ValueError, match="state must contain only finite values"):
+        SimulationResult(
+            time_s=np.array([0.0]),
+            state=np.array([[nonfinite]]),
+            state_labels=("density",),
+        )
+
+    with pytest.raises(ValueError, match=r"observable.*finite values"):
+        SimulationResult(
+            time_s=np.array([0.0]),
+            state=np.array([[1.0]]),
+            state_labels=("density",),
+            observables={"power": np.array([nonfinite])},
+        )
+
+    with pytest.raises(ValueError, match=r"metadata.*finite numeric values"):
+        SimulationResult(
+            time_s=np.array([0.0]),
+            state=np.array([[1.0]]),
+            state_labels=("density",),
+            metadata={"nested": {"value": nonfinite}},
+        )
+
+
 def test_result_h5_has_only_the_fixed_public_layout_and_round_trips(
     tmp_path: Path,
 ) -> None:
@@ -134,6 +160,15 @@ def test_result_h5_has_only_the_fixed_public_layout_and_round_trips(
     }
 
 
+def test_result_h5_reader_rejects_nonfinite_numeric_artifact(tmp_path: Path) -> None:
+    path = write_result_h5(tmp_path / "nonfinite.h5", _result())
+    with h5py.File(path, "a") as h5:
+        h5["state/values"][1, 0] = np.nan
+
+    with pytest.raises(ValueError, match="state must contain only finite values"):
+        read_result_h5(path)
+
+
 def test_result_h5_round_trips_bohm_closure_provenance(tmp_path: Path) -> None:
     result = _result()
     metadata = to_plain_mapping(result.metadata)
@@ -176,6 +211,22 @@ def test_write_result_always_writes_exactly_h5_and_summary(tmp_path: Path) -> No
     }
     assert summary["conservation"]["max_abs_residual"] == pytest.approx(2.0e-9)
     assert summary["audit"]["passed"] is True
+    assert paths.audit_passed is True
+
+
+def test_write_result_preserves_artifacts_and_reports_failed_audit(
+    tmp_path: Path,
+) -> None:
+    result = _result()
+    metadata = to_plain_mapping(result.metadata)
+    metadata["default_conservation_tolerance"] = 1.0e-12
+
+    paths = write_result(replace(result, metadata=metadata), tmp_path / "failed-audit")
+
+    assert paths.audit_passed is False
+    assert paths.result_h5.is_file()
+    summary = yaml.safe_load(paths.summary_yaml.read_text(encoding="utf-8"))
+    assert summary["audit"]["passed"] is False
 
 
 def test_write_result_does_not_publish_half_bundle_on_serialization_failure(
@@ -386,6 +437,14 @@ def test_result_csv_reader_rejects_malformed_public_artifacts(
     path.write_text(content, encoding="utf-8")
 
     with pytest.raises(ValueError, match=message):
+        read_result_csv(path)
+
+
+def test_result_csv_reader_rejects_nonfinite_artifact(tmp_path: Path) -> None:
+    path = tmp_path / "nonfinite.csv"
+    path.write_text("time_s,state:x\n0,nan\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="state must contain only finite values"):
         read_result_csv(path)
 
 

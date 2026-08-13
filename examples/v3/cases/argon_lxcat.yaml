@@ -177,8 +177,8 @@ models:
       max_eV: 160.0
       n: 360
     reduced_field_grid:
-      min_Td: 0.2
-      max_Td: 2500.0
+      min_Td: 1.0
+      max_Td: 100.0
       n: 48
     max_shape_iterations: 48
   electron_closure:

@@ -11,40 +11,28 @@ from typing import Literal, assert_never
 import numpy as np
 
 from plasma_global.chemistry.compile import CompiledChemistry
-from plasma_global.chemistry.data import ChemistryData
+from plasma_global.chemistry.data import ChemistryData, SpeciesData
 from plasma_global.core.domain import Zone
 from plasma_global.core.transport import CompiledTransport
 from plasma_global.errors import CaseValidationError
+from plasma_global.input._compile_power import (
+    compile_external_binding,
+    compile_power_coordinator,
+)
 from plasma_global.input.schema import (
     AmbipolarWallTransport,
     BohmWallTransport,
     CaseSpec,
-    DCSeriesModel,
     EvolvedGasEnergy,
-    ExperimentalCCPModel,
-    ExperimentalICPModel,
-    ExperimentalRFEnvelopeModel,
-    ExternalTableCommand,
-    ExternalTableModel,
     FixedGasEnergy,
     OffWallTransport,
-    PowerPortConfig,
     PrescribedFrequencyWallTransport,
-    PrescribedPowerModel,
     SurfaceConfig,
+    ZoneConfig,
 )
-from plasma_global.models.external_table import (
-    ExternalTableBinding,
-    ExternalTableStore,
-)
+from plasma_global.models.external_table import ExternalTableStore
 from plasma_global.models.gas_energy import HeavyEnergyClosure
-from plasma_global.models.power import (
-    DCSeriesPort,
-    ExternalTablePowerPort,
-    PowerCoordinator,
-    PowerPort,
-    PrescribedPowerPort,
-)
+from plasma_global.models.power import PowerCoordinator
 from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
 from plasma_global.models.walls import AutoBohmHFactor, BoundaryReaction, WallBoundary
 
@@ -61,85 +49,107 @@ class CompiledReactor:
     surface_model: CompiledSurfaceModel | None
 
 
+def _compile_explicit_densities(
+    zone: ZoneConfig,
+    initial_densities_m3: Mapping[str, float],
+    known_species: set[str],
+) -> dict[str, float]:
+    """Validate an explicit density state without changing its declared values."""
+
+    densities = dict(initial_densities_m3)
+    unknown = set(densities) - known_species
+    if unknown:
+        raise CaseValidationError(
+            f"zone {zone.zone_id!r} initializes unknown species {sorted(unknown)}"
+        )
+    pressure_from_state = (
+        sum(densities.values()) * _BOLTZMANN_J_K * zone.gas_temperature_K
+    )
+    if not math.isclose(
+        pressure_from_state,
+        zone.pressure_Pa,
+        rel_tol=1.0e-6,
+        abs_tol=1.0e-12,
+    ):
+        raise CaseValidationError(
+            f"zone {zone.zone_id!r} pressure_Pa={zone.pressure_Pa:g} is "
+            "inconsistent with sum(initial_densities_m3)*kB*T="
+            f"{pressure_from_state:g}"
+        )
+    return densities
+
+
+def _compile_mole_fraction_composition(
+    zone: ZoneConfig,
+    initial_mole_fractions: Mapping[str, float],
+    chemistry: CompiledChemistry,
+    species_index: dict[str, int],
+) -> dict[str, float]:
+    """Convert neutral mole fractions plus charged seeds to number densities."""
+
+    fractions = dict(initial_mole_fractions)
+    seeds = dict(zone.initial_seed_densities_m3)
+    unknown = (set(fractions) | set(seeds)) - set(species_index)
+    if unknown:
+        raise CaseValidationError(
+            f"zone {zone.zone_id!r} initializes unknown species {sorted(unknown)}"
+        )
+    nonneutral_fractions = [
+        species_id
+        for species_id in fractions
+        if chemistry.charges[species_index[species_id]] != 0.0
+    ]
+    neutral_seeds = [
+        species_id
+        for species_id in seeds
+        if chemistry.charges[species_index[species_id]] == 0.0
+    ]
+    if nonneutral_fractions or neutral_seeds:
+        raise CaseValidationError(
+            f"zone {zone.zone_id!r} mole fractions must be neutral and seed "
+            "densities charged; invalid "
+            f"fractions={sorted(nonneutral_fractions)}, "
+            f"seeds={sorted(neutral_seeds)}"
+        )
+    total_density = zone.pressure_Pa / (_BOLTZMANN_J_K * zone.gas_temperature_K)
+    seed_density = sum(seeds.values())
+    if seed_density >= total_density:
+        raise CaseValidationError(
+            f"zone {zone.zone_id!r} seed density must be below p/(kB*T)"
+        )
+    neutral_density = total_density - seed_density
+    densities = {
+        species_id: fraction * neutral_density
+        for species_id, fraction in fractions.items()
+    }
+    densities.update(seeds)
+    return densities
+
+
 def compile_initial_densities(
     case: CaseSpec, chemistry: CompiledChemistry
 ) -> Mapping[str, Mapping[str, float]]:
-    """Resolve either explicit densities or pressure-normalized composition once."""
+    """Compile every zone's selected initial-composition representation."""
 
     species_index = {
         species_id: index for index, species_id in enumerate(chemistry.species_ids)
     }
+    known_species = set(species_index)
     resolved: dict[str, Mapping[str, float]] = {}
     for zone in case.reactor.zones:
         if zone.initial_densities_m3 is not None:
-            densities = {
-                species_id: float(value)
-                for species_id, value in zone.initial_densities_m3.items()
-            }
-            unknown = set(densities) - set(species_index)
-            if unknown:
-                raise CaseValidationError(
-                    f"zone {zone.zone_id!r} initializes unknown species "
-                    f"{sorted(unknown)}"
-                )
-            pressure_from_state = (
-                sum(densities.values()) * _BOLTZMANN_J_K * zone.gas_temperature_K
+            densities = _compile_explicit_densities(
+                zone,
+                zone.initial_densities_m3,
+                known_species,
             )
-            if not math.isclose(
-                pressure_from_state,
-                zone.pressure_Pa,
-                rel_tol=1.0e-6,
-                abs_tol=1.0e-12,
-            ):
-                raise CaseValidationError(
-                    f"zone {zone.zone_id!r} pressure_Pa={zone.pressure_Pa:g} is "
-                    "inconsistent with sum(initial_densities_m3)*kB*T="
-                    f"{pressure_from_state:g}"
-                )
         elif zone.initial_mole_fractions is not None:
-            fractions = {
-                species_id: float(value)
-                for species_id, value in zone.initial_mole_fractions.items()
-            }
-            seeds = {
-                species_id: float(value)
-                for species_id, value in zone.initial_seed_densities_m3.items()
-            }
-            unknown = (set(fractions) | set(seeds)) - set(species_index)
-            if unknown:
-                raise CaseValidationError(
-                    f"zone {zone.zone_id!r} initializes unknown species "
-                    f"{sorted(unknown)}"
-                )
-            nonneutral_fractions = [
-                species_id
-                for species_id in fractions
-                if chemistry.charges[species_index[species_id]] != 0.0
-            ]
-            neutral_seeds = [
-                species_id
-                for species_id in seeds
-                if chemistry.charges[species_index[species_id]] == 0.0
-            ]
-            if nonneutral_fractions or neutral_seeds:
-                raise CaseValidationError(
-                    f"zone {zone.zone_id!r} mole fractions must be neutral and seed "
-                    "densities charged; invalid "
-                    f"fractions={sorted(nonneutral_fractions)}, "
-                    f"seeds={sorted(neutral_seeds)}"
-                )
-            total_density = zone.pressure_Pa / (_BOLTZMANN_J_K * zone.gas_temperature_K)
-            seed_density = sum(seeds.values())
-            if seed_density >= total_density:
-                raise CaseValidationError(
-                    f"zone {zone.zone_id!r} seed density must be below p/(kB*T)"
-                )
-            neutral_density = total_density - seed_density
-            densities = {
-                species_id: fraction * neutral_density
-                for species_id, fraction in fractions.items()
-            }
-            densities.update(seeds)
+            densities = _compile_mole_fraction_composition(
+                zone,
+                zone.initial_mole_fractions,
+                chemistry,
+                species_index,
+            )
         else:
             raise CaseValidationError(
                 f"zone {zone.zone_id!r} needs densities or mole fractions"
@@ -157,106 +167,64 @@ def compile_initial_densities(
     return MappingProxyType(resolved)
 
 
+def _surface_coverage_roles(
+    applicable_species: tuple[SpeciesData, ...],
+) -> tuple[set[str], set[str], dict[str, float]]:
+    """Classify algebraic, independent, and site-occupancy surface species."""
+
+    free_sites = {item.id for item in applicable_species if "site" in item.state_tags}
+    independent = {
+        item.id
+        for item in applicable_species
+        if item.id not in free_sites and "film_fragment" not in item.state_tags
+    }
+    occupancy = {item.id: item.elements.get("site", 1.0) for item in applicable_species}
+    return free_sites, independent, occupancy
+
+
+def _validate_surface_coverages(
+    surface: SurfaceConfig,
+    applicable_species: tuple[SpeciesData, ...],
+) -> None:
+    """Validate that supplied coverages are independent and fit one site layer."""
+
+    free_sites, independent, occupancy = _surface_coverage_roles(applicable_species)
+    supplied = set(surface.initial_coverages)
+    if explicit_free := supplied & free_sites:
+        raise CaseValidationError(
+            f"surface {surface.surface_id!r} must not initialize algebraic "
+            f"free site(s) {sorted(explicit_free)}"
+        )
+    if unknown := supplied - independent:
+        raise CaseValidationError(
+            f"surface {surface.surface_id!r} initializes unknown or dependent "
+            f"coverage species {sorted(unknown)}"
+        )
+    occupied = sum(
+        occupancy[species_id] * coverage
+        for species_id, coverage in surface.initial_coverages.items()
+    )
+    if occupied > 1.0 + 1.0e-12:
+        raise CaseValidationError(
+            f"surface {surface.surface_id!r} initial site occupancy exceeds one"
+        )
+
+
 def validate_surface_initial_conditions(
     case: CaseSpec, chemistry_data: ChemistryData
 ) -> None:
     """Validate independent adsorbates after chemistry IDs are available."""
 
-    surface_species = [
+    surface_species = tuple(
         item for item in chemistry_data.species if item.phase == "surface"
-    ]
+    )
     for surface in case.reactor.surfaces:
-        applicable = [
+        applicable = tuple(
             item
             for item in surface_species
             if not item.surfaces or surface.surface_id in item.surfaces
-        ]
-        free_sites = {item.id for item in applicable if "site" in item.state_tags}
-        supplied = set(surface.initial_coverages)
-        if explicit_free := supplied & free_sites:
-            raise CaseValidationError(
-                f"surface {surface.surface_id!r} must not initialize algebraic "
-                f"free site(s) {sorted(explicit_free)}"
-            )
-        independent = {
-            item.id
-            for item in applicable
-            if item.id not in free_sites and "film_fragment" not in item.state_tags
-        }
-        if unknown := supplied - independent:
-            raise CaseValidationError(
-                f"surface {surface.surface_id!r} initializes unknown or dependent "
-                f"coverage species {sorted(unknown)}"
-            )
-        occupancy = {
-            item.id: float(item.elements.get("site", 1.0)) for item in applicable
-        }
-        occupied = sum(
-            occupancy[species_id] * coverage
-            for species_id, coverage in surface.initial_coverages.items()
         )
-        if occupied > 1.0 + 1.0e-12:
-            raise CaseValidationError(
-                f"surface {surface.surface_id!r} initial site occupancy exceeds one"
-            )
-
-
-def compile_external_binding(
-    model: ExternalTableModel,
-    store: ExternalTableStore,
-    command: ExternalTableCommand | None = None,
-) -> ExternalTableBinding:
-    """Resolve a static external-table model and one optional step override."""
-
-    source = model.file if command is None or command.file is None else command.file
-    interpolation = (
-        model.interpolation
-        if command is None or command.interpolation is None
-        else command.interpolation
-    )
-    bounds_policy = (
-        model.bounds_policy
-        if command is None or command.bounds_policy is None
-        else command.bounds_policy
-    )
-    power_scale = (
-        model.power_scale
-        if command is None or command.power_scale is None
-        else command.power_scale
-    )
-    voltage_scale = (
-        model.voltage_scale
-        if command is None or command.voltage_scale is None
-        else command.voltage_scale
-    )
-    current_scale = (
-        model.current_scale
-        if command is None or command.current_scale is None
-        else command.current_scale
-    )
-    gap_m = model.gap_m if command is None or command.gap_m is None else command.gap_m
-    total_density_m3 = (
-        model.total_density_m3
-        if command is None or command.total_density_m3 is None
-        else command.total_density_m3
-    )
-    plasma_potential_V = (
-        model.plasma_potential_V
-        if command is None or command.plasma_potential_V is None
-        else command.plasma_potential_V
-    )
-    return ExternalTableBinding(
-        data=store.get(source),
-        interpolation=interpolation,
-        bounds=bounds_policy,
-        power_scale=float(power_scale),
-        voltage_scale=float(voltage_scale),
-        current_scale=float(current_scale),
-        gap_m=gap_m,
-        total_density_m3=total_density_m3,
-        plasma_potential_V=float(plasma_potential_V),
-        time_offset_s=0.0 if command is None else float(command.time_offset_s),
-    )
+        _validate_surface_coverages(surface, applicable)
 
 
 def _compile_zones(case: CaseSpec) -> tuple[Zone, ...]:
@@ -302,16 +270,12 @@ def _compile_static_transport(
     )
 
 
-def _compile_heavy_energy(
-    case: CaseSpec,
+def _heavy_heat_capacities(
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
-) -> HeavyEnergyClosure | None:
-    config = case.models.gas_energy
-    if isinstance(config, FixedGasEnergy):
-        return None
-    if not isinstance(config, EvolvedGasEnergy):
-        assert_never(config)
+) -> np.ndarray:
+    """Return heat capacities in compiled species order or report all omissions."""
+
     species = {item.id: item for item in chemistry_data.species}
     missing_cv = [
         species_id
@@ -323,10 +287,15 @@ def _compile_heavy_energy(
             "evolved gas energy requires cv_over_kb for every heavy gas species; "
             f"missing {missing_cv}"
         )
-    cv_over_kb = np.asarray(
+    return np.asarray(
         [species[species_id].cv_over_kb for species_id in chemistry.species_ids],
         dtype=float,
     )
+
+
+def _zone_wall_temperatures(case: CaseSpec) -> np.ndarray:
+    """Area-average each zone's surfaces, falling back to its gas temperature."""
+
     wall_temperatures: list[float] = []
     for zone in case.reactor.zones:
         surfaces = [
@@ -338,9 +307,22 @@ def _compile_heavy_energy(
             if total_area > 0.0
             else zone.gas_temperature_K
         )
+    return np.asarray(wall_temperatures)
+
+
+def _compile_heavy_energy(
+    case: CaseSpec,
+    chemistry_data: ChemistryData,
+    chemistry: CompiledChemistry,
+) -> HeavyEnergyClosure | None:
+    config = case.models.gas_energy
+    if isinstance(config, FixedGasEnergy):
+        return None
+    if not isinstance(config, EvolvedGasEnergy):
+        assert_never(config)
     return HeavyEnergyClosure(
-        cv_over_kb=cv_over_kb,
-        wall_temperature_K=np.asarray(wall_temperatures),
+        cv_over_kb=_heavy_heat_capacities(chemistry_data, chemistry),
+        wall_temperature_K=_zone_wall_temperatures(case),
         wall_relaxation_s_inv=np.asarray(
             [
                 config.wall_energy_relaxation_s_inv_by_zone.get(zone.zone_id, 0.0)
@@ -380,137 +362,6 @@ def _compile_surface_model(
         zone_volumes_m3=np.asarray([zone.volume_m3 for zone in case.reactor.zones]),
         surfaces=surfaces,
         domain_atol=case.solver.atol,
-    )
-
-
-def _ccp_geometry(
-    case: CaseSpec, port: PowerPortConfig, chemistry: CompiledChemistry
-) -> dict[str, float]:
-    zone = next(item for item in case.reactor.zones if item.zone_id == port.zone_id)
-    surfaces = [item for item in case.reactor.surfaces if item.zone_id == port.zone_id]
-    if not surfaces:
-        raise CaseValidationError(
-            f"experimental CCP port {port.port_id!r} needs reactor surface areas"
-        )
-    total_area = sum(item.area_m2 for item in surfaces)
-    target = next(
-        (item for item in surfaces if item.surface_id == port.coupling_target), None
-    )
-    powered_area = target.area_m2 if target is not None else total_area / 2.0
-    grounded_area = max(total_area - powered_area, powered_area)
-    positive_masses = chemistry.masses_kg[chemistry.charges > 0.0]
-    if positive_masses.size == 0:
-        raise CaseValidationError(
-            f"experimental CCP port {port.port_id!r} requires a positive ion species"
-        )
-    return {
-        "zone_volume_m3": zone.volume_m3,
-        "powered_area_m2": powered_area,
-        "grounded_area_m2": grounded_area,
-        "electrode_gap_m": zone.volume_m3 / total_area,
-        "dominant_ion_mass_kg": float(np.min(positive_masses)),
-        "gas_temperature_K": zone.gas_temperature_K,
-    }
-
-
-def _compile_power_ports(
-    case: CaseSpec,
-    chemistry: CompiledChemistry,
-    external_tables: ExternalTableStore,
-) -> PowerCoordinator | None:
-    compiled: list[PowerPort] = []
-    for port in case.reactor.power_ports:
-        model = port.model
-        if isinstance(model, PrescribedPowerModel):
-            physical_port: PowerPort = PrescribedPowerPort(
-                port.port_id,
-                port.zone_id,
-                electron_fraction=model.electron_fraction,
-                gas_fraction=model.gas_fraction,
-                default_power_W=model.default_absorbed_power_W,
-            )
-        elif isinstance(model, DCSeriesModel):
-            physical_port = DCSeriesPort(
-                port.port_id,
-                port.zone_id,
-                ballast_resistance_ohm=model.ballast_resistance_ohm,
-                gap_m=model.gap_m,
-                electrode_area_m2=model.electrode_area_m2,
-                absorption_fraction=model.power_absorption_fraction,
-                configured_mobility_m2_V_s=model.electron_mobility_m2_V_s,
-                default_voltage_V=model.source_voltage_V,
-            )
-        elif isinstance(model, ExternalTableModel):
-            default = compile_external_binding(model, external_tables)
-            physical_port = ExternalTablePowerPort(port.port_id, port.zone_id, default)
-        elif isinstance(model, ExperimentalRFEnvelopeModel):
-            from plasma_global.experimental.power import RFEnvelopePort
-
-            physical_port = RFEnvelopePort(
-                port_id=port.port_id,
-                zone_id=port.zone_id,
-                frequency_Hz=model.frequency_Hz,
-                role=model.role,
-                coupling_efficiency=model.coupling_efficiency,
-                effective_impedance_ohm=model.effective_impedance_ohm,
-                base_reduced_field_Td=model.base_reduced_field_Td,
-                reduced_field_per_sqrt_W_Td=model.reduced_field_per_sqrt_W_Td,
-                self_bias_fraction=model.self_bias_fraction,
-                plasma_potential_offset_V=model.plasma_potential_offset_V,
-                plasma_potential_per_sqrt_W=model.plasma_potential_per_sqrt_W,
-                default_power_W=(
-                    model.default_absorbed_power_W
-                    if model.control == "absorbed_power"
-                    else None
-                ),
-                default_voltage_V=(
-                    model.default_voltage_rms_V if model.control == "voltage" else None
-                ),
-            )
-        elif isinstance(model, ExperimentalCCPModel):
-            from plasma_global.experimental.power import CCPPowerPort
-
-            geometry = _ccp_geometry(case, port, chemistry)
-            physical_port = CCPPowerPort(
-                port_id=port.port_id,
-                zone_id=port.zone_id,
-                frequency_Hz=model.frequency_Hz,
-                default_power_W=(
-                    model.default_absorbed_power_W
-                    if model.control == "absorbed_power"
-                    else None
-                ),
-                default_voltage_V=(
-                    model.default_voltage_rms_V if model.control == "voltage" else None
-                ),
-                zone_volume_m3=geometry["zone_volume_m3"],
-                powered_area_m2=geometry["powered_area_m2"],
-                grounded_area_m2=geometry["grounded_area_m2"],
-                electrode_gap_m=geometry["electrode_gap_m"],
-                dominant_ion_mass_kg=geometry["dominant_ion_mass_kg"],
-                gas_temperature_K=geometry["gas_temperature_K"],
-            )
-        elif isinstance(model, ExperimentalICPModel):
-            from plasma_global.experimental.power import ICPPowerPort
-
-            zone = next(
-                item for item in case.reactor.zones if item.zone_id == port.zone_id
-            )
-            physical_port = ICPPowerPort(
-                port_id=port.port_id,
-                zone_id=port.zone_id,
-                frequency_Hz=model.frequency_Hz,
-                gas_temperature_K=zone.gas_temperature_K,
-                default_power_W=model.default_delivered_power_W,
-            )
-        else:
-            assert_never(model)
-        compiled.append(physical_port)
-    if not compiled:
-        return None
-    return PowerCoordinator(
-        ports=tuple(compiled),
-        zone_ids=tuple(zone.zone_id for zone in case.reactor.zones),
     )
 
 
@@ -648,7 +499,7 @@ def compile_reactor(
         zones=_compile_zones(case),
         transport=_compile_static_transport(case, chemistry, heavy_energy_closure),
         wall_boundaries=_compile_walls(case, chemistry),
-        power_coordinator=_compile_power_ports(case, chemistry, external_tables),
+        power_coordinator=compile_power_coordinator(case, chemistry, external_tables),
         heavy_energy_closure=heavy_energy_closure,
         surface_model=_compile_surface_model(case, chemistry_data, chemistry),
     )

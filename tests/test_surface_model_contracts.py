@@ -361,6 +361,104 @@ def test_surface_temperature_context_is_resolved_per_surface() -> None:
     )
 
 
+def test_thermal_surface_rates_scale_with_their_physical_site_order() -> None:
+    desorption = RateModelData(
+        "desorb",
+        "desorption",
+        {"frequency_s_inv": 3.0, "activation_eV": 0.0},
+    )
+    langmuir_hinshelwood = RateModelData(
+        "recombine",
+        "langmuir_hinshelwood",
+        {"A_m2_s_inv": 5.0, "activation_eV": 0.0},
+    )
+    reactions = (
+        ReactionData(
+            "desorb",
+            {"Ads": 1.0},
+            {"A": 1.0, "site": 1.0},
+            desorption.id,
+            None,
+        ),
+        ReactionData(
+            "recombine",
+            {"Ads": 2.0},
+            {"A": 2.0, "site": 2.0},
+            langmuir_hinshelwood.id,
+            None,
+        ),
+    )
+    chemistry = _chemistry(
+        species=_species(),
+        reactions=reactions,
+        rate_models=(desorption, langmuir_hinshelwood),
+    )
+    low_density = 2.0e18
+    high_density = 2.0 * low_density
+    coverage = 0.25
+    surfaces = (
+        SurfaceGeometry("low", "z", 1.0, low_density, 300.0, {"Ads": coverage}),
+        SurfaceGeometry("high", "z", 1.0, high_density, 300.0, {"Ads": coverage}),
+    )
+
+    evaluated = _model(chemistry, surfaces).evaluate(
+        np.array([coverage, coverage]),
+        np.zeros((1, 2)),
+        np.array([300.0]),
+    )
+
+    assert evaluated.rates_m2_s["desorb@low"] == pytest.approx(
+        3.0 * low_density * coverage
+    )
+    assert evaluated.rates_m2_s["desorb@high"] == pytest.approx(
+        2.0 * evaluated.rates_m2_s["desorb@low"]
+    )
+    assert evaluated.rates_m2_s["recombine@low"] == pytest.approx(
+        5.0 * low_density**2 * coverage**2
+    )
+    assert evaluated.rates_m2_s["recombine@high"] == pytest.approx(
+        4.0 * evaluated.rates_m2_s["recombine@low"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "reactants"),
+    [
+        ("desorption", {"A": 1.0, "Ads": 1.0}),
+        ("desorption", {"Ads": 2.0}),
+        ("desorption", {"site": 1.0}),
+        ("langmuir_hinshelwood", {"A": 1.0, "Ads": 2.0}),
+        ("langmuir_hinshelwood", {"Ads": 1.0}),
+        ("langmuir_hinshelwood", {"Ads": 3.0}),
+        ("langmuir_hinshelwood", {"Ads": 1.0, "site": 1.0}),
+    ],
+)
+def test_thermal_surface_rates_reject_unsupported_reactant_shapes(
+    kind: str,
+    reactants: dict[str, float],
+) -> None:
+    parameters = (
+        {"frequency_s_inv": 1.0, "activation_eV": 0.0}
+        if kind == "desorption"
+        else {"A_m2_s_inv": 1.0, "activation_eV": 0.0}
+    )
+    rate_model = RateModelData("thermal", kind, parameters)
+    reaction = ReactionData(
+        "unsupported",
+        reactants,
+        {"A": 1.0, "site": 1.0},
+        rate_model.id,
+        None,
+    )
+    chemistry = _chemistry(
+        species=_species(), reactions=(reaction,), rate_models=(rate_model,)
+    )
+    surface = SurfaceGeometry("wall", "z", 1.0, 1.0e19, 300.0, {"Ads": 0.2})
+
+    with pytest.raises(CaseValidationError, match="surface reactant"):
+        _model(chemistry, (surface,))
+
+
 def test_evaluation_rejects_shape_and_domain_contract_violations() -> None:
     chemistry = _chemistry(species=_species())
     surface = SurfaceGeometry("wall", "z", 1.0, 1.0e19, 300.0, {"Ads": 0.2})

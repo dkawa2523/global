@@ -120,6 +120,12 @@ def _required_cached_derivative(derivative: np.ndarray | None) -> np.ndarray:
     return derivative
 
 
+def _readonly_csr(value: csr_matrix) -> csr_matrix:
+    for array in (value.data, value.indices, value.indptr):
+        array.setflags(write=False)
+    return value
+
+
 @dataclass(frozen=True)
 class StateLayout:
     species_ids: tuple[str, ...]
@@ -330,7 +336,7 @@ class CompiledGlobalModel:
     domain_atol: float | np.ndarray = 0.0
     layout: StateLayout = field(init=False)
     state_lower_bounds: np.ndarray = field(init=False)
-    jac_sparsity: csr_matrix = field(init=False)
+    _jac_sparsity: csr_matrix = field(init=False, repr=False)
     _chemistry_data: CompiledChemistryData = field(init=False, repr=False)
     _zone_by_id: Mapping[str, Zone] = field(init=False, repr=False)
     _active_reactions_by_zone: Mapping[str, np.ndarray] = field(init=False, repr=False)
@@ -348,6 +354,12 @@ class CompiledGlobalModel:
         if self.__dict__.get("_compiled_immutable", False):
             raise AttributeError("CompiledGlobalModel is immutable after compilation")
         object.__setattr__(self, name, value)
+
+    @property
+    def jac_sparsity(self) -> csr_matrix:
+        """Return a mutable solver-compatible copy of the compiled pattern."""
+
+        return self._jac_sparsity.copy()
 
     @property
     def species_ids(self) -> tuple[str, ...]:
@@ -384,6 +396,12 @@ class CompiledGlobalModel:
     @property
     def energy_loss_eV(self) -> np.ndarray:
         return self._chemistry_data.energy_loss_eV
+
+    @property
+    def electron_energy_transfer_eV(self) -> np.ndarray:
+        """Signed reaction energy deposited into electrons per event."""
+
+        return self._chemistry_data.electron_energy_transfer_eV
 
     @property
     def gas_heating_eV(self) -> np.ndarray:
@@ -450,7 +468,7 @@ class CompiledGlobalModel:
             {zone_id: tuple(values) for zone_id, values in walls_by_zone.items()}
         )
         self._transport_by_segment = self._compile_segment_transport()
-        self.jac_sparsity = JacobianBuilder(self).build()
+        self._jac_sparsity = _readonly_csr(JacobianBuilder(self).build())
         object.__setattr__(self, "_compiled_immutable", True)
 
     def _compile_domain_atol(self, value: float | np.ndarray) -> np.ndarray:

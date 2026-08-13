@@ -95,6 +95,62 @@ def test_compiles_balanced_chemistry_to_readonly_arrays(tmp_path: Path) -> None:
         chemistry.stoichiometry[0, 0] = 0.0
 
 
+def test_signed_electron_energy_transfer_preserves_legacy_loss_view(
+    tmp_path: Path,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / "cross_sections.yaml").write_text(
+        "cross_sections:\n"
+        "  - id: ionization\n"
+        "    kind: ionization\n"
+        "    target: Ar\n"
+        "    threshold_eV: 5\n"
+        "    electron_energy_transfer_eV: -5\n"
+        "    file: xs.csv\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_chemistry(manifest)
+    chemistry = compile_chemistry(loaded)
+
+    assert loaded.cross_sections["ionization"].electron_energy_transfer_eV == -5.0
+    np.testing.assert_array_equal(chemistry.electron_energy_transfer_eV, [-5.0])
+    np.testing.assert_array_equal(chemistry.energy_loss_eV, [5.0])
+
+
+def test_rejects_ambiguous_electron_energy_fields(tmp_path: Path) -> None:
+    manifest = _mechanism(tmp_path)
+    path = tmp_path / "cross_sections.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "    energy_loss_eV: 5\n",
+            "    energy_loss_eV: 5\n    electron_energy_transfer_eV: -5\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChemistryError, match="exactly one of"):
+        load_chemistry(manifest)
+
+
+def test_rejects_ambiguous_electron_energy_fields_before_parsing_values(
+    tmp_path: Path,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    path = tmp_path / "cross_sections.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "    energy_loss_eV: 5\n",
+            "    energy_loss_eV: invalid\n"
+            "    electron_energy_transfer_eV: also-invalid\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChemistryError, match="exactly one of"):
+        load_chemistry(manifest)
+
+
 def _species_validation_chemistry(
     *, electron: SpeciesData, cross_section_target: str
 ) -> ChemistryData:
@@ -372,6 +428,63 @@ def test_chemistry_compile_rejects_unsupported_surface_flux_shape() -> None:
 def test_rejects_nonmonotone_cross_section_without_repair(tmp_path: Path) -> None:
     with pytest.raises(ChemistryError, match="strictly increasing"):
         load_chemistry(_mechanism(tmp_path, bad_curve=True))
+
+
+def test_rejects_nonzero_cross_section_below_declared_threshold(
+    tmp_path: Path,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / "xs.csv").write_text(
+        "energy_eV,sigma_m2\n1,1e-20\n5,0\n10,2e-20\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChemistryError, match="nonzero below threshold"):
+        load_chemistry(manifest)
+
+
+def test_rejects_gap_between_threshold_and_first_cross_section_node(
+    tmp_path: Path,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    (tmp_path / "xs.csv").write_text(
+        "energy_eV,sigma_m2\n1,0\n4,0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChemistryError, match="explicit node at threshold"):
+        load_chemistry(manifest)
+
+
+def test_threshold_contract_is_ulp_aware_and_not_applied_to_momentum(
+    tmp_path: Path,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    near_threshold = float(np.nextafter(5.0, np.inf))
+    (tmp_path / "xs.csv").write_text(
+        f"energy_eV,sigma_m2\n1,0\n{near_threshold!r},0\n10,2e-20\n",
+        encoding="utf-8",
+    )
+    compile_chemistry(load_chemistry(manifest))
+
+    (tmp_path / "cross_sections.yaml").write_text(
+        "cross_sections:\n"
+        "  - id: ionization\n"
+        "    kind: momentum_transfer\n"
+        "    target: Ar\n"
+        "    threshold_eV: 5\n"
+        "    energy_loss_eV: 0\n"
+        "    file: xs.csv\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "xs.csv").write_text(
+        "energy_eV,sigma_m2\n1,1e-20\n10,2e-20\n",
+        encoding="utf-8",
+    )
+
+    assert load_chemistry(manifest).cross_sections["ionization"].kind == (
+        "momentum_transfer"
+    )
 
 
 def test_rejects_duplicate_keys_in_canonical_chemistry_yaml(tmp_path: Path) -> None:

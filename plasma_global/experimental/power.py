@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
+from plasma_global.errors import ModelDomainError
 from plasma_global.models.power import (
     CompiledPowerCommand,
     PowerPortResult,
@@ -53,6 +54,18 @@ def _envelope_value(pulse: SquarePulse | None, time_s: float) -> float:
     return 1.0 if pulse is None else pulse(time_s)
 
 
+def _delivered_power(absorbed_power_W: float, coupling_efficiency: float) -> float:
+    """Recover source-side power from an explicitly absorbed-power command."""
+
+    if absorbed_power_W == 0.0:
+        return 0.0
+    if coupling_efficiency == 0.0:
+        raise ModelDomainError(
+            "positive absorbed power requires a nonzero coupling_efficiency"
+        )
+    return absorbed_power_W / coupling_efficiency
+
+
 def _command_value(
     command: CompiledPowerCommand | None,
     *,
@@ -78,7 +91,7 @@ def _command_value(
 
 @dataclass(frozen=True, slots=True)
 class RFEnvelopePort:
-    """HF/LF cycle-average envelope with explicit power coupling and bias."""
+    """HF/LF envelope; power commands specify plasma-absorbed watts."""
 
     port_id: str
     zone_id: str
@@ -144,12 +157,13 @@ class RFEnvelopePort:
         )
         envelope = _envelope_value(self.pulse, time_s)
         if mode == "power":
-            delivered = value * envelope
+            absorbed = value * envelope
+            delivered = _delivered_power(absorbed, self.coupling_efficiency)
             voltage_rms = math.sqrt(delivered * self.effective_impedance_ohm)
         else:
             voltage_rms = value * envelope
             delivered = voltage_rms**2 / self.effective_impedance_ohm
-        absorbed = self.coupling_efficiency * delivered
+            absorbed = self.coupling_efficiency * delivered
         reduced_field = self.base_reduced_field_Td * envelope
         reduced_field += self.reduced_field_per_sqrt_W_Td * math.sqrt(absorbed)
         self_bias = (
@@ -177,7 +191,7 @@ class RFEnvelopePort:
 
 @dataclass(frozen=True, slots=True)
 class CCPPowerPort:
-    """Lumped bulk-resistance/two-sheath CCP approximation."""
+    """Lumped CCP approximation; power commands specify absorbed watts."""
 
     port_id: str
     zone_id: str
@@ -258,6 +272,26 @@ class CCPPowerPort:
         capacitance = VACUUM_PERMITTIVITY_F_M * area_m2 / thickness
         return capacitance, thickness
 
+    def _power_mode_voltage(
+        self, state: PowerState, current_rms_A: float, initial_voltage_V: float
+    ) -> float:
+        """Solve the voltage-dependent sheath impedance at fixed real power."""
+
+        voltage = initial_voltage_V
+        omega = 2.0 * math.pi * self.frequency_Hz
+        bulk_resistance = self._bulk_resistance(state.electron_density_m3)
+        for _ in range(48):
+            powered, _ = self._sheath_capacitance(self.powered_area_m2, state, voltage)
+            grounded, _ = self._sheath_capacitance(
+                self.grounded_area_m2, state, voltage
+            )
+            reactance = 1.0 / (omega * powered) + 1.0 / (omega * grounded)
+            updated = current_rms_A * math.hypot(bulk_resistance, reactance)
+            if math.isclose(updated, voltage, rel_tol=1.0e-10, abs_tol=1.0e-12):
+                return updated
+            voltage = updated
+        raise ModelDomainError("CCP sheath impedance did not converge")
+
     def evaluate(
         self, time_s: float, state: PowerState, command: CompiledPowerCommand | None
     ) -> PowerPortResult:
@@ -268,16 +302,22 @@ class CCPPowerPort:
         )
         envelope = _envelope_value(self.pulse, time_s)
         bulk_resistance = self._bulk_resistance(state.electron_density_m3)
-        trial_voltage = (
-            value * envelope
-            if mode == "voltage"
-            else math.sqrt(value * envelope * bulk_resistance)
-        )
+        absorbed_command = value * envelope
+        if mode == "voltage":
+            voltage_rms = absorbed_command
+            current_rms = 0.0
+        else:
+            current_rms = math.sqrt(absorbed_command / bulk_resistance)
+            voltage_rms = self._power_mode_voltage(
+                state,
+                current_rms,
+                math.sqrt(absorbed_command * bulk_resistance),
+            )
         powered_capacitance, powered_sheath_m = self._sheath_capacitance(
-            self.powered_area_m2, state, trial_voltage
+            self.powered_area_m2, state, voltage_rms
         )
         grounded_capacitance, grounded_sheath_m = self._sheath_capacitance(
-            self.grounded_area_m2, state, trial_voltage
+            self.grounded_area_m2, state, voltage_rms
         )
         omega = 2.0 * math.pi * self.frequency_Hz
         sheath_reactance = 1.0 / (omega * powered_capacitance)
@@ -285,15 +325,15 @@ class CCPPowerPort:
         impedance = math.hypot(bulk_resistance, sheath_reactance)
 
         if mode == "voltage":
-            voltage_rms = value * envelope
             current_rms = voltage_rms / impedance
             absorbed = current_rms**2 * bulk_resistance
-            delivered = voltage_rms * current_rms
         else:
-            delivered = value * envelope
-            absorbed = delivered * (bulk_resistance / impedance) ** 2
-            current_rms = math.sqrt(absorbed / bulk_resistance)
-            voltage_rms = current_rms * impedance
+            absorbed = absorbed_command
+        # The lossless sheaths carry reactive power but consume no real power.
+        # Source real power therefore equals I^2 R.  V*I is apparent power and
+        # must not be reported in watts or enter the energy ledger.
+        delivered = absorbed
+        apparent_power_VA = voltage_rms * current_rms
 
         area_ratio = max(self.grounded_area_m2 / self.powered_area_m2, 1.0)
         asymmetry = area_ratio**1.35
@@ -331,6 +371,7 @@ class CCPPowerPort:
             observables={
                 "frequency_Hz": self.frequency_Hz,
                 "delivered_power_W": delivered,
+                "apparent_power_VA": apparent_power_VA,
                 "absorbed_power_W": absorbed,
                 "rf_voltage_rms_V": voltage_rms,
                 "rf_current_rms_A": current_rms,

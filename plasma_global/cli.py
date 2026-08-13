@@ -71,7 +71,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     paths = write_result(result, args.output)
     print(paths.result_h5)
     print(paths.summary_yaml)
-    return 0 if result.status.success else 1
+    return int(not (result.status.success and paths.audit_passed))
 
 
 def _cmd_audit(args: argparse.Namespace) -> int:

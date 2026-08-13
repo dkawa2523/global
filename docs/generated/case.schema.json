@@ -1845,13 +1845,13 @@
       "additionalProperties": false,
       "properties": {
         "max_Td": {
-          "default": 2500.0,
+          "default": 100.0,
           "exclusiveMinimum": 0.0,
           "title": "Max Td",
           "type": "number"
         },
         "min_Td": {
-          "default": 0.2,
+          "default": 1.0,
           "exclusiveMinimum": 0.0,
           "title": "Min Td",
           "type": "number"

@@ -331,8 +331,9 @@ def _swarm(raw: dict[str, Any]) -> SimpleNamespace:
         _mapping(two_term.get("energy_grid"), "energy_grid"),
         {"min_eV": 1.0e-3, "max_eV": 160.0, "n": 360},
     )
+    raw_field = _mapping(two_term.get("reduced_field_grid_Td"), "reduced_field_grid_Td")
     field = _defaults(
-        _mapping(two_term.get("reduced_field_grid_Td"), "reduced_field_grid_Td"),
+        raw_field,
         {"min": 0.2, "max": 2500.0, "n": 48},
     )
     table = _defaults(
@@ -365,6 +366,7 @@ def _swarm(raw: dict[str, Any]) -> SimpleNamespace:
         boltzmann_2term=_namespace(
             energy_grid=_namespace(**energy),
             reduced_field_grid_Td=_namespace(**field),
+            reduced_field_grid_was_explicit=bool(raw_field),
             max_shape_iterations=int(two_term.get("max_shape_iterations", 48)),
         ),
         table=_namespace(**table),

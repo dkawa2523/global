@@ -457,6 +457,8 @@ def _publish_cross_sections(
         destination = target / "cross_sections" / original.name
         cross_section_id = str(entry["cross_section_id"])
         segment_index = (selected_segments or {}).get(cross_section_id)
+        kind = str(entry.get("kind", "inelastic"))
+        threshold = float(entry.get("threshold_eV", 0.0))
         _write_canonical_cross_section(
             original,
             destination,
@@ -465,9 +467,9 @@ def _publish_cross_sections(
         converted.append(
             {
                 "id": entry["cross_section_id"],
-                "kind": entry.get("kind", "inelastic"),
+                "kind": kind,
                 "target": entry.get("target_species", ""),
-                "threshold_eV": float(entry.get("threshold_eV", 0.0)),
+                "threshold_eV": threshold,
                 "energy_loss_eV": float(
                     entry.get("energy_loss_eV", entry.get("threshold_eV", 0.0))
                 ),
@@ -592,14 +594,12 @@ def main(argv: list[str] | None = None) -> int:
     products: dict[str, str] | None = None
     if arguments.boundary_products is not None:
         raw_products = _yaml(arguments.boundary_products)
-        products = {
-            str(ion): str(product_side) for ion, product_side in raw_products.items()
-        }
+        products = dict(raw_products)
     segments: dict[str, int] | None = None
     if arguments.cross_section_segments is not None:
         raw_segments = _yaml(arguments.cross_section_segments)
         segments = {
-            str(cross_section_id): int(segment)
+            cross_section_id: int(segment)
             for cross_section_id, segment in raw_segments.items()
         }
     print(

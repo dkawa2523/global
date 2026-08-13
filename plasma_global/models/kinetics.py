@@ -243,6 +243,22 @@ class TabulatedElectronKinetics:
             },
         )
 
+    def zero_field_result(self) -> ElectronKineticsResult:
+        """Return the explicit cold-electron boundary used when a port is off."""
+
+        if self.lookup != "local_field":
+            raise ModelDomainError("zero-field kinetics require a local_field table")
+        return ElectronKineticsResult(
+            mean_energy_eV=0.0,
+            electron_temperature_eV=0.0,
+            # Zero-field mobility remains finite in a swarm.  The first
+            # resolved table value is the least-assumptive boundary value and
+            # is only used by electrical ports; rates and energy stay zero.
+            mobility_m2_V_s=float(self.mobility_m2_V_s[0]),
+            effective_field_Td=0.0,
+            rate_coefficients=dict.fromkeys(self.rate_tables, 0.0),
+        )
+
     def mean_energy_from_field(self, reduced_field_Td: float) -> float:
         if self.lookup != "local_field":
             raise ModelDomainError(

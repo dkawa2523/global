@@ -84,6 +84,10 @@ knots は BDF segment 境界になります。
 | waveform | `continuous`, `square_pulse` |
 
 `prescribed_power` は吸収電力だけを与え、E/N、self-bias、plasma potential を生成しません。
+`experimental.rf_envelope` と `experimental.ccp` の `absorbed_power_W` も plasma へ実際に
+吸収される実電力です。RF は `coupling_efficiency` から source-side real powerを逆算します。
+CCP の lossless sheath は実電力を消費しないため、real source powerは吸収電力と等しく、
+reactive成分を含む (V_{rms}I_{rms}) は別observable `apparent_power_VA` に記録します。
 `external_table` と prescribed profile は strict numeric CSV を読み、重複 header、余剰列、
 欠損 cell、非有限値を compile 時に拒否します。bounds は既定で error です。経験モデルは必ず
 `experimental.*` を明示し、audit が `experimental` と分類して provenance を残します。
@@ -96,6 +100,15 @@ rate、transport、mean energy を代数評価し、electron-energy state を持
 
 `mean_energy_eV` と `electron_temperature_eV` は別 observable です。Maxwellian 等価温度は
 `2/3 * mean_energy_eV` であり、Bohm/sheath には後者を渡します。
+
+`experimental.approximate_two_term` は各reduced-field grid点でpower-balance rootがbracketされ、
+指定反復内に収束した場合だけtableを生成します。rootがないendpoint値の代用、field boundsのclip、
+cross-section最終energyより先への外挿は行いません。末端energy binの確率質量が `1e-3` を超える
+分布も、energy gridが未解像として拒否します。既定field gridは `1..100 Td` であり、より高いfieldを
+使う場合は断面積supportと `energy_grid.max_eV` を物理的に検証して明示指定します。
+正のfieldだけを持つprepared tableでportがoffの
+場合はcold boundary（mean energy/rateは0）を使い、明示0-field nodeを持つ一般tableではそのnodeを
+そのまま評価します。
 
 `gas_energy: fixed` は zone temperature を固定します。`evolved` は experimental 分類で、
 重粒子内部エネルギーを state とし、gas species 全ての `cv_over_kb`、反応・弾性加熱、flow、
@@ -143,18 +156,36 @@ runtime rate ID は `electron_impact`, `arrhenius`, `constant`, `first_order`, `
 `experimental.electron_temperature_power_law` と明示します。各 kind の必須 parameter と未知
 parameter は厳格に検証されます。
 
-cross-section manifest は `kind`, `target`, `threshold_eV`, `energy_loss_eV`, `file` を必須とし、
+cross-section manifest は `kind`, `target`, `threshold_eV`, `file` と、電子energy移送を表す
+`electron_energy_transfer_eV` または互換入力 `energy_loss_eV` のどちらか一方を必須とします。
+前者は正値が電子加熱、負値が電子冷却です。後者は従来どおり非負の電子energy損失で、内部で
+符号付きtransferへ変換されます。両方を同時指定できません。
+gas reaction CSVでも同じ2 fieldを任意overrideとして使え、未指定時は参照cross sectionの
+transferを継承します。
+現行result artifactは互換性のためledger名 `reaction_energy_loss_J_m3_s` を維持します。この値は
+符号付きtransferの負値なので、superelastic反応による電子加熱では負になります。
 curve CSV は exact header `energy_eV,sigma_m2`、有限・非負断面積、厳密昇順 energy を要求します。
 sort、負値 clip、非有限行の黙殺はしません。LXCat / BOLSIG / ZDPlaskin の変換は
 `tools/importers/` で offline に行います。
+
+`excitation`, `dissociation`, `ionization` の正の `threshold_eV` は反応onsetです。それ未満に
+非zero断面積を指定してはいけません。threshold nodeを省略したcurveは積分用の非公開gridへ
+`(threshold_eV, 0)` を補います。`momentum_transfer` と `attachment` のthresholdは同じ
+zero-onset契約を持たず、実データのsupportをそのまま使います。
+
+surface thermal rateは、desorptionを
+`ν exp(-Ea/kTs) Ns θ [m^-2 s^-1]`、Langmuir-Hinshelwood二体反応を
+`A exp(-Ea/kTs) Ns^2 θa θb [m^-2 s^-1]` と評価します。前者のreactant総次数は1、
+後者は2で、gas reactantやfree-site reactantを受理しません。
 
 Maxwellian rate の事前 table は、CSV 最終energyより上を外挿しません。未解像の
 energy-weighted Maxwellian tailが `1e-6` 以下となるmean-energy範囲だけを生成し、その範囲外は
 `ModelDomainError` です。高いelectron energyを扱う場合は、rateをclipするのではなく断面積CSVを
 十分高いenergyまで延長する必要があります。
-低energy側は積分時だけ0 eVまで補います。curveが正の閾値から始まる場合、または先頭断面積が
-0なら未収録区間を0とします。curveが閾値より低いenergyから有限値を明示している場合は、その
-先頭値を0 eVまで保持します。source CSVやruntimeの断面積補間は書き換えません。
+低energy側は積分時だけ0 eVまで補います。正のonset thresholdを持つ非弾性curveでは、未収録の
+threshold nodeを0として補い、それ未満の区間も0とします。threshold契約を持たないcurveが
+有限の先頭値を明示している場合は、その先頭値を0 eVまで保持します。source CSVやruntimeの
+断面積補間は書き換えません。
 
 ## 固定 `result.h5` layout
 

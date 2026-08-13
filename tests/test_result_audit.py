@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -19,11 +20,19 @@ from plasma_global.input.schema import SurfaceKineticsConfig
 def test_audit_reports_status_finiteness_required_series_and_nonnegativity() -> None:
     result = SimulationResult(
         time_s=np.array([0.0, 1.0]),
-        state=np.array([[1.0, 2.0], [-1.0e-2, np.nan]]),
+        state=np.array([[1.0, 2.0], [-1.0e-2, 3.0]]),
         state_labels=("density", "energy"),
-        observables={"power": np.array([1.0, np.inf])},
+        observables={"power": np.array([1.0, 2.0])},
         status=SimulationStatus.failed("integrator diverged"),
     )
+    # The public constructor rejects non-finite content. The audit still
+    # diagnoses an old in-memory result or an object corrupted after loading.
+    legacy_state = np.array([[1.0, 2.0], [-1.0e-2, np.nan]])
+    legacy_power = np.array([1.0, np.inf])
+    legacy_state.setflags(write=False)
+    legacy_power.setflags(write=False)
+    object.__setattr__(result, "state", legacy_state)
+    object.__setattr__(result, "observables", MappingProxyType({"power": legacy_power}))
 
     report = audit_result(
         result,
