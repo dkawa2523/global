@@ -22,30 +22,59 @@ def _readonly(value: object, shape: tuple[int, ...], name: str) -> np.ndarray:
     return result
 
 
+def _optional_heavy_cv(value: object | None, n_species: int) -> np.ndarray | None:
+    if value is None:
+        return None
+    heavy_cv = _readonly(value, (n_species,), "heavy_cv_over_kb")
+    if np.any(heavy_cv <= 0.0):
+        raise CaseValidationError("heavy_cv_over_kb must be positive")
+    return heavy_cv
+
+
+def _validated_flow_energy(
+    value: np.ndarray,
+    *,
+    n_zones: int,
+    flow_energy_J_m3: np.ndarray | None,
+    name: str,
+) -> np.ndarray:
+    energy = np.asarray(value, dtype=float)
+    if energy.shape != (n_zones,):
+        raise ValueError(f"{name} array has wrong shape")
+    if not np.all(np.isfinite(energy)):
+        raise ValueError(f"{name} array must contain finite values")
+    flow_energy = energy if flow_energy_J_m3 is None else flow_energy_J_m3
+    if flow_energy.shape != (n_zones,) or not np.all(np.isfinite(flow_energy)):
+        raise ValueError(f"{name} flow-energy array must be finite with zone shape")
+    return flow_energy
+
+
 def _energy_transport_rhs(
     value: np.ndarray | None,
     *,
     n_zones: int,
     pump_frequency_s_inv: np.ndarray,
     inlet_J_m3_s: np.ndarray | None,
+    flow_energy_J_m3: np.ndarray | None = None,
     name: str,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     if value is None:
         return None, None
-    energy = np.asarray(value, dtype=float)
-    if energy.shape != (n_zones,):
-        raise ValueError(f"{name} array has wrong shape")
-    if not np.all(np.isfinite(energy)):
-        raise ValueError(f"{name} array must contain finite values")
-    rhs = -pump_frequency_s_inv * energy
+    flow_energy = _validated_flow_energy(
+        value,
+        n_zones=n_zones,
+        flow_energy_J_m3=flow_energy_J_m3,
+        name=name,
+    )
+    rhs = -pump_frequency_s_inv * flow_energy
     if inlet_J_m3_s is not None:
         rhs = inlet_J_m3_s + rhs
-    return energy, rhs
+    return flow_energy, rhs
 
 
 @dataclass(frozen=True, slots=True)
 class SegmentTransport:
-    """Forcing that is constant within one compiled recipe segment."""
+    """Constant particle and inlet-enthalpy forcing for one recipe segment."""
 
     particle_source_m3_s: np.ndarray
     inlet_heavy_energy_J_m3_s: np.ndarray
@@ -81,7 +110,7 @@ class SegmentTransport:
 
 @dataclass(frozen=True, slots=True)
 class CompiledTransport:
-    """Zone-indexed static transport coefficients; no ID lookup occurs in RHS."""
+    """Zone-indexed particle and open-control-volume energy transport."""
 
     volumes_m3: np.ndarray
     pump_frequency_s_inv: np.ndarray
@@ -89,6 +118,7 @@ class CompiledTransport:
     edge_to: np.ndarray
     edge_conductance_m3_s: np.ndarray
     n_species: int
+    heavy_cv_over_kb: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         volumes = np.asarray(self.volumes_m3, dtype=float)
@@ -124,10 +154,12 @@ class CompiledTransport:
             or not np.all(np.isfinite(conductance))
         ):
             raise CaseValidationError(
-                "edges must be directed between distinct zones with finite nonnegative conductance"
+                "edges must be directed between distinct zones with finite "
+                "nonnegative conductance"
             )
         if self.n_species <= 0:
             raise CaseValidationError("n_species must be positive")
+        heavy_cv = _optional_heavy_cv(self.heavy_cv_over_kb, self.n_species)
         frozen_volumes = np.array(volumes, copy=True)
         frozen_volumes.setflags(write=False)
         for name, value in (
@@ -140,10 +172,51 @@ class CompiledTransport:
             object.__setattr__(self, name, frozen)
         object.__setattr__(self, "volumes_m3", frozen_volumes)
         object.__setattr__(self, "pump_frequency_s_inv", pump)
+        object.__setattr__(self, "heavy_cv_over_kb", heavy_cv)
 
     @property
     def n_zones(self) -> int:
         return int(self.volumes_m3.size)
+
+    def _heavy_enthalpy_J_m3(
+        self, density_m3: np.ndarray, internal_energy_J_m3: np.ndarray
+    ) -> np.ndarray:
+        cv = self.heavy_cv_over_kb
+        if cv is None:
+            raise ValueError(
+                "heavy-energy transport requires heavy_cv_over_kb so flow carries "
+                "enthalpy rather than internal energy"
+            )
+        if np.any(density_m3 < 0.0):
+            raise ValueError("heavy-particle enthalpy requires nonnegative densities")
+        heat_capacity_over_kb = density_m3 @ cv
+        if np.any(heat_capacity_over_kb <= 0.0):
+            raise ValueError(
+                "heavy-particle enthalpy is undefined for an empty mixture"
+            )
+        pressure_J_m3 = (
+            internal_energy_J_m3 * np.sum(density_m3, axis=1) / heat_capacity_over_kb
+        )
+        return internal_energy_J_m3 + pressure_J_m3
+
+    def _heavy_flow_energy_J_m3(
+        self,
+        density_m3: np.ndarray,
+        internal_energy_J_m3: np.ndarray | None,
+        flow_density_m3: np.ndarray | None,
+    ) -> np.ndarray | None:
+        if internal_energy_J_m3 is None:
+            return None
+        expected = (self.n_zones, self.n_species)
+        density = density_m3 if flow_density_m3 is None else np.asarray(flow_density_m3)
+        if density.shape != expected or not np.all(np.isfinite(density)):
+            raise ValueError(
+                f"heavy-flow density array must be finite with shape {expected}"
+            )
+        energy = np.asarray(internal_energy_J_m3, dtype=float)
+        if energy.shape != (self.n_zones,) or not np.all(np.isfinite(energy)):
+            raise ValueError("heavy-energy array must be finite with zone shape")
+        return self._heavy_enthalpy_J_m3(density, energy)
 
     def evaluate(
         self,
@@ -152,6 +225,7 @@ class CompiledTransport:
         *,
         electron_energy_J_m3: np.ndarray | None = None,
         heavy_energy_J_m3: np.ndarray | None = None,
+        heavy_flow_densities_m3: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
         density = np.asarray(densities_m3, dtype=float)
         expected = (self.n_zones, self.n_species)
@@ -176,6 +250,11 @@ class CompiledTransport:
             n_zones=self.n_zones,
             pump_frequency_s_inv=self.pump_frequency_s_inv,
             inlet_J_m3_s=forcing.inlet_heavy_energy_J_m3_s,
+            flow_energy_J_m3=self._heavy_flow_energy_J_m3(
+                density,
+                heavy_energy_J_m3,
+                heavy_flow_densities_m3,
+            ),
             name="heavy-energy",
         )
 

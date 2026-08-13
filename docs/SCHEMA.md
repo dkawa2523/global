@@ -99,7 +99,13 @@ rate、transport、mean energy を代数評価し、electron-energy state を持
 
 `gas_energy: fixed` は zone temperature を固定します。`evolved` は experimental 分類で、
 重粒子内部エネルギーを state とし、gas species 全ての `cv_over_kb`、反応・弾性加熱、flow、
-wall heat exchange から温度を導出します。
+wall heat exchange から温度を導出します。inlet、pump、directed edge のflowは内部エネルギー
+ではなく理想気体エンタルピー \(h_s=(c_{v,s}+k_B)T\) を運びます。
+
+Bohm wall の数値 `h_factor` は \(\Gamma_i=h_i n_i\sqrt{eT_e/m_i}\) の \(h_i\) そのものです。
+`auto` は現在の中性重粒子総密度、`ion_neutral_cross_section_m2`、characteristic lengthから
+各 RHS 評価時に更新されます。密度、断面積、長さの単位はそれぞれ `m^-3`, `m^2`, `m` で、
+初期圧力から固定した係数ではありません。
 
 ## Solver と output
 
@@ -110,9 +116,10 @@ state に直接適用せず、初期状態から作る固定 scale で state を
 どちらもなければ accepted points を保存します。forcing 境界はどの sampling mode でも必ず
 保存します。accepted points を含む保存点総数には固定上限 100,000 点があり、超過は設定エラーです。
 
-event による途中停止は標準 `solver` の契約ではありません。必要な場合だけ
-`experimental.stop_when_quasi_steady` に `relative_rhs_norm_s_inv` と `min_time_s` を指定します。
-これは時間不変 segment で scaled RHS norm を監視する機能で、定常 root solver ではありません。
+`experimental.stop_when_quasi_steady` は互換性のため名称を維持した診断設定です。
+`relative_rhs_norm_s_inv` と `min_time_s` を指定すると、時間不変 segment で局所的な
+quasi-steady 候補を記録します。event は非終端で、積分の打切りや定数外挿は行わず、
+定常 root solver の代用にはなりません。
 
 `output.observables` は保存する派生系列、`output.summary_series` は summary に最終値を出す
 state/選択 observable です。未知名は compile 時に拒否します。
@@ -145,6 +152,9 @@ Maxwellian rate の事前 table は、CSV 最終energyより上を外挿しま�
 energy-weighted Maxwellian tailが `1e-6` 以下となるmean-energy範囲だけを生成し、その範囲外は
 `ModelDomainError` です。高いelectron energyを扱う場合は、rateをclipするのではなく断面積CSVを
 十分高いenergyまで延長する必要があります。
+低energy側は積分時だけ0 eVまで補います。curveが正の閾値から始まる場合、または先頭断面積が
+0なら未収録区間を0とします。curveが閾値より低いenergyから有限値を明示している場合は、その
+先頭値を0 eVまで保持します。source CSVやruntimeの断面積補間は書き換えません。
 
 ## 固定 `result.h5` layout
 

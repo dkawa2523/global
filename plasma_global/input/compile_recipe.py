@@ -165,7 +165,7 @@ def _compile_segment_transport(
                     )
                 heavy_energy[zone_row] += (
                     rate_m3_s
-                    * cv_by_species[species_id]
+                    * (cv_by_species[species_id] + 1.0)
                     * _BOLTZMANN_J_K
                     * inlet.temperature_K
                 )

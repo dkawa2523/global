@@ -58,6 +58,24 @@ def first_order_chemistry(rate_s_inv: object = 2.0) -> ChemistryFixture:
     )
 
 
+def autocatalytic_chemistry(rate_m3_s: float) -> ChemistryFixture:
+    """A + B -> 2 B exposes growth hidden by an initially small RHS."""
+
+    return ChemistryFixture(
+        species_ids=("A", "B", "ion"),
+        charges=np.array([0.0, 0.0, 1.0]),
+        masses_kg=np.array([2.0e-26, 2.0e-26, 6.0e-26]),
+        reaction_ids=("A_plus_B_to_2B",),
+        stoichiometry=np.array([[-1.0, 1.0, 0.0]]),
+        reactant_orders=np.array([[1.0, 1.0, 0.0]]),
+        electron_orders=np.array([0.0]),
+        rate_evaluators=(rate_m3_s,),
+        energy_loss_eV=np.array([0.0]),
+        gas_heating_eV=np.zeros(1),
+        reaction_zones=((),),
+    )
+
+
 def compiled_model(
     *segments: RecipeSegment, chemistry: ChemistryFixture | None = None
 ) -> CompiledGlobalModel:
@@ -124,6 +142,19 @@ def test_save_at_is_global_and_includes_every_forcing_boundary() -> None:
 
     assert result.metadata["sampling_mode"] == "save_at"
     assert np.allclose(result.time_s, [0.1, 0.2, 0.55, 0.9, 1.05])
+
+
+def test_save_at_preserves_distinct_subpicosecond_forcing_boundaries() -> None:
+    end_s = 1.0e-15
+    model = compiled_model(RecipeSegment("short", 0.0, end_s))
+
+    result = solve_compiled_model(
+        model,
+        initial_state(),
+        SolverSettings(save_at_s=(0.0, end_s)),
+    )
+
+    assert np.array_equal(result.time_s, [0.0, end_s])
 
 
 def test_result_contract_records_segment_statistics_and_scaling() -> None:
@@ -259,8 +290,75 @@ def test_experimental_quasi_steady_holds_autonomous_segment_to_output_end() -> N
     assert result.metadata["experimental_stop_policy"] == (
         "experimental.stop_when_quasi_steady"
     )
+    assert (
+        result.metadata["experimental_quasi_steady_event_mode"]
+        == "nonterminal_observation_v1"
+    )
     assert np.allclose(result.time_s, np.linspace(0.0, 1.0, 6))
     assert np.all(result.state == result.state[0])
+
+
+def test_experimental_quasi_steady_cannot_freeze_slow_unfinished_dynamics() -> None:
+    duration_s = 1.0e6
+    rate_s_inv = 1.0e-6
+    model = compiled_model(
+        RecipeSegment("slow", 0.0, duration_s),
+        chemistry=first_order_chemistry(rate_s_inv=rate_s_inv),
+    )
+
+    result = solve_compiled_model(
+        model,
+        initial_state(),
+        SolverSettings(
+            rtol=1.0e-8,
+            atol=1.0e-10,
+            save_at_s=(0.0, duration_s),
+            experimental_quasi_steady_threshold_s_inv=1.0e-3,
+            experimental_quasi_steady_min_time_s=1.0,
+        ),
+    )
+
+    expected_a = 1.0e18 * np.exp(-rate_s_inv * duration_s)
+    assert result.solver_stats["quasi_steady_events"] == 1
+    assert result.final_value("n[z,A]") == pytest.approx(expected_a, rel=2.0e-6)
+
+
+def test_experimental_quasi_steady_observation_never_freezes_future_growth() -> None:
+    segment = RecipeSegment("autocatalytic", 0.0, 1_000.0)
+    model = compiled_model(
+        segment,
+        chemistry=autocatalytic_chemistry(rate_m3_s=3.0e-20),
+    )
+    state = InitialState(
+        densities_m3_by_zone={"z": {"A": 1.0e18, "B": 1.0, "ion": 1.0e14}},
+        mean_energy_eV_by_zone={"z": 3.0},
+    )
+    integration_controls = {
+        "rtol": 1.0e-8,
+        "atol": 1.0e-12,
+        "max_step_s": 0.1,
+        "save_at_s": (0.0, segment.end_s),
+    }
+
+    reference = solve_compiled_model(
+        model,
+        state,
+        SolverSettings(**integration_controls),
+    )
+    observed = solve_compiled_model(
+        model,
+        state,
+        SolverSettings(
+            **integration_controls,
+            experimental_quasi_steady_threshold_s_inv=1.0e-3,
+        ),
+    )
+
+    assert observed.final_value("n[z,B]") == pytest.approx(
+        reference.final_value("n[z,B]"), rel=1.0e-10
+    )
+    assert observed.final_value("n[z,B]") > 1.0e12
+    assert observed.time_s[-1] == segment.end_s
 
 
 def test_experimental_quasi_steady_rejects_time_dependent_rate() -> None:

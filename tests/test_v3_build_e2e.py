@@ -13,6 +13,7 @@ from plasma_global.build import CompiledCase, compile_case, simulate_case
 from plasma_global.errors import CaseValidationError
 from plasma_global.input.load import load_case
 from plasma_global.input.schema import CaseSpec
+from plasma_global.models.electrons import ELEMENTARY_CHARGE_C
 from plasma_global.models.gas_energy import elastic_electron_heating_J_m3_s
 from plasma_global.models.power import CompiledPowerCommand
 
@@ -274,6 +275,122 @@ def test_off_wall_transport_compiles_no_boundary() -> None:
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
     assert compiled.model.wall_boundaries == ()
+
+
+@pytest.mark.parametrize(
+    ("h_factor", "expected_mode"),
+    [(0.61, "numeric"), ("auto", "auto")],
+)
+def test_bohm_h_factor_contract_is_recorded_without_changing_model_id(
+    h_factor: float | str,
+    expected_mode: str,
+) -> None:
+    def update(data: dict[str, object]) -> None:
+        data["reactor"]["surfaces"][0]["wall_transport"] = {
+            "kind": "bohm",
+            "h_factor": h_factor,
+        }
+
+    compiled = compile_case(_updated_case(load_case(FIXTURE), update))
+
+    assert compiled.metadata["model_ids"]["wall_transport"] == {"wall": "bohm"}
+    assert compiled.metadata["provenance"]["wall_transport_closure"] == {
+        "bohm_h_factor": {
+            "version": "direct-multiplier-v2",
+            "surface_modes": {"wall": expected_mode},
+        }
+    }
+
+
+def test_schema_bohm_h_factor_is_the_complete_edge_density_factor() -> None:
+    def update(data: dict[str, object]) -> None:
+        data["reactor"]["surfaces"][0]["wall_transport"] = {
+            "kind": "bohm",
+            "h_factor": 1.0,
+        }
+
+    compiled = compile_case(_updated_case(load_case(FIXTURE), update))
+    state = compiled.model.initial_state(compiled.initial_state)
+    evaluated = compiled.model.evaluate(0.0, state, compiled.segments[0])
+    electrons = evaluated.electron_states["plasma"]
+    ion_index = compiled.chemistry.species_ids.index("Ar_plus")
+    sound_speed = np.sqrt(
+        ELEMENTARY_CHARGE_C
+        * electrons.temperature_eV
+        / compiled.chemistry.masses_kg[ion_index]
+    )
+
+    assert evaluated.ledger_by_zone["plasma"].wall_fluxes[
+        0
+    ].bohm_speed_m_s == pytest.approx(sound_speed)
+
+
+def test_auto_bohm_h_factor_tracks_current_neutral_density_and_limits() -> None:
+    length_m = 0.1
+    cross_section_m2 = 1.0e-18
+
+    def update(data: dict[str, object]) -> None:
+        data["reactor"]["surfaces"][0]["wall_transport"] = {
+            "kind": "bohm",
+            "h_factor": "auto",
+            "characteristic_length_m": length_m,
+            "ion_neutral_cross_section_m2": cross_section_m2,
+            "min_h_factor": 0.02,
+            "max_h_factor": 1.0,
+        }
+
+    compiled = compile_case(_updated_case(load_case(FIXTURE), update))
+    initial = compiled.model.initial_state(compiled.initial_state)
+    neutral_index = compiled.model.layout.density_slices["plasma"].start
+
+    def evaluated_speed(neutral_density_m3: float) -> float:
+        state = initial.copy()
+        state[neutral_index] = neutral_density_m3
+        evaluated = compiled.model.evaluate(0.0, state, compiled.segments[0])
+        return evaluated.ledger_by_zone["plasma"].wall_fluxes[0].bohm_speed_m_s
+
+    low_density_speed = evaluated_speed(0.0)
+    initial_density_speed = evaluated_speed(2.0e20)
+    high_density_speed = evaluated_speed(1.0e25)
+    electrons = compiled.model.evaluate(
+        0.0, initial, compiled.segments[0]
+    ).electron_states["plasma"]
+    ion_index = compiled.chemistry.species_ids.index("Ar_plus")
+    sound_speed = np.sqrt(
+        ELEMENTARY_CHARGE_C
+        * electrons.temperature_eV
+        / compiled.chemistry.masses_kg[ion_index]
+    )
+    low_density_limit = 0.86 / np.sqrt(3.0)
+    expected_initial = 0.86 / np.sqrt(3.0 + length_m * 2.0e20 * cross_section_m2 / 2.0)
+
+    assert low_density_speed == pytest.approx(low_density_limit * sound_speed)
+    assert initial_density_speed == pytest.approx(expected_initial * sound_speed)
+    assert high_density_speed == pytest.approx(0.02 * sound_speed)
+    assert low_density_speed > initial_density_speed > high_density_speed
+
+
+def test_evolved_gas_inlet_compiles_particle_enthalpy_source(tmp_path: Path) -> None:
+    manifest = _write_momentum_chemistry(tmp_path / "chemistry")
+
+    def update(data: dict[str, object]) -> None:
+        data["chemistry"]["manifest"] = manifest
+        data["models"]["gas_energy"] = {"kind": "evolved"}
+        data["reactor"]["gas_inlets"] = [
+            {
+                "inlet_id": "feed",
+                "zone_id": "plasma",
+                "flow_sccm": {"Ar": 1.0},
+                "temperature_K": 450.0,
+            }
+        ]
+
+    compiled = compile_case(_updated_case(load_case(FIXTURE), update))
+    source = compiled.segments[0].transport.inlet_heavy_energy_J_m3_s
+    particles_m3_s = 4.477962e17 / 0.01
+    expected = particles_m3_s * (1.5 + 1.0) * 1.380649e-23 * 450.0
+
+    np.testing.assert_allclose(source, [expected])
 
 
 def test_compile_reads_each_shared_external_model_once(

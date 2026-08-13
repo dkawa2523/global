@@ -55,6 +55,7 @@ from plasma_global.models.electrons import (
 )
 from plasma_global.models.external_table import ExternalTableStore
 from plasma_global.models.kinetics import TabulatedElectronKinetics
+from plasma_global.models.walls import BOHM_H_FACTOR_CLOSURE_VERSION
 from plasma_global.postprocess import (
     derive_observables_and_diagnostics,
     validate_summary_selection,
@@ -240,14 +241,30 @@ def _effective_case_yaml(case: CaseSpec) -> str:
     )
 
 
-def _metadata(
+def _wall_transport_closure_provenance(case: CaseSpec) -> dict[str, Any] | None:
+    surface_modes = {
+        surface.surface_id: (
+            "auto" if surface.wall_transport.h_factor == "auto" else "numeric"
+        )
+        for surface in case.reactor.surfaces
+        if surface.wall_transport.kind == "bohm"
+    }
+    if not surface_modes:
+        return None
+    return {
+        "bohm_h_factor": {
+            "version": BOHM_H_FACTOR_CLOSURE_VERSION,
+            "surface_modes": surface_modes,
+        }
+    }
+
+
+def _model_ids(
     case: CaseSpec,
     chemistry: CompiledChemistry,
-    missing_momentum_targets: tuple[str, ...],
-    electron_kinetics_provenance: Mapping[str, Any],
     experimental_features: tuple[str, ...],
-) -> Mapping[str, Any]:
-    model_ids = {
+) -> dict[str, Any]:
+    return {
         "electrons": case.models.electrons.kind,
         "electron_closure": case.models.electron_closure.kind,
         "electron_density": case.models.electron_density.kind,
@@ -273,19 +290,31 @@ def _metadata(
             else None
         ),
     }
-    provenance = {
+
+
+def _metadata(
+    case: CaseSpec,
+    chemistry: CompiledChemistry,
+    missing_momentum_targets: tuple[str, ...],
+    electron_kinetics_provenance: Mapping[str, Any],
+    experimental_features: tuple[str, ...],
+) -> Mapping[str, Any]:
+    provenance: dict[str, Any] = {
         "case_source": None if case.source_path is None else str(case.source_path),
         "included_files": [str(path) for path in case.included_files],
         "chemistry_manifest": str(case.chemistry.manifest),
         "chemistry": dict(chemistry.provenance),
         "missing_momentum_cross_section_targets": missing_momentum_targets,
     }
+    wall_transport_closure = _wall_transport_closure_provenance(case)
+    if wall_transport_closure is not None:
+        provenance["wall_transport_closure"] = wall_transport_closure
     if electron_kinetics_provenance:
         provenance["electron_kinetics"] = dict(electron_kinetics_provenance)
     return MappingProxyType(
         {
             "effective_case_yaml": _effective_case_yaml(case),
-            "model_ids": model_ids,
+            "model_ids": _model_ids(case, chemistry, experimental_features),
             "provenance": provenance,
             "summary_series": tuple(case.output.summary_series),
         }

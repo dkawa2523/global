@@ -10,6 +10,7 @@ from typing import Any, Protocol, SupportsFloat
 
 import numpy as np
 
+from plasma_global.chemistry._contracts import surface_reaction_shape_error
 from plasma_global.chemistry.data import ChemistryData, RateModelData, ReactionData
 from plasma_global.errors import CaseValidationError, ModelDomainError
 
@@ -98,24 +99,9 @@ class _NumericRateKernel(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class _ZeroRate:
-    def evaluate(
-        self,
-        gas: np.ndarray,
-        gas_temperature_K: float,
-        ion_fluxes: Mapping[tuple[str, str], float],
-        ion_energy_eV: float,
-        surface_temperature_K: float,
-    ) -> float:
-        del gas, gas_temperature_K, ion_fluxes, ion_energy_eV, surface_temperature_K
-        return 0.0
-
-
-@dataclass(frozen=True, slots=True)
 class _StickingRate:
-    primary_gas_index: int
+    gas_index: int
     thermal_prefactor_m_s_K_half: float
-    other_gas_reactants: tuple[tuple[int, float], ...]
 
     def evaluate(
         self,
@@ -126,14 +112,11 @@ class _StickingRate:
         surface_temperature_K: float,
     ) -> float:
         del ion_fluxes, ion_energy_eV, surface_temperature_K
-        rate = (
+        return (
             self.thermal_prefactor_m_s_K_half
             * math.sqrt(gas_temperature_K)
-            * float(gas[self.primary_gas_index])
+            * float(gas[self.gas_index])
         )
-        for gas_index, order in self.other_gas_reactants:
-            rate *= max(float(gas[gas_index]), 0.0) ** order
-        return float(rate)
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,17 +349,25 @@ class CompiledSurfaceModel:
     def _compile_kernels(self) -> tuple[_Kernel, ...]:
         kernels: list[_Kernel] = []
         for reaction in self.chemistry.surface_reactions:
-            rate_model_id = reaction.rate_model
-            if rate_model_id is None or rate_model_id not in self.chemistry.rate_models:
-                raise CaseValidationError(
-                    f"surface reaction {reaction.id} has unknown rate model"
-                )
-            model = self.chemistry.rate_models[rate_model_id]
+            model = self._validated_rate_model(reaction)
             kernels.extend(
                 self._compile_kernel(reaction, model, surface_index, surface)
                 for surface_index, surface in self._reaction_surfaces(reaction)
             )
         return tuple(kernels)
+
+    def _validated_rate_model(self, reaction: ReactionData) -> RateModelData:
+        """Resolve and validate the rate model before selecting any surfaces."""
+        rate_model_id = reaction.rate_model
+        if rate_model_id is None or rate_model_id not in self.chemistry.rate_models:
+            raise CaseValidationError(
+                f"surface reaction {reaction.id} has unknown rate model"
+            )
+        model = self.chemistry.rate_models[rate_model_id]
+        shape_error = surface_reaction_shape_error(reaction, model, self._species)
+        if shape_error is not None:
+            raise CaseValidationError(shape_error)
+        return model
 
     def _reaction_surfaces(
         self, reaction: ReactionData
@@ -568,12 +559,10 @@ class CompiledSurfaceModel:
         gas_reactants: list[tuple[int, float, str]],
     ) -> _NumericRateKernel:
         if model.kind == "sticking":
-            if not gas_reactants:
-                return _ZeroRate()
             gas_index, _order, _species_id = gas_reactants[0]
             value = self._numeric_parameter(model, "value")
             return _StickingRate(
-                primary_gas_index=gas_index,
+                gas_index=gas_index,
                 thermal_prefactor_m_s_K_half=(
                     0.25
                     * value
@@ -581,18 +570,9 @@ class CompiledSurfaceModel:
                         8.0 * BOLTZMANN_J_K / (math.pi * self.gas_masses_kg[gas_index])
                     )
                 ),
-                other_gas_reactants=tuple(
-                    (index, order) for index, order, _ in gas_reactants[1:]
-                ),
             )
         if model.kind == "ion_assisted":
-            ions = tuple(
-                species_id
-                for _index, _order, species_id in gas_reactants
-                if self._species[species_id].charge > 0
-            )
-            if not ions:
-                return _ZeroRate()
+            _gas_index, _order, ion_species_id = gas_reactants[0]
             threshold = self._numeric_parameter(model, "threshold_eV")
             reference = self._numeric_parameter(model, "reference_energy_eV")
             if reference <= threshold:
@@ -601,7 +581,7 @@ class CompiledSurfaceModel:
                     "exceed threshold_eV"
                 )
             return _IonAssistedRate(
-                flux_key=(surface.surface_id, ions[0]),
+                flux_key=(surface.surface_id, ion_species_id),
                 yield_factor=self._numeric_parameter(model, "yield"),
                 threshold_eV=threshold,
                 inverse_energy_span_eV_inv=1.0 / (reference - threshold),

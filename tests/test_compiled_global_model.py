@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -16,6 +17,7 @@ from plasma_global.models.electrons import (
     LocalFieldClosure,
     TabulatedMeanEnergy,
 )
+from plasma_global.models.kinetics import TabulatedElectronKinetics
 from plasma_global.models.walls import (
     ELECTRON_MASS_KG,
     BoundaryReaction,
@@ -62,6 +64,59 @@ def inert_argon() -> ChemistryFixture:
         gas_heating_eV=np.zeros(0),
         reaction_zones=(),
     )
+
+
+def test_compiled_module_keeps_its_public_facade() -> None:
+    assert compiled_module.__all__ == [
+        "BoundSegmentRHS",
+        "CompiledChemistryLike",
+        "CompiledGlobalModel",
+        "ElasticHeatingEvaluator",
+        "ElectronDensityProvider",
+        "ExtensionStateAccumulator",
+        "ModelEvaluation",
+        "StateLayout",
+        "ZoneTermLedger",
+    ]
+    assert CompiledGlobalModel.__module__ == "plasma_global.core.compiled"
+    assert compiled_module.ModelEvaluation.__module__ == "plasma_global.core.compiled"
+    assert compiled_module.ZoneTermLedger.__module__ == "plasma_global.core.compiled"
+
+
+def test_compiled_facade_preserves_immutability_and_evaluation_paths() -> None:
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("plasma", 2.0),),
+        segments=(
+            RecipeSegment(
+                "powered", 0.0, 1.0, absorbed_power_W_by_zone={"plasma": 6.0}
+            ),
+        ),
+        electron_closure=ElectronEnergyClosure(),
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={"plasma": {"Ar": 1.0e20, "Ar_plus": 1.0e15}},
+            mean_energy_eV_by_zone={"plasma": 3.0},
+        )
+    )
+    segment = model.segments[0]
+
+    evaluation = model.evaluate(0.0, state, segment)
+    derivative = model.evaluate_derivative(0.0, state, segment)
+    bound_derivative = model.bind_segment(segment)(0.0, state)
+
+    np.testing.assert_array_equal(derivative, evaluation.derivative)
+    np.testing.assert_array_equal(bound_derivative, evaluation.derivative)
+    assert not evaluation.derivative.flags.writeable
+    assert not model.charges.flags.writeable
+    assert not model._active_reactions_by_zone["plasma"].flags.writeable
+    with pytest.raises(TypeError):
+        model._zone_by_id["other"] = model.zones[0]
+    with pytest.raises(TypeError):
+        model._walls_by_zone["other"] = ()
+    with pytest.raises(AttributeError, match="immutable after compilation"):
+        model.segments = ()
 
 
 def test_mean_energy_and_electron_temperature_are_distinct() -> None:
@@ -202,6 +257,87 @@ def test_mass_action_bdf_matches_first_order_analytic_solution() -> None:
         initial_A,
         rel=1.0e-10,
     )
+
+
+def test_zero_electron_density_skips_electron_rate_coefficient_lookup() -> None:
+    def unavailable_at_zero_energy(_context: object) -> float:
+        raise AssertionError("electron-rate coefficient must not be evaluated")
+
+    chemistry = ChemistryFixture(
+        species_ids=("Ar", "Ar_plus"),
+        charges=np.array([0.0, 1.0]),
+        masses_kg=np.array([ARGON_MASS_KG, ARGON_MASS_KG]),
+        reaction_ids=("ionize",),
+        stoichiometry=np.array([[-1.0, 1.0]]),
+        reactant_orders=np.array([[1.0, 0.0]]),
+        electron_orders=np.array([1.0]),
+        rate_evaluators=(unavailable_at_zero_energy,),
+        energy_loss_eV=np.array([15.76]),
+        gas_heating_eV=np.array([0.0]),
+        reaction_zones=((),),
+    )
+    model = CompiledGlobalModel(
+        chemistry=chemistry,
+        zones=(Zone("z", 1.0),),
+        segments=(RecipeSegment("zero-electrons", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={"z": {"Ar": 1.0e20, "Ar_plus": 0.0}},
+            mean_energy_eV_by_zone={"z": 0.0},
+        )
+    )
+
+    evaluated = model.evaluate(0.0, state, model.segments[0])
+
+    assert evaluated.ledger_by_zone["z"].reaction_rates_m3_s["ionize"] == 0.0
+    np.testing.assert_array_equal(evaluated.derivative, np.zeros(model.layout.size))
+
+
+def test_zero_electron_density_skips_mean_energy_kinetics_lookup() -> None:
+    chemistry = ChemistryFixture(
+        species_ids=("Ar", "Ar_plus"),
+        charges=np.array([0.0, 1.0]),
+        masses_kg=np.array([ARGON_MASS_KG, ARGON_MASS_KG]),
+        reaction_ids=("ionize",),
+        stoichiometry=np.array([[-1.0, 1.0]]),
+        reactant_orders=np.array([[1.0, 0.0]]),
+        electron_orders=np.array([1.0]),
+        rate_evaluators=(lambda _context: 1.0,),
+        energy_loss_eV=np.array([15.76]),
+        gas_heating_eV=np.array([0.0]),
+        reaction_zones=((),),
+    )
+    kinetics = TabulatedElectronKinetics(
+        source=Path("unused-zero-electron-table.h5"),
+        lookup="mean_energy",
+        bounds="error",
+        axis=np.array([1.0, 2.0]),
+        mean_energy_eV=np.array([1.0, 2.0]),
+        mobility_m2_V_s=np.ones(2),
+        effective_field_Td=np.array([10.0, 20.0]),
+        rate_tables={"ionize": np.ones(2)},
+    )
+    model = CompiledGlobalModel(
+        chemistry=chemistry,
+        zones=(Zone("z", 1.0),),
+        segments=(RecipeSegment("zero-electrons", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+        electron_kinetics_by_zone={"z": kinetics},
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={"z": {"Ar": 1.0e20, "Ar_plus": 0.0}},
+            mean_energy_eV_by_zone={"z": 0.0},
+        )
+    )
+
+    evaluated = model.evaluate(0.0, state, model.segments[0])
+
+    assert evaluated.kinetics_by_zone == {}
+    assert evaluated.ledger_by_zone["z"].reaction_rates_m3_s["ionize"] == 0.0
+    np.testing.assert_array_equal(evaluated.derivative, np.zeros(model.layout.size))
 
 
 def test_recipe_segments_bind_endpoint_forcing_and_integrate_power_balance() -> None:

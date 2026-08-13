@@ -10,7 +10,7 @@ from typing import Protocol
 import numpy as np
 from typing_extensions import override
 
-from plasma_global.core.exceptions import ModelConfigurationError, StateDomainError
+from plasma_global.errors import ModelConfigurationError, StateDomainError
 
 
 def _density_value(

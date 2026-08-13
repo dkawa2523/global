@@ -102,6 +102,18 @@ heat capacity の明示値が必要です。RHS は gas-directed port power、ga
 electron elastic heating、inlet/outlet/inter-zone energy transport、wall temperature への熱交換を
 同じ heavy-energy ledger で合計します。
 
+state は内部エネルギーのままですが、開いた control volume を横切る重粒子流はエンタルピーを
+運びます。inlet species の流入エネルギーは
+\(\dot N_s(c_{v,s}/k_B+1)k_BT_{in}\)、pump と directed edge の流出エネルギー密度は
+
+\[
+H_g=U_g+p=U_g+k_BT_g\sum_s n_s
+\]
+
+です。したがって、定容・断熱容器の充填と排気を第一法則どおり扱います。evolved gas と
+transport を組み合わせる場合、transport は同じ species 順の `cv_over_kb` を必須とし、内部
+エネルギーをそのまま移流する fallback はありません。
+
 ## Wall と surface
 
 Bohm wall の正イオン incident flux は一度だけ評価します。
@@ -110,6 +122,20 @@ Bohm wall の正イオン incident flux は一度だけ評価します。
 \Gamma_i=h_i n_i\sqrt{\frac{eT_e}{m_i}},\qquad
 L_i=\Gamma_i A/V.
 \]
+
+数値の `h_factor` はこの式の \(h_i\) 全体であり、隠れた `0.61` 係数は追加しません。
+`h_factor: auto` は初期状態から定数を作る設定ではなく、各 RHS 評価時の中性重粒子総密度
+\(n_n\) を使って
+
+\[
+h_i=\operatorname{clamp}\!\left[
+\frac{0.86}{\sqrt{3+L n_n\sigma_{in}/2}},h_{min},h_{max}
+\right]
+\]
+
+を再評価します。`characteristic_length_m` 未指定時はそのsurfaceの \(V/A\) を使用します。
+ここで \(n_n\) は \(\mathrm{m^{-3}}\)、\(L\) は m、\(\sigma_{in}\) は \(\mathrm{m^2}\) です。
+衝突なし極限は \(0.86/\sqrt{3}\) です。
 
 同じ flux を gas particle source、`boundary_reactions.csv` の生成物 branch、surface reaction、
 electron wall loss へ分配します。活動する incident ion ごとに branch probability 合計 1 を要求し、
@@ -131,8 +157,10 @@ renormalization、区間後 projection はありません。
 
 ## Transport
 
-inlet は segment 固定の particle/enthalpy source、pump は zone の first-order loss、directed edge
-は source zone から `C*n` 個/s を取り target zone へ同数/s 加えるよう compile されます。
+inlet は segment 固定の particle/enthalpy source、pump は粒子数に対する zone の first-order
+loss、directed edge は source zone から `C*n` 個/s を取り target zone へ同数/s 加えるよう
+compile されます。重粒子energyは前節の \(H_g\)、electron energyはそのenergy densityを同じ
+粒子流に載せます。
 inter-zone だけなら \(\sum_z V_z n_{z,s}\) と、対応する electron/heavy energy の体積積分が
 保存されます。
 
@@ -164,9 +192,11 @@ sampling は積分誤差制御に使わず、accepted points または `sample_i
 指定点と全 forcing boundary を保存します。保存点は 100,000 点を固定上限とし、入力で上限を
 変更する契約は設けません。
 
-`experimental.stop_when_quasi_steady` は時間不変 segment だけで、scaled RHS norm が閾値を
-下回った時に停止します。標準 solver 設定ではなく、定常 root solver でもありません。残り区間は
-停止 state を保存し、audit は case を `experimental` と分類します。
+`experimental.stop_when_quasi_steady` は互換性のため旧名を保っていますが、時間不変 segment の
+scaled RHS norm と、その時点の RHS から見積もる残区間変化を監視する**非終端の診断 event**です。
+現在の RHS だけでは自己触媒反応などの将来の増幅を保証できないため、積分の途中停止や残区間への
+state の定数外挿は行いません。`quasi_steady_events` は条件候補を観測した segment 数であり、
+定常 root の証明ではありません。audit はこの設定を持つ case を引き続き `experimental` と分類します。
 
 ## Audit の数値診断
 

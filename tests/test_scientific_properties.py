@@ -147,7 +147,7 @@ def _transport_case(
     density = np.asarray(
         draw(
             st.lists(
-                st.integers(min_value=0, max_value=1_000_000),
+                st.integers(min_value=1, max_value=1_000_000),
                 min_size=2 * species_count,
                 max_size=2 * species_count,
             )
@@ -199,6 +199,7 @@ def test_transport_preserves_shape_dtype_and_volume_integrals(
         edge_to=np.array([target]),
         edge_conductance_m3_s=np.array([conductance]),
         n_species=density.shape[1],
+        heavy_cv_over_kb=np.ones(density.shape[1]),
     )
     forcing = SegmentTransport.zeros(2, density.shape[1])
 

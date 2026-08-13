@@ -713,7 +713,7 @@ class ExperimentalExtensionsConfig(StrictModel):
 
 
 class ExperimentalStopWhenQuasiSteadyConfig(StrictModel):
-    """Experimental event-based stopping; this is not a steady root solve."""
+    """Legacy-named nonterminal quasi-steady observation, not a root solve."""
 
     relative_rhs_norm_s_inv: NonNegativeFloat = 1.0e-3
     min_time_s: NonNegativeFloat = 0.0

@@ -144,7 +144,7 @@ forbidden_modules = [
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Models cannot depend on input, experiments, or orchestration"
+name = "Models remain independent of core and orchestration"
 type = "forbidden"
 source_modules = ["plasma_global.models"]
 forbidden_modules = [
@@ -152,6 +152,7 @@ forbidden_modules = [
   "plasma_global.audit",
   "plasma_global.build",
   "plasma_global.cli",
+  "plasma_global.core",
   "plasma_global.experimental",
   "plasma_global.input",
   "plasma_global.output",

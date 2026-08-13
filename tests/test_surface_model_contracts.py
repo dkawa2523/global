@@ -12,7 +12,7 @@ from plasma_global.chemistry.data import (
     ReactionData,
     SpeciesData,
 )
-from plasma_global.errors import ModelDomainError
+from plasma_global.errors import CaseValidationError, ModelDomainError
 from plasma_global.models.surface import (
     BOLTZMANN_J_K,
     E_CHARGE,
@@ -202,6 +202,119 @@ def test_reactions_aggregate_particle_event_heat_and_coverage_rates() -> None:
     )
     assert result.gas_derivative_m3_s.dtype == np.dtype(float)
     assert result.coverage_derivative_s_inv.shape == (1,)
+
+
+@pytest.mark.parametrize(
+    ("kind", "reactants", "products"),
+    [
+        ("sticking", {"A": 2.0, "site": 2.0}, {"Ads": 2.0}),
+        (
+            "sticking",
+            {"A": 1.0, "ion": 1.0, "site": 1.0},
+            {"Ads": 1.0, "ion": 1.0},
+        ),
+        (
+            "ion_assisted",
+            {"ion": 1.0, "Ads": 1.0, "A": 1.0},
+            {"ion": 1.0, "A": 2.0, "site": 1.0},
+        ),
+        (
+            "ion_assisted",
+            {"ion": 2.0, "Ads": 1.0},
+            {"ion": 2.0, "A": 1.0, "site": 1.0},
+        ),
+    ],
+)
+def test_flux_driven_surface_rates_reject_unsupported_gas_reactants(
+    kind: str,
+    reactants: dict[str, float],
+    products: dict[str, float],
+) -> None:
+    parameters = (
+        {"value": 0.2}
+        if kind == "sticking"
+        else {
+            "yield": 1.0,
+            "threshold_eV": 0.0,
+            "reference_energy_eV": 10.0,
+            "exponent": 1.0,
+        }
+    )
+    rate_model = RateModelData("rate", kind, parameters)
+    reaction = ReactionData(
+        "unsupported",
+        reactants,
+        products,
+        rate_model.id,
+        None,
+    )
+    chemistry = _chemistry(
+        species=_species(), reactions=(reaction,), rate_models=(rate_model,)
+    )
+    surface = SurfaceGeometry("wall", "z", 1.0, 1.0e19, 300.0, {"Ads": 0.2})
+
+    with pytest.raises(
+        CaseValidationError,
+        match="must have exactly one unit",
+    ):
+        _model(chemistry, (surface,))
+
+
+def test_sticking_rate_is_independent_of_reactant_order() -> None:
+    rate_model = RateModelData("stick", "sticking", {"value": 0.2})
+    rates: list[float] = []
+    for reactants in ({"A": 1.0, "site": 1.0}, {"site": 1.0, "A": 1.0}):
+        reaction = ReactionData("stick", reactants, {"Ads": 1.0}, rate_model.id, None)
+        chemistry = _chemistry(
+            species=_species(), reactions=(reaction,), rate_models=(rate_model,)
+        )
+        surface = SurfaceGeometry("wall", "z", 1.0, 1.0e19, 300.0, {"Ads": 0.2})
+        model = _model(chemistry, (surface,))
+        evaluated = model.evaluate(
+            model.initial_state(),
+            np.array([[1.0e20, 1.0e15]]),
+            np.array([400.0]),
+        )
+        rates.append(evaluated.rates_m2_s["stick@wall"])
+
+    assert rates[0] == pytest.approx(rates[1])
+
+
+def test_ion_assisted_rate_is_independent_of_reactant_order() -> None:
+    rate_model = RateModelData(
+        "etch",
+        "ion_assisted",
+        {
+            "yield": 2.0,
+            "threshold_eV": 2.0,
+            "reference_energy_eV": 10.0,
+            "exponent": 1.0,
+        },
+    )
+    rates: list[float] = []
+    for reactants in ({"ion": 1.0, "Ads": 1.0}, {"Ads": 1.0, "ion": 1.0}):
+        reaction = ReactionData(
+            "etch",
+            reactants,
+            {"ion": 1.0, "A": 1.0, "site": 1.0},
+            rate_model.id,
+            None,
+        )
+        chemistry = _chemistry(
+            species=_species(), reactions=(reaction,), rate_models=(rate_model,)
+        )
+        surface = SurfaceGeometry("wall", "z", 1.0, 1.0e19, 300.0, {"Ads": 0.2})
+        model = _model(chemistry, (surface,))
+        evaluated = model.evaluate(
+            model.initial_state(),
+            np.array([[1.0e20, 1.0e15]]),
+            np.array([400.0]),
+            ion_flux_m2_s={("wall", "ion"): 10.0},
+            ion_energy_eV={"wall": 6.0},
+        )
+        rates.append(evaluated.rates_m2_s["etch@wall"])
+
+    assert rates[0] == pytest.approx(rates[1])
 
 
 def test_surface_temperature_context_is_resolved_per_surface() -> None:

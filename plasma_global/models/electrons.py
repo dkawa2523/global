@@ -8,7 +8,7 @@ from typing import Protocol
 
 import numpy as np
 
-from plasma_global.core.exceptions import (
+from plasma_global.errors import (
     ModelConfigurationError,
     QuasineutralityError,
     StateDomainError,
@@ -142,7 +142,8 @@ class TabulatedMeanEnergy:
             or fields.shape != energies.shape
         ):
             raise ModelConfigurationError(
-                "Local-field table needs equal one-dimensional axes with at least two points"
+                "Local-field table needs equal one-dimensional axes with at least "
+                "two points"
             )
         if not np.all(np.isfinite(fields)) or not np.all(np.isfinite(energies)):
             raise ModelConfigurationError("Local-field table values must be finite")
@@ -191,7 +192,8 @@ class LocalFieldClosure:
         )
         if reduced_field_Td is None:
             raise StateDomainError(
-                "local_field closure requires reduced_field_Td for every zone and segment"
+                "local_field closure requires reduced_field_Td for every zone and "
+                "segment"
             )
         field = float(reduced_field_Td)
         mean_energy = float(self.mean_energy_from_field(field))

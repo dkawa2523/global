@@ -33,7 +33,7 @@ migrator は v2 の split case/chamber/recipe を include 展開して一つの 
 | prescribed electron series | `experimental.prescribed_profile` |
 | RF/CCP/ICP | 対応する明示 `experimental.*` port |
 | film/inventory/generic state | `experimental` セクションの opt-in |
-| quasi-steady event stop | `experimental.stop_when_quasi_steady` |
+| quasi-steady observation（旧 event stop） | `experimental.stop_when_quasi_steady` |
 
 power/electron/wall/solver mode が曖昧なら別モデルへ置換せず `MigrationError` にします。v3 で
 無作用な `physics.mode`, `gas_model`, `Zone.role`, `imported_inputs`、cache/diagnostic/alias field は
@@ -84,6 +84,28 @@ python -m tools.importers.chemistry_v2 \
 一つの旧断面積ファイルに複数 segment があり自動選択できない場合も、cross-section ID ごとの
 zero-based segment mapping を importer に明示します。元素・電荷・mass、reaction energy loss、
 boundary branch、evolved gas で使う `cv_over_kb` は変換 report と canonical files を必ず確認して
+ください。
+
+## Bohm `h_factor` の runtime 契約変更
+
+数値の `h_factor` は、現在の runtime では Bohm 音速へ直接掛ける完全な係数です。同じ状態に
+対する式は、旧 runtime と現在の runtime で次のように異なります。
+
+```text
+旧: Gamma_i = 0.61 * h_factor * n_i * sqrt(e * T_e / m_i)
+現: Gamma_i =        h_factor * n_i * sqrt(e * T_e / m_i)
+```
+
+したがって同じ数値を残すと、瞬時の ion wall flux は旧実装の `1 / 0.61 = 1.63934...` 倍、
+約 63.9% 増えます。旧 flux を維持するには `h_factor_new = 0.61 * h_factor_old` としてください。
+これは同一状態での境界 flux の比較であり、反応と power balance を含む時間発展結果が一律に
+63.9% 変化するという意味ではありません。必ず対象 case を再実行して比較してください。
+
+`h_factor: auto` は現在の中性粒子密度を使う動的 closure であるため、この定数変換は適用できません。
+新しい artifact は `provenance.wall_transport_closure.bohm_h_factor` に
+`version: direct-multiplier-v2` と surface ごとの `numeric` / `auto` mode を保存します。
+`model_ids.wall_transport` の既存形式は変わりません。この provenance がない旧 artifact は契約を
+単独では特定できないため、作成時の runtime version を保持するか、review 済み設定で再実行して
 ください。
 
 ## Review checklist

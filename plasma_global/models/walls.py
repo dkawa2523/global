@@ -9,10 +9,12 @@ from types import MappingProxyType
 
 import numpy as np
 
-from plasma_global.core.exceptions import ModelConfigurationError
+from plasma_global.errors import ModelConfigurationError, StateDomainError
 from plasma_global.models.electrons import ELEMENTARY_CHARGE_C, ElectronState
 
 ELECTRON_MASS_KG = 9.1093837139e-31
+# Bump whenever numeric h-factor semantics or the automatic closure equation changes.
+BOHM_H_FACTOR_CLOSURE_VERSION = "direct-multiplier-v2"
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,48 @@ class BoundaryReaction:
                 "Boundary reaction probability must be between zero and one"
             )
         object.__setattr__(self, "products", MappingProxyType(products))
+
+
+@dataclass(frozen=True, slots=True)
+class AutoBohmHFactor:
+    """Density-dependent sheath-edge to bulk ion-density ratio."""
+
+    characteristic_length_m: float
+    ion_neutral_cross_section_m2: float
+    min_h_factor: float
+    max_h_factor: float
+
+    def __post_init__(self) -> None:
+        values = (
+            self.characteristic_length_m,
+            self.ion_neutral_cross_section_m2,
+            self.min_h_factor,
+            self.max_h_factor,
+        )
+        if any(not math.isfinite(value) or value <= 0.0 for value in values):
+            raise ModelConfigurationError(
+                "Automatic Bohm h-factor parameters must be finite and positive"
+            )
+        if self.min_h_factor > self.max_h_factor or self.max_h_factor > 1.0:
+            raise ModelConfigurationError(
+                "Automatic Bohm h-factor limits must satisfy 0 < min <= max <= 1"
+            )
+
+    def evaluate(self, neutral_density_m3: float) -> float:
+        """Evaluate the collisional edge-to-bulk closure at current density."""
+
+        if not math.isfinite(neutral_density_m3) or neutral_density_m3 < 0.0:
+            raise StateDomainError(
+                "Automatic Bohm h-factor requires finite nonnegative neutral density"
+            )
+        collisionality = (
+            self.characteristic_length_m
+            * neutral_density_m3
+            * self.ion_neutral_cross_section_m2
+            / 2.0
+        )
+        value = 0.86 / math.sqrt(3.0 + collisionality)
+        return min(max(value, self.min_h_factor), self.max_h_factor)
 
 
 def _validate_prescribed_transport(
@@ -119,6 +163,13 @@ def _validate_branch_probabilities(reactions: tuple[BoundaryReaction, ...]) -> N
         )
 
 
+def _validate_auto_bohm_h_factor(kind: str, closure: AutoBohmHFactor | None) -> None:
+    if closure is not None and kind != "bohm":
+        raise ModelConfigurationError(
+            "Automatic Bohm h-factor is only valid for Bohm wall transport"
+        )
+
+
 @dataclass(frozen=True)
 class WallBoundary:
     """One surface's positive-ion transport and boundary reaction branches."""
@@ -133,6 +184,7 @@ class WallBoundary:
     prescribed_frequency_s_inv: float | None = None
     diffusion_coefficient_m2_s: float | None = None
     diffusion_length_m: float | None = None
+    auto_bohm_h_factor: AutoBohmHFactor | None = None
 
     def __post_init__(self) -> None:
         if not self.zone_id:
@@ -151,6 +203,10 @@ class WallBoundary:
             )
         if self.surface_id is not None and not self.surface_id:
             raise ModelConfigurationError("Wall boundary surface_id must not be empty")
+        _validate_auto_bohm_h_factor(
+            self.transport_kind,
+            self.auto_bohm_h_factor,
+        )
         _validate_wall_transport(
             kind=self.transport_kind,
             area_m2=self.area_m2,
@@ -206,6 +262,7 @@ class CompiledWallBoundary:
     masses_kg: np.ndarray
     branches_by_ion: tuple[tuple[_CompiledBranch, ...], ...]
     standard_floating_wall: bool
+    neutral_indices: np.ndarray = field(default_factory=lambda: np.array([], dtype=int))
 
 
 def _readonly(values: object, *, dtype: type) -> np.ndarray:
@@ -232,6 +289,7 @@ def compile_wall_boundary(
             "Wall species, charge, and mass arrays must use the same order"
         )
     ion_indices = np.flatnonzero(charge_values > 0.0)
+    neutral_indices = np.flatnonzero(charge_values == 0.0)
     branches: dict[int, list[_CompiledBranch]] = {
         int(species_index): [] for species_index in ion_indices
     }
@@ -244,7 +302,8 @@ def compile_wall_boundary(
             )
         if charge_values[incident_index] <= 0.0:
             raise ModelConfigurationError(
-                f"Boundary incident species {reaction.incident_species!r} must be a positive ion"
+                f"Boundary incident species {reaction.incident_species!r} must be "
+                "a positive ion"
             )
         product_indices: list[int] = []
         product_yields: list[float] = []
@@ -269,7 +328,7 @@ def compile_wall_boundary(
     if np.any(selected_masses <= 0.0):
         bad = [
             species_ids[int(species_index)]
-            for species_index, mass in zip(ion_indices, selected_masses)
+            for species_index, mass in zip(ion_indices, selected_masses, strict=True)
             if mass <= 0.0
         ]
         raise ModelConfigurationError(
@@ -280,6 +339,7 @@ def compile_wall_boundary(
         ion_indices=_readonly(ion_indices, dtype=int),
         charges=_readonly(charge_values[ion_indices], dtype=float),
         masses_kg=_readonly(selected_masses, dtype=float),
+        neutral_indices=_readonly(neutral_indices, dtype=int),
         branches_by_ion=tuple(
             tuple(branches[int(species_index)]) for species_index in ion_indices
         ),
@@ -325,6 +385,17 @@ def _compiled_loss_frequency(boundary: WallBoundary) -> float:
     raise RuntimeError("compiled wall transport parameters are inconsistent")
 
 
+def _bohm_h_factor(compiled: CompiledWallBoundary, densities_m3: np.ndarray) -> float:
+    boundary = compiled.boundary
+    closure = boundary.auto_bohm_h_factor
+    if closure is None:
+        return boundary.bohm_factor
+    neutral_density = float(
+        np.sum(np.maximum(densities_m3[compiled.neutral_indices], 0.0))
+    )
+    return closure.evaluate(neutral_density)
+
+
 def evaluate_compiled_wall_boundary(
     *,
     compiled: CompiledWallBoundary,
@@ -356,7 +427,7 @@ def evaluate_compiled_wall_boundary(
         # remains untouched and is rejected by the caller below -10*atol.
         ion_density = max(float(densities_m3[species_index]), 0.0)
         if boundary.transport_kind == "bohm":
-            transport_speed = boundary.bohm_factor * math.sqrt(
+            transport_speed = _bohm_h_factor(compiled, densities_m3) * math.sqrt(
                 charge * ELEMENTARY_CHARGE_C * electrons.temperature_eV / mass
             )
             incident_flux = ion_density * transport_speed
@@ -408,6 +479,8 @@ def evaluate_compiled_wall_boundary(
 
 
 __all__ = [
+    "BOHM_H_FACTOR_CLOSURE_VERSION",
+    "AutoBohmHFactor",
     "BoundaryReaction",
     "CompiledWallBoundary",
     "WallBoundary",

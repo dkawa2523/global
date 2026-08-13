@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import pytest
 
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
@@ -14,6 +15,7 @@ from plasma_global.models.electrons import (
     LocalFieldClosure,
     TabulatedMeanEnergy,
 )
+from plasma_global.models.gas_energy import BOLTZMANN_J_K, HeavyEnergyClosure
 from plasma_global.models.walls import BoundaryReaction, WallBoundary
 
 
@@ -155,6 +157,77 @@ def test_cstr_matches_constant_inlet_and_pump_analytic_solution_to_1e_6() -> Non
     error = abs(result.final_value("n[cstr,A]") - expected) / expected
 
     assert error <= 1.0e-6
+
+
+def test_adiabatic_monatomic_filling_uses_inlet_enthalpy() -> None:
+    cv_over_kb = 1.5
+    inlet_temperature_K = 600.0
+    initial_temperature_K = 300.0
+    initial_neutral_density = 2.0e20
+    ion_density = 1.0e15
+    particle_source = 1.0e20
+    duration_s = 0.5
+    closure = HeavyEnergyClosure(
+        cv_over_kb=np.array([cv_over_kb, cv_over_kb]),
+        wall_temperature_K=np.array([initial_temperature_K]),
+        wall_relaxation_s_inv=np.zeros(1),
+    )
+    transport = CompiledTransport(
+        volumes_m3=np.array([1.0]),
+        pump_frequency_s_inv=np.zeros(1),
+        edge_from=np.array([], dtype=int),
+        edge_to=np.array([], dtype=int),
+        edge_conductance_m3_s=np.array([]),
+        n_species=2,
+        heavy_cv_over_kb=closure.cv_over_kb,
+    )
+    segment = RecipeSegment(
+        "fill",
+        0.0,
+        duration_s,
+        reduced_field_Td_by_zone={"vessel": 1.0},
+        transport=SegmentTransport(
+            particle_source_m3_s=np.array([[particle_source, 0.0]]),
+            inlet_heavy_energy_J_m3_s=np.array(
+                [
+                    particle_source
+                    * (cv_over_kb + 1.0)
+                    * BOLTZMANN_J_K
+                    * inlet_temperature_K
+                ]
+            ),
+        ),
+    )
+    model = CompiledGlobalModel(
+        chemistry=_inert_pair(),
+        zones=(Zone("vessel", 1.0),),
+        segments=(segment,),
+        electron_closure=LocalFieldClosure(TabulatedMeanEnergy((1.0, 2.0), (3.0, 3.0))),
+        transport=transport,
+        heavy_energy_closure=closure,
+    )
+    result = solve_compiled_model(
+        model,
+        InitialState(
+            densities_m3_by_zone={
+                "vessel": {"A": initial_neutral_density, "ion": ion_density}
+            },
+            gas_temperature_K_by_zone={"vessel": initial_temperature_K},
+        ),
+        SolverSettings(rtol=1.0e-10, atol=1.0e-12, save_at_s=(0.0, duration_s)),
+    )
+    final_density = result.state[-1, model.layout.density_slices["vessel"]]
+    final_energy = result.state[-1, model.layout.heavy_energy_indices["vessel"]]
+    actual_temperature = closure.temperature_K(
+        final_density[None, :], np.array([final_energy])
+    )[0]
+    initial_total_density = initial_neutral_density + ion_density
+    expected_temperature = (
+        cv_over_kb * initial_total_density * initial_temperature_K
+        + (cv_over_kb + 1.0) * particle_source * duration_s * inlet_temperature_K
+    ) / (cv_over_kb * (initial_total_density + particle_source * duration_s))
+
+    assert actual_temperature == pytest.approx(expected_temperature, rel=1.0e-8)
 
 
 def test_bohm_wall_loss_matches_exponential_decay_to_1e_5() -> None:

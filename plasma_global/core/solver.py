@@ -31,26 +31,38 @@ _MAX_SAVED_POINTS = 100_000
 _EXPERIMENTAL_QUASI_STEADY_MODEL_ID = "experimental.stop_when_quasi_steady"
 
 
-def _time_tolerance(start_s: float, end_s: float) -> float:
-    scale = max(abs(start_s), abs(end_s), abs(end_s - start_s), 1.0)
-    return 64.0 * np.finfo(float).eps * scale
+def _times_coincide(left_s: float, right_s: float) -> bool:
+    """Treat only the nearest representable neighbours as the same time."""
+
+    return bool(
+        np.nextafter(left_s, -math.inf) <= right_s <= np.nextafter(left_s, math.inf)
+    )
+
+
+def _times_coincide_array(
+    values_s: np.ndarray, references_s: np.ndarray | float
+) -> np.ndarray:
+    """Vector form of :func:`_times_coincide`."""
+
+    return (values_s >= np.nextafter(references_s, -math.inf)) & (
+        values_s <= np.nextafter(references_s, math.inf)
+    )
 
 
 def _merge_with_boundaries(requested: np.ndarray, boundaries: np.ndarray) -> np.ndarray:
     """Merge global sample times while giving exact boundaries precedence."""
 
-    tolerance = _time_tolerance(float(boundaries[0]), float(boundaries[-1]))
     positions = np.searchsorted(boundaries, requested)
     left = boundaries[np.maximum(positions - 1, 0)]
     right = boundaries[np.minimum(positions, boundaries.size - 1)]
-    near_boundary = np.minimum(np.abs(requested - left), np.abs(requested - right)) <= (
-        tolerance
+    near_boundary = _times_coincide_array(requested, left) | _times_coincide_array(
+        requested, right
     )
     values = np.sort(np.concatenate((requested[~near_boundary], boundaries)))
     merged: list[float] = []
     for value in values:
         item = float(value)
-        if not merged or item - merged[-1] > tolerance:
+        if not merged or not _times_coincide(merged[-1], item):
             merged.append(item)
     return np.asarray(merged, dtype=float)
 
@@ -64,7 +76,6 @@ def _global_sample_times(
         return None
     start_s = model.segments[0].start_s
     end_s = model.segments[-1].end_s
-    tolerance = _time_tolerance(start_s, end_s)
     boundaries = np.asarray(
         [model.segments[0].start_s, *(item.end_s for item in model.segments)],
         dtype=float,
@@ -81,7 +92,9 @@ def _global_sample_times(
                 f"({_MAX_SAVED_POINTS})"
             )
         requested = np.asarray(controls.save_at_s, dtype=float)
-        if requested[0] < start_s - tolerance or requested[-1] > end_s + tolerance:
+        if requested[0] < np.nextafter(start_s, -math.inf) or requested[
+            -1
+        ] > np.nextafter(end_s, math.inf):
             raise ModelConfigurationError(
                 f"save_at_s must lie within the recipe interval [{start_s:g}, "
                 f"{end_s:g}]"
@@ -105,7 +118,7 @@ def _global_sample_times(
             )
         count = math.floor(interval_count)
         requested = start_s + interval * np.arange(count + 1, dtype=float)
-        requested = requested[requested <= end_s + tolerance]
+        requested = requested[requested <= np.nextafter(end_s, math.inf)]
     merged = _merge_with_boundaries(requested, boundaries)
     if merged.size > _MAX_SAVED_POINTS:
         raise ModelConfigurationError(
@@ -120,13 +133,12 @@ def _segment_sample_times(
 ) -> np.ndarray | None:
     if global_times is None:
         return None
-    tolerance = _time_tolerance(segment.start_s, segment.end_s)
     selected = global_times[
-        (global_times >= segment.start_s - tolerance)
-        & (global_times <= segment.end_s + tolerance)
+        (global_times >= np.nextafter(segment.start_s, -math.inf))
+        & (global_times <= np.nextafter(segment.end_s, math.inf))
     ].copy()
-    selected[np.abs(selected - segment.start_s) <= tolerance] = segment.start_s
-    selected[np.abs(selected - segment.end_s) <= tolerance] = segment.end_s
+    selected[_times_coincide_array(selected, segment.start_s)] = segment.start_s
+    selected[_times_coincide_array(selected, segment.end_s)] = segment.end_s
     if (
         selected.size < 2
         or selected[0] != segment.start_s
@@ -185,12 +197,17 @@ class _ScaledSegmentRHS:
 
 
 @dataclass(frozen=True, slots=True)
-class _QuasiSteadyEvent:
+class _QuasiSteadyObservation:
+    """Observe a local quasi-steady candidate without truncating integration."""
+
     rhs: Callable[[float, np.ndarray], np.ndarray]
     earliest_s: float
+    end_s: float
     gate_scale_s: float
     relative_rhs_norm_s_inv: float
-    terminal: bool = True
+    rtol: float
+    atol: float
+    terminal: bool = False
     direction: float = -1.0
 
     def __call__(self, time_s: float, scaled_state: np.ndarray) -> float:
@@ -204,21 +221,31 @@ class _QuasiSteadyEvent:
         relative_residual = (
             float(np.max(np.abs(derivative) / scale)) - self.relative_rhs_norm_s_inv
         )
-        return max(time_gate, relative_residual)
+        remaining_s = max(self.end_s - time_s, 0.0)
+        solver_error_budget = self.atol + self.rtol * np.abs(scaled_state)
+        remaining_change_residual = (
+            float(np.max(remaining_s * np.abs(derivative) / solver_error_budget)) - 1.0
+        )
+        return max(time_gate, relative_residual, remaining_change_residual)
 
 
-def _quasi_steady_event(
+def _quasi_steady_observation(
     rhs: Callable[[float, np.ndarray], np.ndarray],
     segment: RecipeSegment,
     *,
     relative_rhs_norm_s_inv: float,
     min_time_s: float,
-) -> _QuasiSteadyEvent:
-    return _QuasiSteadyEvent(
+    rtol: float,
+    atol: float,
+) -> _QuasiSteadyObservation:
+    return _QuasiSteadyObservation(
         rhs=rhs,
         earliest_s=segment.start_s + min_time_s,
+        end_s=segment.end_s,
         gate_scale_s=max(segment.end_s - segment.start_s, 1.0e-300),
         relative_rhs_norm_s_inv=relative_rhs_norm_s_inv,
+        rtol=rtol,
+        atol=atol,
     )
 
 
@@ -249,44 +276,10 @@ def _validate_experimental_quasi_steady(model: CompiledGlobalModel) -> None:
         )
 
 
-def _steady_event_state(solution: Any) -> tuple[float, np.ndarray] | None:
-    if not solution.t_events or not len(solution.t_events[0]):
-        return None
-    return (
-        float(solution.t_events[0][-1]),
-        np.asarray(solution.y_events[0][-1], dtype=float),
-    )
+def _observed_quasi_steady(solution: Any) -> bool:
+    """Return whether the nonterminal diagnostic crossed its threshold."""
 
-
-def _segment_output(
-    solution: Any,
-    requested_times: np.ndarray | None,
-    segment: RecipeSegment,
-    steady_event: tuple[float, np.ndarray] | None,
-    state_scale: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    solver_time = np.asarray(solution.t, dtype=float)
-    solver_state = np.asarray(solution.y, dtype=float).T * state_scale
-    if steady_event is None:
-        return solver_time, solver_state
-
-    event_time, scaled_event_state = steady_event
-    event_state = scaled_event_state * state_scale
-    if requested_times is not None:
-        output_state = np.repeat(event_state[None, :], requested_times.size, axis=0)
-        output_state[: solver_time.size, :] = solver_state
-        return np.array(requested_times, copy=True), output_state
-
-    tolerance = _time_tolerance(segment.start_s, segment.end_s)
-    output_time = np.array(solver_time, copy=True)
-    output_state = np.array(solver_state, copy=True)
-    if not output_time.size or abs(output_time[-1] - event_time) > tolerance:
-        output_time = np.append(output_time, event_time)
-        output_state = np.vstack((output_state, event_state))
-    if event_time < segment.end_s - tolerance:
-        output_time = np.append(output_time, segment.end_s)
-        output_state = np.vstack((output_state, event_state))
-    return output_time, output_state
+    return bool(solution.t_events and len(solution.t_events[0]))
 
 
 def _accepted_state_for_result(
@@ -386,7 +379,6 @@ def _segment_solver_options(
     scaled_initial_state: np.ndarray,
     controls: SolverSettings,
     sample_times: np.ndarray | None,
-    stop_threshold: float | None,
 ) -> dict[str, object]:
     options: dict[str, object] = {
         "fun": scaled_rhs,
@@ -403,12 +395,15 @@ def _segment_solver_options(
         options["first_step"] = controls.first_step_s
     if controls.max_step_s is not None:
         options["max_step"] = controls.max_step_s
+    stop_threshold = controls.experimental_quasi_steady_threshold_s_inv
     if stop_threshold is not None:
-        options["events"] = _quasi_steady_event(
+        options["events"] = _quasi_steady_observation(
             scaled_rhs,
             segment,
             relative_rhs_norm_s_inv=stop_threshold,
             min_time_s=controls.experimental_quasi_steady_min_time_s,
+            rtol=controls.rtol,
+            atol=controls.atol,
         )
     return options
 
@@ -451,23 +446,12 @@ def _call_segment_solver(
 
 def _completed_segment_output(
     solution: Any,
-    sample_times: np.ndarray | None,
-    segment: RecipeSegment,
     state_scale: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
-    steady_event = _steady_event_state(solution)
-    if steady_event is None:
-        current_state = np.asarray(solution.y[:, -1], dtype=float) * state_scale
-    else:
-        current_state = steady_event[1] * state_scale
-    time_s, state = _segment_output(
-        solution,
-        sample_times,
-        segment,
-        steady_event,
-        state_scale,
-    )
-    return current_state, time_s, state, steady_event is not None
+    time_s = np.asarray(solution.t, dtype=float)
+    state = np.asarray(solution.y, dtype=float).T * state_scale
+    current_state = np.asarray(solution.y[:, -1], dtype=float) * state_scale
+    return current_state, time_s, state, _observed_quasi_steady(solution)
 
 
 @dataclass(slots=True)
@@ -490,7 +474,7 @@ class _IntegrationHistory:
         solution: Any,
         time_s: np.ndarray,
         state: np.ndarray,
-        stopped_quasi_steady: bool,
+        observed_quasi_steady: bool,
     ) -> None:
         if segment_index > 0 and time_s.size:
             time_s = time_s[1:]
@@ -509,7 +493,7 @@ class _IntegrationHistory:
         self.nlu += int(getattr(solution, "nlu", 0) or 0)
         self.completed_segments += 1
         self.saved_points = saved_points
-        self.quasi_steady_events += int(stopped_quasi_steady)
+        self.quasi_steady_events += int(observed_quasi_steady)
 
     def arrays(self, state_size: int) -> tuple[np.ndarray, np.ndarray]:
         time_s = (
@@ -536,6 +520,16 @@ class _IntegrationHistory:
         return stats
 
 
+def _sampling_mode(
+    controls: SolverSettings, global_sample_times: np.ndarray | None
+) -> str:
+    if global_sample_times is None:
+        return "native"
+    if controls.sample_interval_s is not None:
+        return "sample_interval"
+    return "save_at"
+
+
 def _result_metadata(
     model: CompiledGlobalModel,
     controls: SolverSettings,
@@ -544,12 +538,6 @@ def _result_metadata(
     physical_domain_atol: np.ndarray,
     zeroed_negative_count: int,
 ) -> dict[str, object]:
-    if global_sample_times is None:
-        sampling_mode = "native"
-    elif controls.sample_interval_s is not None:
-        sampling_mode = "sample_interval"
-    else:
-        sampling_mode = "save_at"
     return {
         "electron_closure": model.electron_closure.mode,
         "jacobian_sparsity_nnz": model.jac_sparsity.nnz,
@@ -562,7 +550,12 @@ def _result_metadata(
             if controls.experimental_quasi_steady_threshold_s_inv is None
             else _EXPERIMENTAL_QUASI_STEADY_MODEL_ID
         ),
-        "sampling_mode": sampling_mode,
+        "experimental_quasi_steady_event_mode": (
+            None
+            if controls.experimental_quasi_steady_threshold_s_inv is None
+            else "nonterminal_observation_v1"
+        ),
+        "sampling_mode": _sampling_mode(controls, global_sample_times),
         "provenance": {
             "accepted_state_negative_policy": (
                 "At solver-to-result construction, states with zero lower bound store "
@@ -619,14 +612,11 @@ def solve_compiled_model(
             current_state / state_scale,
             controls,
             sample_times,
-            stop_threshold,
         )
         solution = _call_segment_solver(segment, scaled_rhs, options)
-        current_state, segment_time, segment_state, stopped_quasi_steady = (
+        current_state, segment_time, segment_state, observed_quasi_steady = (
             _completed_segment_output(
                 solution,
-                sample_times,
-                segment,
                 state_scale,
             )
         )
@@ -635,7 +625,7 @@ def solve_compiled_model(
             solution=solution,
             time_s=segment_time,
             state=segment_state,
-            stopped_quasi_steady=stopped_quasi_steady,
+            observed_quasi_steady=observed_quasi_steady,
         )
 
     time_s, raw_state = history.arrays(model.layout.size)

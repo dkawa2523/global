@@ -27,6 +27,22 @@ class IntegrationError(PlasmaGlobalError, RuntimeError):
     """The time integrator failed or produced a materially invalid state."""
 
 
+class CoreModelError(PlasmaGlobalError):
+    """Base class for failures raised while compiling or evaluating a model."""
+
+
+class ModelConfigurationError(CaseValidationError, CoreModelError):
+    """The supplied model cannot define one unambiguous physical system."""
+
+
+class StateDomainError(ModelDomainError, CoreModelError):
+    """An evolving state is outside the validity domain of its model."""
+
+
+class QuasineutralityError(StateDomainError):
+    """Heavy-particle charge implies a negative electron density."""
+
+
 class MigrationError(PlasmaGlobalError, ValueError):
     """A legacy case cannot be converted without an explicit user choice."""
 
@@ -34,9 +50,13 @@ class MigrationError(PlasmaGlobalError, ValueError):
 __all__ = [
     "CaseValidationError",
     "ChemistryError",
+    "CoreModelError",
     "CouplingConvergenceError",
     "IntegrationError",
     "MigrationError",
+    "ModelConfigurationError",
     "ModelDomainError",
     "PlasmaGlobalError",
+    "QuasineutralityError",
+    "StateDomainError",
 ]

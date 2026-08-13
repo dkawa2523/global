@@ -8,6 +8,8 @@ from pathlib import Path
 
 import plasma_global
 import plasma_global.api
+from plasma_global import errors
+from plasma_global.core import exceptions as legacy_core_exceptions
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "plasma_global" / "core"
@@ -81,6 +83,14 @@ def test_core_imports_only_core_models_and_shared_errors() -> None:
             offenders[path.relative_to(ROOT).as_posix()] = rejected
 
     assert offenders == {}
+
+
+def test_core_exception_imports_are_compatibility_aliases() -> None:
+    assert (
+        legacy_core_exceptions.ModelConfigurationError is errors.ModelConfigurationError
+    )
+    assert legacy_core_exceptions.StateDomainError is errors.StateDomainError
+    assert legacy_core_exceptions.QuasineutralityError is errors.QuasineutralityError
 
 
 def test_compiled_power_path_has_no_dynamic_configuration_contract() -> None:

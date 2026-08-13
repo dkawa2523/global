@@ -206,10 +206,167 @@ def test_maxwellian_constant_cross_section_matches_analytic_rate() -> None:
     assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(expected, rel=3.0e-4)
 
 
+def test_maxwellian_quadrature_resolves_zero_threshold_lower_tail() -> None:
+    sigma_m2 = 1.0e-20
+    cross_section = CrossSectionData(
+        id="constant-truncated-at-low-energy",
+        kind="momentum_transfer",
+        target="Ar",
+        threshold_eV=0.0,
+        energy_loss_eV=0.0,
+        energy_eV=np.geomspace(1.0e-3, 10.0, 4001),
+        sigma_m2=np.full(4001, sigma_m2),
+    )
+
+    axis, rate = compile_module.maxwell_rate_table(cross_section)
+    mean_energy_eV = axis[0]
+    electron_temperature_eV = (2.0 / 3.0) * mean_energy_eV
+    expected = sigma_m2 * np.sqrt(
+        8.0
+        * compile_module.E_CHARGE
+        * electron_temperature_eV
+        / (np.pi * compile_module.ELECTRON_MASS_KG)
+    )
+
+    assert rate[0] == pytest.approx(expected, rel=3.0e-4)
+
+
+def test_maxwellian_quadrature_keeps_positive_threshold_lower_tail_zero() -> None:
+    sigma_m2 = 1.0e-20
+    threshold_eV = 2.0
+    cross_section = CrossSectionData(
+        id="constant-above-threshold",
+        kind="ionization",
+        target="Ar",
+        threshold_eV=threshold_eV,
+        energy_loss_eV=threshold_eV,
+        energy_eV=np.linspace(threshold_eV, 200.0, 4001),
+        sigma_m2=np.full(4001, sigma_m2),
+    )
+    axis, rate = compile_module.maxwell_rate_table(cross_section)
+    mean_energy_eV = 2.0
+    electron_temperature_eV = (2.0 / 3.0) * mean_energy_eV
+    reduced_threshold = threshold_eV / electron_temperature_eV
+    full_constant_rate = sigma_m2 * np.sqrt(
+        8.0
+        * compile_module.E_CHARGE
+        * electron_temperature_eV
+        / (np.pi * compile_module.ELECTRON_MASS_KG)
+    )
+    expected = (
+        full_constant_rate * (1.0 + reduced_threshold) * np.exp(-reduced_threshold)
+    )
+
+    assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(expected, rel=3.0e-4)
+
+
 def test_rejects_unbalanced_reaction(tmp_path: Path) -> None:
     manifest = _mechanism(tmp_path, equation="e + Ar -> Ar_plus + Ar_plus + e")
     with pytest.raises(ChemistryError, match="conserve"):
         compile_chemistry(load_chemistry(manifest))
+
+
+@pytest.mark.parametrize(
+    "equation",
+    [
+        "2 e + Ar -> Ar_plus + e + e + e",
+        "e + 2 Ar -> Ar_plus + Ar + e + e",
+        "e + Ar + Ar_plus -> Ar_plus + Ar_plus + e + e",
+    ],
+)
+def test_electron_impact_requires_one_electron_target_collision(
+    tmp_path: Path, equation: str
+) -> None:
+    manifest = _mechanism(tmp_path, equation=equation)
+
+    with pytest.raises(
+        ChemistryError,
+        match="electron-impact reaction ionize must have exactly one unit electron",
+    ):
+        compile_chemistry(load_chemistry(manifest))
+
+
+@pytest.mark.parametrize(
+    "equation",
+    [
+        "2 Ar -> Ar_plus + Ar + e",
+        "Ar + Ar_plus -> 2 Ar_plus + e",
+    ],
+)
+def test_first_order_rate_requires_one_unit_reactant(
+    tmp_path: Path, equation: str
+) -> None:
+    manifest = _mechanism(tmp_path, equation=equation)
+    (tmp_path / "gas.csv").write_text(
+        f"id,equation,rate_model\nionize,{equation},decay\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "rates.yaml").write_text(
+        "rate_models:\n  decay:\n    kind: first_order\n    rate_s_inv: 1.0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ChemistryError,
+        match="first-order reaction ionize must have exactly one unit reactant",
+    ):
+        compile_chemistry(load_chemistry(manifest))
+
+
+def test_first_order_rate_accepts_one_unit_electron_reactant(tmp_path: Path) -> None:
+    manifest = _mechanism(tmp_path, equation="e -> e")
+    (tmp_path / "gas.csv").write_text(
+        "id,equation,rate_model\nrelax,e -> e,relaxation\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "rates.yaml").write_text(
+        "rate_models:\n  relaxation:\n    kind: first_order\n    rate_s_inv: 1.0\n",
+        encoding="utf-8",
+    )
+
+    chemistry = compile_chemistry(load_chemistry(manifest))
+
+    np.testing.assert_array_equal(chemistry.electron_orders, [1.0])
+    np.testing.assert_array_equal(chemistry.reactant_orders, [[0.0, 0.0]])
+
+
+def test_chemistry_compile_rejects_unsupported_surface_flux_shape() -> None:
+    rate_model = RateModelData("stick", "sticking", {"value": 0.2})
+    chemistry = ChemistryData(
+        source=Path("surface-shape.yaml"),
+        species=(
+            SpeciesData("e", "gas", -1, 0.00054858, {}),
+            SpeciesData("A", "gas", 0, 40.0, {"X": 1.0}),
+            SpeciesData(
+                "site",
+                "surface",
+                0,
+                0.0,
+                {"site": 1.0},
+                state_tags=frozenset({"site"}),
+            ),
+            SpeciesData("Ads", "surface", 0, 40.0, {"X": 1.0, "site": 1.0}),
+        ),
+        gas_reactions=(),
+        boundary_reactions=(),
+        surface_reactions=(
+            ReactionData(
+                "stick_twice",
+                {"A": 2.0, "site": 2.0},
+                {"Ads": 2.0},
+                rate_model.id,
+                None,
+            ),
+        ),
+        rate_models={rate_model.id: rate_model},
+        cross_sections={},
+    )
+
+    with pytest.raises(
+        ChemistryError,
+        match="sticking surface reaction stick_twice must have exactly one unit",
+    ):
+        compile_chemistry(chemistry)
 
 
 def test_rejects_nonmonotone_cross_section_without_repair(tmp_path: Path) -> None:

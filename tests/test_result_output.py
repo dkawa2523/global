@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import h5py
@@ -131,6 +132,29 @@ def test_result_h5_has_only_the_fixed_public_layout_and_round_trips(
         "model_ids": to_plain_mapping(result.metadata["model_ids"]),
         "provenance": to_plain_mapping(result.metadata["provenance"]),
     }
+
+
+def test_result_h5_round_trips_bohm_closure_provenance(tmp_path: Path) -> None:
+    result = _result()
+    metadata = to_plain_mapping(result.metadata)
+    metadata["provenance"]["wall_transport_closure"] = {
+        "bohm_h_factor": {
+            "version": "direct-multiplier-v2",
+            "surface_modes": {"wall": "numeric", "electrode": "auto"},
+        }
+    }
+
+    loaded = read_result_h5(
+        write_result_h5(
+            tmp_path / "result.h5",
+            replace(result, metadata=metadata),
+        )
+    )
+
+    assert (
+        to_plain_mapping(loaded.metadata)["provenance"]["wall_transport_closure"]
+        == metadata["provenance"]["wall_transport_closure"]
+    )
 
 
 def test_write_result_always_writes_exactly_h5_and_summary(tmp_path: Path) -> None:

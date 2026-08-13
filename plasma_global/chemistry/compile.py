@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from plasma_global.chemistry._contracts import surface_reaction_shape_error
 from plasma_global.chemistry.data import (
     ChemistryData,
     CrossSectionData,
@@ -239,6 +240,37 @@ def _bounded_interp(
     return float(np.interp(x, axis, values))
 
 
+def _maxwell_quadrature_curve(
+    cross_section: CrossSectionData,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Resolve the physical lower tail without changing the source curve."""
+
+    energy = cross_section.energy_eV
+    sigma = cross_section.sigma_m2
+    first_energy = float(energy[0])
+    threshold = cross_section.threshold_eV
+    if first_energy == 0.0:
+        return energy, sigma
+    begins_at_threshold = threshold > 0.0 and first_energy >= threshold
+    if begins_at_threshold:
+        zero_tail_end = np.nextafter(first_energy, 0.0)
+        return (
+            np.concatenate(([0.0, zero_tail_end], energy)),
+            np.concatenate(([0.0, 0.0], sigma)),
+        )
+    if sigma[0] == 0.0:
+        return np.insert(energy, 0, 0.0), np.insert(sigma, 0, 0.0)
+
+    # A curve with a finite first value explicitly represents a nonzero
+    # low-energy cross section. Resolve the missing interval on a private grid;
+    # the canonical CSV and runtime interpolation stay intact.
+    lower_energy = np.concatenate(
+        ([0.0], np.geomspace(first_energy * 1.0e-6, first_energy, 32)[:-1])
+    )
+    lower_sigma = np.full(lower_energy.shape, float(sigma[0]))
+    return np.concatenate((lower_energy, energy)), np.concatenate((lower_sigma, sigma))
+
+
 def maxwell_rate_table(
     cross_section: CrossSectionData,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -259,8 +291,7 @@ def maxwell_rate_table(
         _MAXWELL_TABLE_POINTS,
     )
     temperature = 2.0 * mean_energy / 3.0
-    energy = cross_section.energy_eV
-    sigma = cross_section.sigma_m2
+    energy, sigma = _maxwell_quadrature_curve(cross_section)
     prefactor = 2.0 / np.sqrt(np.pi) * np.sqrt(2.0 * E_CHARGE / ELECTRON_MASS_KG)
     rates = np.empty_like(mean_energy)
     for index, te_eV in enumerate(temperature):
@@ -470,15 +501,33 @@ def _validate_electron_impact_reaction(
             f"reaction {reaction.id} cannot use momentum-transfer cross section "
             f"{cross_section.id!r} as a reactive rate"
         )
-    if reaction.reactants.get("e", 0.0) <= 0.0:
+    target = cross_section.target
+    expected_reactants = {"e": 1.0, target: 1.0}
+    if reaction.reactants != expected_reactants:
         raise ChemistryError(
-            f"electron-impact reaction {reaction.id} must consume an electron"
+            f"electron-impact reaction {reaction.id} must have exactly one unit "
+            f"electron and one unit cross-section target {target!r} as reactants"
         )
-    if reaction.reactants.get(cross_section.target, 0.0) <= 0.0:
+
+
+def _validate_first_order_reaction(reaction: ReactionData) -> None:
+    if len(reaction.reactants) != 1 or next(iter(reaction.reactants.values())) != 1.0:
         raise ChemistryError(
-            f"electron-impact reaction {reaction.id} must consume cross-section "
-            f"target {cross_section.target!r}"
+            f"first-order reaction {reaction.id} must have exactly one unit reactant"
         )
+
+
+def _validate_gas_rate_shape(
+    data: ChemistryData,
+    reaction: ReactionData,
+    rate_model: RateModelData,
+) -> None:
+    """Validate reactant shapes required by non-mass-action rate evaluators."""
+
+    if rate_model.kind == "electron_impact":
+        _validate_electron_impact_reaction(reaction, rate_model, data.cross_sections)
+    elif rate_model.kind == "first_order":
+        _validate_first_order_reaction(reaction)
 
 
 def _validated_gas_rate_model(
@@ -498,8 +547,7 @@ def _validated_gas_rate_model(
             f"{reaction.rate_model!r}"
         )
     rate_model = data.rate_models[reaction.rate_model]
-    if rate_model.kind == "electron_impact":
-        _validate_electron_impact_reaction(reaction, rate_model, data.cross_sections)
+    _validate_gas_rate_shape(data, reaction, rate_model)
     return rate_model
 
 
@@ -550,18 +598,33 @@ def _compile_gas_reactions(
     )
 
 
+def _validate_surface_reaction(
+    data: ChemistryData,
+    reaction: ReactionData,
+    species_by_id: Mapping[str, SpeciesData],
+) -> None:
+    """Validate one surface reaction and its flux-driven rate contract."""
+
+    _validate_reaction_balance(reaction, species_by_id, boundary=False)
+    if reaction.rate_model not in data.rate_models:
+        raise ChemistryError(
+            f"surface reaction {reaction.id} references unknown rate model "
+            f"{reaction.rate_model!r}"
+        )
+    shape_error = surface_reaction_shape_error(
+        reaction, data.rate_models[reaction.rate_model], species_by_id
+    )
+    if shape_error is not None:
+        raise ChemistryError(shape_error)
+
+
 def _validate_non_gas_reactions(
     data: ChemistryData, species_by_id: Mapping[str, SpeciesData]
 ) -> None:
     for reaction in data.boundary_reactions:
         _validate_reaction_balance(reaction, species_by_id, boundary=True)
     for reaction in data.surface_reactions:
-        _validate_reaction_balance(reaction, species_by_id, boundary=False)
-        if reaction.rate_model not in data.rate_models:
-            raise ChemistryError(
-                f"surface reaction {reaction.id} references unknown rate model "
-                f"{reaction.rate_model!r}"
-            )
+        _validate_surface_reaction(data, reaction, species_by_id)
 
 
 def _compile_element_matrix(

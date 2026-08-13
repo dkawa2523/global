@@ -109,6 +109,7 @@ REQUIRED_IMPORT_DIRECTIONS = {
         "plasma_global.audit",
         "plasma_global.build",
         "plasma_global.cli",
+        "plasma_global.core",
         "plasma_global.experimental",
         "plasma_global.input",
         "plasma_global.output",

@@ -28,6 +28,7 @@ from plasma_global.models.power import (
 from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
 from plasma_global.models.walls import (
     BoundaryReaction,
+    CompiledWallBoundary,
     WallBoundary,
     WallEvaluation,
     compile_wall_boundary,
@@ -36,6 +37,19 @@ from plasma_global.models.walls import (
 
 E_CHARGE = 1.602176634e-19
 ELECTRON_MASS_KG = 9.1093837139e-31
+
+
+def test_compiled_wall_boundary_keeps_legacy_positional_constructor() -> None:
+    compiled = CompiledWallBoundary(
+        WallBoundary("z", 1.0),
+        np.array([1]),
+        np.array([1.0]),
+        np.array([6.6e-26]),
+        ((),),
+        True,
+    )
+
+    assert compiled.neutral_indices.size == 0
 
 
 def _evaluate_compiled_wall(
@@ -162,6 +176,33 @@ def test_evolved_gas_internal_energy_matches_wall_relaxation_analytic() -> None:
     )
 
 
+def test_evolved_gas_rejects_mismatched_transport_heat_capacities() -> None:
+    closure = HeavyEnergyClosure(
+        cv_over_kb=np.array([1.5, 1.5]),
+        wall_temperature_K=np.array([300.0]),
+        wall_relaxation_s_inv=np.zeros(1),
+    )
+    transport = CompiledTransport(
+        volumes_m3=np.array([1.0]),
+        pump_frequency_s_inv=np.zeros(1),
+        edge_from=np.array([], dtype=int),
+        edge_to=np.array([], dtype=int),
+        edge_conductance_m3_s=np.array([]),
+        n_species=2,
+        heavy_cv_over_kb=np.array([2.5, 2.5]),
+    )
+
+    with pytest.raises(ModelConfigurationError, match="heat capacities to match"):
+        CompiledGlobalModel(
+            chemistry=inert_chemistry(),
+            zones=(Zone("z", 1.0),),
+            segments=(RecipeSegment("flow", 0.0, 1.0),),
+            electron_closure=ElectronEnergyClosure(),
+            transport=transport,
+            heavy_energy_closure=closure,
+        )
+
+
 def test_heavy_energy_ledger_composes_power_reaction_flow_and_elastic_terms() -> None:
     chemistry = ChemistryFixture(
         species_ids=("A", "B", "ion"),
@@ -210,6 +251,7 @@ def test_heavy_energy_ledger_composes_power_reaction_flow_and_elastic_terms() ->
             edge_to=np.zeros(0, dtype=int),
             edge_conductance_m3_s=np.zeros(0),
             n_species=3,
+            heavy_cv_over_kb=closure.cv_over_kb,
         ),
         power_coordinator=coordinator,
         heavy_energy_closure=closure,

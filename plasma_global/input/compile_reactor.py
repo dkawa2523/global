@@ -46,7 +46,7 @@ from plasma_global.models.power import (
     PrescribedPowerPort,
 )
 from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
-from plasma_global.models.walls import BoundaryReaction, WallBoundary
+from plasma_global.models.walls import AutoBohmHFactor, BoundaryReaction, WallBoundary
 
 _BOLTZMANN_J_K = 1.380649e-23
 
@@ -79,7 +79,8 @@ def compile_initial_densities(
             unknown = set(densities) - set(species_index)
             if unknown:
                 raise CaseValidationError(
-                    f"zone {zone.zone_id!r} initializes unknown species {sorted(unknown)}"
+                    f"zone {zone.zone_id!r} initializes unknown species "
+                    f"{sorted(unknown)}"
                 )
             pressure_from_state = (
                 sum(densities.values()) * _BOLTZMANN_J_K * zone.gas_temperature_K
@@ -107,7 +108,8 @@ def compile_initial_densities(
             unknown = (set(fractions) | set(seeds)) - set(species_index)
             if unknown:
                 raise CaseValidationError(
-                    f"zone {zone.zone_id!r} initializes unknown species {sorted(unknown)}"
+                    f"zone {zone.zone_id!r} initializes unknown species "
+                    f"{sorted(unknown)}"
                 )
             nonneutral_fractions = [
                 species_id
@@ -123,7 +125,8 @@ def compile_initial_densities(
                 raise CaseValidationError(
                     f"zone {zone.zone_id!r} mole fractions must be neutral and seed "
                     "densities charged; invalid "
-                    f"fractions={sorted(nonneutral_fractions)}, seeds={sorted(neutral_seeds)}"
+                    f"fractions={sorted(nonneutral_fractions)}, "
+                    f"seeds={sorted(neutral_seeds)}"
                 )
             total_density = zone.pressure_Pa / (_BOLTZMANN_J_K * zone.gas_temperature_K)
             seed_density = sum(seeds.values())
@@ -263,8 +266,18 @@ def _compile_zones(case: CaseSpec) -> tuple[Zone, ...]:
     )
 
 
+def _transport_heat_capacities(
+    heavy_energy_closure: HeavyEnergyClosure | None,
+) -> np.ndarray | None:
+    if heavy_energy_closure is None:
+        return None
+    return heavy_energy_closure.cv_over_kb
+
+
 def _compile_static_transport(
-    case: CaseSpec, chemistry: CompiledChemistry
+    case: CaseSpec,
+    chemistry: CompiledChemistry,
+    heavy_energy_closure: HeavyEnergyClosure | None,
 ) -> CompiledTransport:
     zones = tuple(case.reactor.zones)
     zone_index = {zone.zone_id: index for index, zone in enumerate(zones)}
@@ -285,6 +298,7 @@ def _compile_static_transport(
             [edge.conductance_m3_s for edge in case.reactor.edges]
         ),
         n_species=len(chemistry.species_ids),
+        heavy_cv_over_kb=_transport_heat_capacities(heavy_energy_closure),
     )
 
 
@@ -500,34 +514,24 @@ def _compile_power_ports(
     )
 
 
-def _auto_bohm_factor(
+def _bohm_h_factor(
     case: CaseSpec,
-    chemistry: CompiledChemistry,
-    initial_densities: Mapping[str, Mapping[str, float]],
     surface: SurfaceConfig,
-) -> float:
+) -> tuple[float, AutoBohmHFactor | None]:
     config = surface.wall_transport
     if not isinstance(config, BohmWallTransport):
-        raise TypeError("_auto_bohm_factor requires Bohm wall transport")
+        raise TypeError("_bohm_h_factor requires Bohm wall transport")
     if config.h_factor != "auto":
-        return 0.61 * float(config.h_factor)
+        return config.h_factor, None
     zone = next(item for item in case.reactor.zones if item.zone_id == surface.zone_id)
-    neutral_species = {
-        species_id
-        for species_id, charge in zip(chemistry.species_ids, chemistry.charges)
-        if charge == 0.0
-    }
-    neutral_density = sum(
-        density
-        for species_id, density in initial_densities[zone.zone_id].items()
-        if species_id in neutral_species
-    )
     length = config.characteristic_length_m or zone.volume_m3 / surface.area_m2
-    mean_free_path = 1.0 / max(
-        neutral_density * config.ion_neutral_cross_section_m2, 1.0e-300
+    closure = AutoBohmHFactor(
+        characteristic_length_m=length,
+        ion_neutral_cross_section_m2=config.ion_neutral_cross_section_m2,
+        min_h_factor=config.min_h_factor,
+        max_h_factor=config.max_h_factor,
     )
-    factor = 0.86 / math.sqrt(3.0 + length / (2.0 * mean_free_path))
-    return 0.61 * min(max(factor, config.min_h_factor), config.max_h_factor)
+    return 1.0, closure
 
 
 def _compile_wall_boundary(
@@ -542,6 +546,7 @@ def _compile_wall_boundary(
     prescribed_frequency_s_inv: float | None = None,
     diffusion_coefficient_m2_s: float | None = None,
     diffusion_length_m: float | None = None,
+    auto_bohm_h_factor: AutoBohmHFactor | None = None,
 ) -> WallBoundary:
     """Bind typed compiled boundary reactions to one reactor surface."""
 
@@ -567,13 +572,13 @@ def _compile_wall_boundary(
         prescribed_frequency_s_inv=prescribed_frequency_s_inv,
         diffusion_coefficient_m2_s=diffusion_coefficient_m2_s,
         diffusion_length_m=diffusion_length_m,
+        auto_bohm_h_factor=auto_bohm_h_factor,
     )
 
 
 def _compile_walls(
     case: CaseSpec,
     chemistry: CompiledChemistry,
-    initial_densities: Mapping[str, Mapping[str, float]],
 ) -> tuple[WallBoundary, ...]:
     walls: list[WallBoundary] = []
     for surface in case.reactor.surfaces:
@@ -581,6 +586,7 @@ def _compile_walls(
         if isinstance(transport, OffWallTransport):
             continue
         if isinstance(transport, BohmWallTransport):
+            bohm_factor, auto_bohm_h_factor = _bohm_h_factor(case, surface)
             boundary = _compile_wall_boundary(
                 chemistry,
                 zone_id=surface.zone_id,
@@ -588,9 +594,8 @@ def _compile_walls(
                 surface_id=surface.surface_id,
                 sheath_energy_eV=surface.ion_impact_energy_eV,
                 transport_kind="bohm",
-                bohm_factor=_auto_bohm_factor(
-                    case, chemistry, initial_densities, surface
-                ),
+                bohm_factor=bohm_factor,
+                auto_bohm_h_factor=auto_bohm_h_factor,
             )
         elif isinstance(transport, PrescribedFrequencyWallTransport):
             boundary = _compile_wall_boundary(
@@ -631,15 +636,20 @@ def compile_reactor(
     external_tables: ExternalTableStore,
     initial_densities: Mapping[str, Mapping[str, float]],
 ) -> CompiledReactor:
-    """Compile topology, transport, walls, and typed power ports."""
+    """Compile topology, transport, walls, and typed power ports.
+
+    ``initial_densities`` remains in this adapter API for compatibility. Dynamic
+    wall closures deliberately read the evolving state instead of this snapshot.
+    """
 
     validate_surface_initial_conditions(case, chemistry_data)
+    heavy_energy_closure = _compile_heavy_energy(case, chemistry_data, chemistry)
     return CompiledReactor(
         zones=_compile_zones(case),
-        transport=_compile_static_transport(case, chemistry),
-        wall_boundaries=_compile_walls(case, chemistry, initial_densities),
+        transport=_compile_static_transport(case, chemistry, heavy_energy_closure),
+        wall_boundaries=_compile_walls(case, chemistry),
         power_coordinator=_compile_power_ports(case, chemistry, external_tables),
-        heavy_energy_closure=_compile_heavy_energy(case, chemistry_data, chemistry),
+        heavy_energy_closure=heavy_energy_closure,
         surface_model=_compile_surface_model(case, chemistry_data, chemistry),
     )
 

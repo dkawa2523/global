@@ -1,29 +1,15 @@
-"""Domain-specific failures for the compact global-model core."""
+"""Compatibility imports for the public model exception hierarchy.
 
-from __future__ import annotations
+Model implementations depend on :mod:`plasma_global.errors`, the shared lower
+layer.  This module remains as a stable import path for existing callers.
+"""
 
 from plasma_global.errors import (
-    CaseValidationError,
-    ModelDomainError,
-    PlasmaGlobalError,
+    CoreModelError,
+    ModelConfigurationError,
+    QuasineutralityError,
+    StateDomainError,
 )
-
-
-class CoreModelError(PlasmaGlobalError):
-    """Base class for failures raised by the compiled core."""
-
-
-class ModelConfigurationError(CaseValidationError, CoreModelError):
-    """The supplied model cannot define one unambiguous physical system."""
-
-
-class StateDomainError(ModelDomainError, CoreModelError):
-    """An ODE state is outside the physical domain of the selected model."""
-
-
-class QuasineutralityError(StateDomainError):
-    """Heavy-particle charge implies a negative quasineutral electron density."""
-
 
 __all__ = [
     "CoreModelError",

@@ -99,6 +99,12 @@ def test_case_audit_reports_missing_momentum_cross_section_target() -> None:
     assert [(issue.level, issue.quantity) for issue in missing] == [("WARNING", "Ar")]
     assert report.model_ids["elastic_heating"] is None
     assert report.provenance["missing_momentum_cross_section_targets"] == ["Ar"]
+    assert report.provenance["wall_transport_closure"] == {
+        "bohm_h_factor": {
+            "version": "direct-multiplier-v2",
+            "surface_modes": {"wall": "numeric"},
+        }
+    }
     assert report.simulation["status"]["success"] is True
     assert report.simulation["time_count"] > 1
     assert report.classification == "standard"

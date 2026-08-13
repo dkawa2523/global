@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
 
@@ -13,6 +14,7 @@ def test_interzone_transport_conserves_volume_integrals() -> None:
         edge_to=np.array([1]),
         edge_conductance_m3_s=np.array([0.2]),
         n_species=2,
+        heavy_cv_over_kb=np.array([1.5, 1.5]),
     )
     forcing = SegmentTransport(np.zeros((2, 2)), np.zeros(2))
     density = np.array([[10.0, 20.0], [1.0, 2.0]])
@@ -24,8 +26,10 @@ def test_interzone_transport_conserves_volume_integrals() -> None:
     )
 
     np.testing.assert_allclose(network.volumes_m3 @ density_rhs, 0.0, atol=1.0e-15)
-    assert electron_rhs is not None and abs(network.volumes_m3 @ electron_rhs) < 1.0e-15
-    assert heavy_rhs is not None and abs(network.volumes_m3 @ heavy_rhs) < 1.0e-15
+    assert electron_rhs is not None
+    assert abs(network.volumes_m3 @ electron_rhs) < 1.0e-15
+    assert heavy_rhs is not None
+    assert abs(network.volumes_m3 @ heavy_rhs) < 1.0e-15
 
 
 def test_inlet_and_pump_are_compiled_sources() -> None:
@@ -36,6 +40,7 @@ def test_inlet_and_pump_are_compiled_sources() -> None:
         edge_to=np.array([], dtype=int),
         edge_conductance_m3_s=np.array([]),
         n_species=1,
+        heavy_cv_over_kb=np.array([1.5]),
     )
     forcing = SegmentTransport(np.array([[3.0]]), np.array([4.0]))
     density_rhs, electron_rhs, heavy_rhs = network.evaluate(
@@ -46,4 +51,51 @@ def test_inlet_and_pump_are_compiled_sources() -> None:
     )
     np.testing.assert_allclose(density_rhs, [[2.0]])
     np.testing.assert_allclose(electron_rhs, [-3.0])
-    np.testing.assert_allclose(heavy_rhs, [0.0])
+    np.testing.assert_allclose(heavy_rhs, [4.0 - 0.5 * 8.0 * (1.0 + 1.0 / 1.5)])
+
+
+def test_heavy_particle_flow_transports_enthalpy() -> None:
+    network = CompiledTransport(
+        volumes_m3=np.array([2.0, 4.0]),
+        pump_frequency_s_inv=np.array([0.5, 0.0]),
+        edge_from=np.array([0]),
+        edge_to=np.array([1]),
+        edge_conductance_m3_s=np.array([0.2]),
+        n_species=1,
+        heavy_cv_over_kb=np.array([1.5]),
+    )
+    forcing = SegmentTransport(np.zeros((2, 1)), np.array([4.0, 0.0]))
+    density = np.array([[10.0], [1.0]])
+    internal_energy = np.array([12.0, 3.0])
+
+    _, _, heavy_rhs = network.evaluate(
+        density,
+        forcing,
+        heavy_energy_J_m3=internal_energy,
+    )
+
+    assert heavy_rhs is not None
+    source_enthalpy = (1.0 + 1.0 / 1.5) * internal_energy[0]
+    expected_source = 4.0 - (0.5 + 0.2 / 2.0) * source_enthalpy
+    expected_target = (0.2 / 4.0) * source_enthalpy
+    np.testing.assert_allclose(heavy_rhs, [expected_source, expected_target])
+    pump_loss = 0.5 * 2.0 * source_enthalpy
+    assert network.volumes_m3 @ heavy_rhs == pytest.approx(8.0 - pump_loss)
+
+
+def test_heavy_energy_transport_rejects_missing_heat_capacity() -> None:
+    network = CompiledTransport(
+        volumes_m3=np.array([1.0]),
+        pump_frequency_s_inv=np.array([0.5]),
+        edge_from=np.array([], dtype=int),
+        edge_to=np.array([], dtype=int),
+        edge_conductance_m3_s=np.array([]),
+        n_species=1,
+    )
+
+    with pytest.raises(ValueError, match="requires heavy_cv_over_kb"):
+        network.evaluate(
+            np.array([[2.0]]),
+            SegmentTransport.zeros(1, 1),
+            heavy_energy_J_m3=np.array([8.0]),
+        )
