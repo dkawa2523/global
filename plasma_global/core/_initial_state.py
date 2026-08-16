@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from plasma_global.core._runtime_state import RuntimeStatePreparer
 from plasma_global.core.domain import InitialState
-from plasma_global.core.exceptions import ModelConfigurationError
+from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.electrons import ELEMENTARY_CHARGE_C
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ def _pack_zone_state(
         )
         state[model.layout.density_slices[zone_id]] = density
         density_rows.append(density)
-        electron_density = model._electron_density(
+        electron_density = RuntimeStatePreparer(model).electron_density(
             first_segment.start_s,
             zone_id,
             float(model.charges @ density),

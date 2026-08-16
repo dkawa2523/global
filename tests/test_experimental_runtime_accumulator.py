@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from plasma_global.experimental.accumulators import (
+    FilmInventoryAccumulator,
     GenericStateAccumulator,
     ProcessContext,
     SurfaceEventRate,
@@ -146,6 +147,18 @@ def test_runtime_layout_and_rhs_combine_film_inventory_and_generic_state() -> No
         "extra[surface_marker,wall_a]",
     )
     assert runtime.lower_bounds == (0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0, 0.0, None, None)
+    assert runtime.upper_bounds == (
+        None,
+        None,
+        None,
+        None,
+        None,
+        5.0,
+        None,
+        None,
+        None,
+        None,
+    )
     expected_initial = [0.0, 0.0, 2.0, 1.0, 3.0, 1.0, 2.0, 2.0, -1.0, -1.0]
     initial = runtime.initial_state()
     np.testing.assert_array_equal(initial, expected_initial)
@@ -203,6 +216,165 @@ def test_runtime_normalizes_numpy_scalar_inventory_and_event_rates() -> None:
 
     assert type(runtime.initial_inventory_by_surface["wall"]["A"]) is float
     np.testing.assert_array_equal(numpy_rate, python_rate)
+
+
+def test_runtime_surface_plan_preserves_order_without_runtime_dtos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = (
+        SurfaceEventRate(
+            event_id="a",
+            zone_id="plasma",
+            surface_id="wall",
+            rate_m2_s=0.0,
+            area_m2=1.7,
+            site_density_m2=3.1,
+            inventory_particles_per_event={"A": 0.7},
+            film_layers_per_event=0.3,
+        ),
+        SurfaceEventRate(
+            event_id="b",
+            zone_id="plasma",
+            surface_id="wall",
+            rate_m2_s=0.0,
+            area_m2=2.3,
+            site_density_m2=7.9,
+            inventory_particles_per_event={"A": -0.2},
+            film_layers_per_event=-0.11,
+        ),
+        SurfaceEventRate(
+            event_id="c",
+            zone_id="plasma",
+            surface_id="wall",
+            rate_m2_s=0.0,
+            area_m2=0.13,
+            site_density_m2=2.2,
+            inventory_particles_per_event={"A": 4.2},
+            film_layers_per_event=0.07,
+        ),
+    )
+    runtime = ExperimentalRuntimeAccumulator(
+        film_surfaces=("wall",),
+        initial_inventory_by_surface={"wall": {"A": 0.0}},
+        surface_event_templates=events,
+        monolayer_thickness_m=3.0e-10,
+    )
+
+    def reject_runtime_dto(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("surface DTOs must not be rebuilt by the RHS")
+
+    monkeypatch.setattr(SurfaceEventRate, "__post_init__", reject_runtime_dto)
+    monkeypatch.setattr(FilmInventoryAccumulator, "__post_init__", reject_runtime_dto)
+    derivative = runtime.rhs(
+        runtime.initial_state(),
+        surface_rates_m2_s={"a": np.float32(0.11), "b": 1.3, "c": 9.7},
+    )
+
+    assert tuple(float(value).hex() for value in derivative) == (
+        "0x1.8d61a5ce6a3cbp-34",
+        "0x1.350ff971844d0p+2",
+    )
+
+
+def test_runtime_surface_plan_returns_before_zero_rate_accumulation() -> None:
+    class RejectMultiplication(float):
+        def __mul__(self, _other: object) -> float:
+            raise AssertionError("zero surface rates must return before accumulation")
+
+    runtime = ExperimentalRuntimeAccumulator(
+        film_surfaces=("wall",),
+        surface_event_templates=(
+            SurfaceEventRate(
+                event_id="event",
+                zone_id="plasma",
+                surface_id="wall",
+                rate_m2_s=0.0,
+                area_m2=RejectMultiplication(1.0),
+                site_density_m2=1.0,
+                film_layers_per_event=1.0,
+            ),
+        ),
+    )
+
+    np.testing.assert_array_equal(runtime.rhs(runtime.initial_state()), [0.0])
+
+
+def test_runtime_surface_plan_skips_unused_gas_accumulation() -> None:
+    template = SurfaceEventRate(
+        event_id="event",
+        zone_id="plasma",
+        surface_id="wall",
+        rate_m2_s=0.0,
+        area_m2=1.0,
+        site_density_m2=1.0,
+        gas_particles_per_event={"A": 1.0e308},
+        film_layers_per_event=1.0,
+    )
+    runtime = ExperimentalRuntimeAccumulator(
+        film_surfaces=("wall",), surface_event_templates=(template,)
+    )
+
+    derivative = runtime.rhs(
+        runtime.initial_state(), surface_rates_m2_s={"event": 10.0}
+    )
+
+    np.testing.assert_array_equal(derivative, [3.0e-9])
+    overflowing_event = SurfaceEventRate(
+        event_id="event",
+        zone_id="plasma",
+        surface_id="wall",
+        rate_m2_s=10.0,
+        area_m2=1.0,
+        site_density_m2=1.0,
+        gas_particles_per_event={"A": 1.0e308},
+        film_layers_per_event=1.0,
+    )
+    with pytest.raises(ValueError, match="surface accumulation must be finite"):
+        FilmInventoryAccumulator().accumulate((overflowing_event,))
+
+
+@pytest.mark.parametrize("rate", [-1.0, np.nan])
+def test_runtime_surface_plan_still_validates_dynamic_rates(rate: float) -> None:
+    runtime = ExperimentalRuntimeAccumulator(
+        film_surfaces=("wall",),
+        surface_event_templates=(
+            SurfaceEventRate(
+                event_id="event",
+                zone_id="plasma",
+                surface_id="wall",
+                rate_m2_s=0.0,
+                area_m2=1.0,
+                site_density_m2=1.0,
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError, match="surface event rate must be finite and nonnegative"
+    ):
+        runtime.rhs(runtime.initial_state(), surface_rates_m2_s={"event": rate})
+
+
+def test_runtime_surface_plan_preserves_deferred_monolayer_validation() -> None:
+    runtime = ExperimentalRuntimeAccumulator(
+        film_surfaces=("wall",),
+        surface_event_templates=(
+            SurfaceEventRate(
+                event_id="event",
+                zone_id="plasma",
+                surface_id="wall",
+                rate_m2_s=0.0,
+                area_m2=1.0,
+                site_density_m2=1.0,
+            ),
+        ),
+        monolayer_thickness_m=0.0,
+    )
+
+    with pytest.raises(
+        ValueError, match="monolayer_thickness_m must be finite and positive"
+    ):
+        runtime.rhs(runtime.initial_state())
 
 
 @pytest.mark.parametrize(

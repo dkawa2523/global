@@ -10,6 +10,7 @@ from plasma_global.models.external_table import (
     ExternalTableBinding,
     load_external_table,
 )
+from plasma_global.models.kinetics import TabulatedElectronKinetics
 from plasma_global.models.power import (
     CompiledPowerCommand,
     DCSeriesPort,
@@ -191,11 +192,10 @@ def test_dc_series_rejects_nonfinite_optional_parameters(
         )
 
 
-def test_dc_series_solves_local_field_on_prepared_mobility_axis() -> None:
-    class Kinetics:
-        axis = np.array([1.0, 100.0, 300.0])
-        mobility_m2_V_s = np.array([1.0, 0.5, 0.2])
-
+@pytest.mark.parametrize("neutral_density", [1.0e24, 2.0e24])
+def test_dc_series_solves_local_field_on_prepared_mobility_axis(
+    neutral_density: float,
+) -> None:
     port = DCSeriesPort(
         "dc",
         "plasma",
@@ -204,14 +204,27 @@ def test_dc_series_solves_local_field_on_prepared_mobility_axis() -> None:
         electrode_area_m2=5.0e-5,
     )
     electron_density = 1.0e17
-    neutral_density = 1.0e24
+    kinetics = TabulatedElectronKinetics(
+        source=Path("prepared.h5"),
+        lookup="local_field",
+        bounds="error",
+        axis=np.array([1.0, 100.0, 300.0]),
+        mean_energy_eV=np.array([1.0, 2.0, 3.0]),
+        mobility_m2_V_s=np.array([1.0, 0.5, 0.2]),
+        effective_field_Td=np.array([1.0, 100.0, 300.0]),
+        rate_tables={},
+        mobility_reference_neutral_density_m3=1.0e24,
+    )
     field = port.solve_local_field(
         electron_density_m3=electron_density,
         neutral_density_m3=neutral_density,
-        kinetics=Kinetics(),
+        kinetics=kinetics,
         command=CompiledPowerCommand(kind="voltage", voltage_V=1_000.0),
     )
-    mobility = float(np.interp(field, Kinetics.axis, Kinetics.mobility_m2_V_s))
+    mobility = kinetics.evaluate(
+        reduced_field_Td=field,
+        neutral_density_m3=neutral_density,
+    ).mobility_m2_V_s
     result = port.evaluate(
         0.0,
         PowerState(

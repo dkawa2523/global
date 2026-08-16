@@ -14,9 +14,12 @@ from plasma_global.core.domain import (
     SolverSettings,
     Zone,
 )
-from plasma_global.core.exceptions import ModelConfigurationError
 from plasma_global.core.solver import solve_compiled_model
-from plasma_global.errors import IntegrationError, ModelDomainError
+from plasma_global.errors import (
+    IntegrationError,
+    ModelConfigurationError,
+    ModelDomainError,
+)
 from plasma_global.models.electrons import ElectronEnergyClosure
 
 

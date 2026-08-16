@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 
 import numpy as np
 
@@ -10,6 +10,8 @@ from plasma_global.core.compiled import CompiledGlobalModel, ModelEvaluation
 from plasma_global.core.domain import RecipeSegment
 from plasma_global.errors import CaseValidationError
 from plasma_global.models.electrons import ElectronState
+
+_EvaluationObserver = Callable[[np.ndarray, ModelEvaluation], None]
 
 
 def _has_reduced_field_series(model: CompiledGlobalModel, zone_id: str) -> bool:
@@ -186,11 +188,14 @@ def _saved_point_observables(
     needs_power_ledger: bool,
     volume_by_zone: Mapping[str, float],
     selected: Collection[str],
+    evaluation_observer: _EvaluationObserver | None,
 ) -> tuple[dict[str, float], float, int]:
     segment, segment_index = _segment_for_saved_time(model, time_s, segment_index)
     evaluated = model.evaluate(
         time_s, state, segment, collect_ledger=needs_power_ledger
     )
+    if evaluation_observer is not None:
+        evaluation_observer(state, evaluated)
     observable_values: dict[str, float] = {}
     maximum_charge_residual = 0.0
     for zone_id, electrons in evaluated.electron_states.items():
@@ -219,17 +224,34 @@ def _requires_postprocessing(
     )
 
 
-def derive_observables_and_diagnostics(
+def _store_observable_values(
+    output: Mapping[str, np.ndarray],
+    values_by_name: Mapping[str, float],
+    time_index: int,
+    time_s: float,
+) -> None:
+    for name, values in output.items():
+        if name not in values_by_name:
+            raise ValueError(
+                f"observable {name!r} is undefined at saved time {time_s:g}"
+            )
+        values[time_index] = values_by_name[name]
+
+
+def _derive_observables_and_diagnostics(
     model: CompiledGlobalModel,
     time_s: np.ndarray,
     state: np.ndarray,
     names: Iterable[str],
+    *,
+    collect_ledger: bool = False,
+    evaluation_observer: _EvaluationObserver | None = None,
 ) -> tuple[Mapping[str, np.ndarray], dict[str, float]]:
-    """Create selected series and normal diagnostics in one saved-point pass."""
+    """Run one saved-point pass for output and optional internal diagnostics."""
 
     selected = validate_observable_selection(model, names)
     diagnostics = {"charge_closure_normalized": 0.0}
-    if not _requires_postprocessing(model, selected):
+    if evaluation_observer is None and not _requires_postprocessing(model, selected):
         # Quasineutrality is algebraic, so its residual is identically zero.  Do
         # not rerun the complete physical model after integration to prove it.
         return {}, diagnostics
@@ -241,7 +263,9 @@ def derive_observables_and_diagnostics(
         )
 
     output = {name: np.empty(times.size, dtype=float) for name in selected}
-    needs_power_ledger = any(name.startswith("absorbed_power_W[") for name in selected)
+    needs_power_ledger = collect_ledger or any(
+        name.startswith("absorbed_power_W[") for name in selected
+    )
     volume_by_zone = {zone.zone_id: zone.volume_m3 for zone in model.zones}
     segment_index = 0
     for time_index, (time, state_values) in enumerate(zip(times, states, strict=True)):
@@ -253,17 +277,24 @@ def derive_observables_and_diagnostics(
             needs_power_ledger=needs_power_ledger,
             volume_by_zone=volume_by_zone,
             selected=output,
+            evaluation_observer=evaluation_observer,
         )
         diagnostics["charge_closure_normalized"] = max(
             diagnostics["charge_closure_normalized"], normalized_residual
         )
-        for name, values in output.items():
-            if name not in values_by_name:
-                raise ValueError(
-                    f"observable {name!r} is undefined at saved time {float(time):g}"
-                )
-            values[time_index] = values_by_name[name]
+        _store_observable_values(output, values_by_name, time_index, float(time))
     return output, diagnostics
+
+
+def derive_observables_and_diagnostics(
+    model: CompiledGlobalModel,
+    time_s: np.ndarray,
+    state: np.ndarray,
+    names: Iterable[str],
+) -> tuple[Mapping[str, np.ndarray], dict[str, float]]:
+    """Create selected series and normal diagnostics in one saved-point pass."""
+
+    return _derive_observables_and_diagnostics(model, time_s, state, names)
 
 
 __all__ = [

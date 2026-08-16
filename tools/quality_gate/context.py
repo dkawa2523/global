@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[2]
 QUALITY_DIR = ROOT / "quality"
 REPORT_DIR = ROOT / ".quality-reports"
 BASELINE_PATH = QUALITY_DIR / "baseline.json"
-PYREFLY_BASELINE_PATH = QUALITY_DIR / "pyrefly-baseline.json"
 SECRETS_BASELINE_PATH = ROOT / ".secrets.baseline"
 SOURCE_PATHS = ("plasma_global", "tools")
 ALL_PYTHON_PATHS = (*SOURCE_PATHS, "tests")

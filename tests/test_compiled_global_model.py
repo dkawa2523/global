@@ -9,8 +9,8 @@ import pytest
 import plasma_global.core.compiled as compiled_module
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
-from plasma_global.core.exceptions import QuasineutralityError, StateDomainError
 from plasma_global.core.solver import solve_compiled_model
+from plasma_global.errors import QuasineutralityError, StateDomainError
 from plasma_global.models.electrons import (
     ELEMENTARY_CHARGE_C,
     ElectronEnergyClosure,
@@ -111,13 +111,47 @@ def test_compiled_facade_preserves_immutability_and_evaluation_paths() -> None:
     np.testing.assert_array_equal(bound_derivative, evaluation.derivative)
     assert not evaluation.derivative.flags.writeable
     assert not model.charges.flags.writeable
-    assert not model._active_reactions_by_zone["plasma"].flags.writeable
+    assert model._active_reaction_indices_by_zone["plasma"] == ()
     with pytest.raises(TypeError):
         model._zone_by_id["other"] = model.zones[0]
     with pytest.raises(TypeError):
         model._walls_by_zone["other"] = ()
     with pytest.raises(AttributeError, match="immutable after compilation"):
         model.segments = ()
+
+
+def test_standard_electron_energy_closure_is_evaluated_once_per_zone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closure = ElectronEnergyClosure()
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("plasma", 2.0),),
+        segments=(RecipeSegment("powered", 0.0, 1.0),),
+        electron_closure=closure,
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={"plasma": {"Ar": 1.0e20, "Ar_plus": 1.0e15}},
+            mean_energy_eV_by_zone={"plasma": 3.0},
+        )
+    )
+    original_evaluate = ElectronEnergyClosure.evaluate
+    calls = 0
+
+    def counted_evaluate(self: ElectronEnergyClosure, **values: float | None) -> object:
+        nonlocal calls
+        calls += 1
+        return original_evaluate(self, **values)
+
+    monkeypatch.setattr(ElectronEnergyClosure, "evaluate", counted_evaluate)
+
+    evaluation = model.evaluate(0.0, state, model.segments[0])
+
+    assert calls == 1
+    electron_state = evaluation.electron_states["plasma"]
+    assert electron_state.mean_energy_eV == 3.0
+    assert electron_state.temperature_eV == 2.0
 
 
 def test_mean_energy_and_electron_temperature_are_distinct() -> None:
@@ -130,6 +164,15 @@ def test_mean_energy_and_electron_temperature_are_distinct() -> None:
 
     assert state.mean_energy_eV == pytest.approx(3.0)
     assert state.temperature_eV == pytest.approx(2.0)
+
+
+def test_electron_energy_closure_rejects_nonfinite_mean_energy() -> None:
+    with pytest.raises(StateDomainError, match="mean energy must be finite"):
+        ElectronEnergyClosure().evaluate(
+            net_heavy_charge_density_m3=1.0e-300,
+            energy_density_J_m3=1.0,
+            reduced_field_Td=None,
+        )
 
 
 def test_quasineutral_closure_rejects_negative_electron_density_without_floor() -> None:
@@ -282,6 +325,8 @@ def test_mass_action_bdf_matches_first_order_analytic_solution() -> None:
         segments=(RecipeSegment("decay", 0.0, 1.0),),
         electron_closure=ElectronEnergyClosure(),
     )
+    assert model._chemistry_data.reactant_powers_by_reaction == (((0, 1.0),),)
+    assert model._active_reaction_indices_by_zone["z"] == (0,)
     initial_A = 1.0e18
     result = solve_compiled_model(
         model,
@@ -651,8 +696,8 @@ def test_wall_flux_and_boundary_return_share_one_ledger() -> None:
     assert record.branch_rates_m3_s["neutralize"] == pytest.approx(expected_rate)
     assert ion_rhs == pytest.approx(-expected_rate)
     assert neutral_rhs == pytest.approx(expected_rate)
-    floating_sheath_eV = (
-        0.5 * 2.0 * np.log(ARGON_MASS_KG / (2.0 * np.pi * ELECTRON_MASS_KG))
+    floating_sheath_eV = 2.0 * np.log(
+        np.sqrt(ARGON_MASS_KG / (2.0 * np.pi * ELECTRON_MASS_KG)) / 0.61
     )
     assert evaluated.ledger_by_zone["plasma"].wall_energy_loss_J_m3_s == pytest.approx(
         expected_rate * (4.0 + floating_sheath_eV) * ELEMENTARY_CHARGE_C

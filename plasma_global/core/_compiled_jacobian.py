@@ -10,6 +10,7 @@ from scipy.sparse import csr_matrix
 
 if TYPE_CHECKING:
     from plasma_global.core.compiled import CompiledGlobalModel
+    from plasma_global.models.power import PowerCoordinator
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,14 +99,48 @@ class JacobianBuilder:
                 pattern[np.ix_(coverage_indices, coverage_indices)] = True
 
     def _add_power_blocks(self, pattern: np.ndarray) -> None:
-        model = self.model
-        if (
-            model.power_coordinator is not None
-            and model.electron_closure.mode == "local_field"
-        ):
-            for zone_id in model.layout.zone_ids:
-                start, stop = self._zone_state_bounds(zone_id)
-                pattern[start:stop, start:stop] = True
+        coordinator = self.model.power_coordinator
+        if coordinator is None:
+            return
+        self._add_field_power_blocks(pattern, coordinator)
+        self._add_distributed_power_blocks(pattern, coordinator)
+
+    def _add_field_power_blocks(
+        self, pattern: np.ndarray, coordinator: PowerCoordinator
+    ) -> None:
+        for zone_id in self.model.layout.zone_ids:
+            if not any(
+                coordinator.has_reduced_field_source(zone_id, segment.port_commands)
+                for segment in self.model.segments
+            ):
+                continue
+            start, stop = self._zone_state_bounds(zone_id)
+            pattern[start:stop, start:stop] = True
+
+    def _add_distributed_power_blocks(
+        self, pattern: np.ndarray, coordinator: PowerCoordinator
+    ) -> None:
+        if not self.model.layout.evolves_electron_energy:
+            return
+        energy_indices = self.model.layout.electron_energy_indices
+        all_energy_rows = list(energy_indices.values())
+        for distributor in coordinator._zone_power_distributors:
+            target_ids = distributor.static_target_zone_ids
+            target_rows = (
+                all_energy_rows
+                if target_ids is None
+                else [
+                    energy_indices[target]
+                    for target in target_ids
+                    if target in energy_indices
+                ]
+            )
+            if not target_rows:
+                continue
+            source_start, source_stop = self._zone_state_bounds(
+                distributor.source_zone_id
+            )
+            pattern[target_rows, source_start:source_stop] = True
 
 
 __all__ = ["JacobianBuilder"]

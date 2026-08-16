@@ -50,6 +50,8 @@ local-field、evolved gas、surface kinetics、複数イオン・負イオン、
 現在のv3既定gridを省略形で選び、warningを残します。これは全chemistryに普遍的な有効範囲を仮定する
 処理ではありません。compile時に実際の断面積・混合比で全grid点のpower-balance rootを検証し、
 一つでも未収束ならcaseは失敗します。明示された旧gridは勝手にclipせず、そのまま検証します。
+旧 `mixture_key_species` と `cache.fraction_decimals` は、計算identityに作用しなかったため削除されます。
+変換後は全collision targetの厳密な組成比をcache keyとし、削除した指定はwarningへ記録します。
 
 `experimental.rf_envelope` / `experimental.ccp` の `absorbed_power_W` はv3では文字どおりplasma吸収
 実電力です。旧runtimeがこれをsource-side電力としてefficiencyやimpedanceを再乗算していた結果とは
@@ -58,8 +60,10 @@ CCPの`apparent_power_VA`を別々に確認してください。
 
 ## Chemistry 変換
 
-旧 chemistry の変換器は runtime 外の `tools/importers` にあります。通常は `migrate-v2` が
-bundle 作成時に呼びますが、単独でも実行できます。
+通常利用の主動線は上記の `plasma-global migrate-v2` です。chemistry とrate-tableの変換本体は
+installed CLIだけで完結するようruntime packageのprivate migration境界に含めています。
+source repositoryの `tools.importers.chemistry_v2` は、その変換器を単独検証する開発用facadeで、
+通常wheelには同梱しません。
 
 ```bash
 python -m tools.importers.chemistry_v2 \

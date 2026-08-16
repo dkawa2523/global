@@ -27,7 +27,14 @@ def _chemistry(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (tmp_path / "rates.yaml").write_text(
-        "rate_models:\n  stick:\n    kind: sticking\n    value: 0.1\n    coverage:\n      kind: site_blocking\n      site_species: wall:*\n      exponent: 1.0\n",
+        "rate_models:\n"
+        "  stick:\n"
+        "    kind: sticking\n"
+        "    value: 0.1\n"
+        "    coverage:\n"
+        "      kind: site_blocking\n"
+        "      site_species: wall:*\n"
+        "      exponent: 1.0\n",
         encoding="utf-8",
     )
     manifest = tmp_path / "chemistry.yaml"

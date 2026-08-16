@@ -31,6 +31,46 @@ def _optional_heavy_cv(value: object | None, n_species: int) -> np.ndarray | Non
     return heavy_cv
 
 
+def _validated_edges(
+    edge_from_value: object,
+    edge_to_value: object,
+    conductance_value: object,
+    n_zones: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    edge_from = np.asarray(edge_from_value, dtype=int)
+    edge_to = np.asarray(edge_to_value, dtype=int)
+    conductance = np.asarray(conductance_value, dtype=float)
+    if any(
+        (
+            edge_from.ndim != 1,
+            edge_to.shape != edge_from.shape,
+            conductance.shape != edge_from.shape,
+        )
+    ):
+        raise CaseValidationError("edge arrays must be equal one-dimensional arrays")
+    if any(
+        (
+            np.any(edge_from < 0),
+            np.any(edge_from >= n_zones),
+            np.any(edge_to < 0),
+            np.any(edge_to >= n_zones),
+        )
+    ):
+        raise CaseValidationError("edge indexes are outside the zone array")
+    if any(
+        (
+            np.any(edge_from == edge_to),
+            np.any(conductance < 0.0),
+            not np.all(np.isfinite(conductance)),
+        )
+    ):
+        raise CaseValidationError(
+            "edges must be directed between distinct zones with finite "
+            "nonnegative conductance"
+        )
+    return edge_from, edge_to, conductance
+
+
 def _validated_flow_energy(
     value: np.ndarray,
     *,
@@ -130,33 +170,12 @@ class CompiledTransport:
         pump = _readonly(self.pump_frequency_s_inv, (n_zones,), "pump_frequency_s_inv")
         if np.any(pump < 0.0):
             raise CaseValidationError("pump_frequency_s_inv must be nonnegative")
-        edge_from = np.asarray(self.edge_from, dtype=int)
-        edge_to = np.asarray(self.edge_to, dtype=int)
-        conductance = np.asarray(self.edge_conductance_m3_s, dtype=float)
-        if (
-            edge_from.ndim != 1
-            or edge_to.shape != edge_from.shape
-            or conductance.shape != edge_from.shape
-        ):
-            raise CaseValidationError(
-                "edge arrays must be equal one-dimensional arrays"
-            )
-        if (
-            np.any(edge_from < 0)
-            or np.any(edge_from >= n_zones)
-            or np.any(edge_to < 0)
-            or np.any(edge_to >= n_zones)
-        ):
-            raise CaseValidationError("edge indexes are outside the zone array")
-        if (
-            np.any(edge_from == edge_to)
-            or np.any(conductance < 0.0)
-            or not np.all(np.isfinite(conductance))
-        ):
-            raise CaseValidationError(
-                "edges must be directed between distinct zones with finite "
-                "nonnegative conductance"
-            )
+        edge_from, edge_to, conductance = _validated_edges(
+            self.edge_from,
+            self.edge_to,
+            self.edge_conductance_m3_s,
+            n_zones,
+        )
         if self.n_species <= 0:
             raise CaseValidationError("n_species must be positive")
         heavy_cv = _optional_heavy_cv(self.heavy_cv_over_kb, self.n_species)

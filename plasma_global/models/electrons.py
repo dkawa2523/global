@@ -111,7 +111,12 @@ class ElectronEnergyClosure:
                 )
             mean_energy = 0.0
         else:
-            mean_energy = energy / (density * ELEMENTARY_CHARGE_C)
+            denominator = density * ELEMENTARY_CHARGE_C
+            mean_energy = math.inf if denominator == 0.0 else energy / denominator
+            if not math.isfinite(mean_energy):
+                raise StateDomainError(
+                    "Electron mean energy must be finite at positive density"
+                )
         return ElectronState(
             density_m3=density,
             mean_energy_eV=mean_energy,

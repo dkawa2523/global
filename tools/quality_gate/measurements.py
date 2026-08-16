@@ -12,6 +12,7 @@ from tools.quality_gate.context import (
     SOURCE_PATHS,
     Finding,
     _capture,
+    _die,
     _finding_key,
     _git,
     _relative_path,
@@ -20,7 +21,15 @@ from tools.quality_gate.context import (
 
 def _ruff_findings(paths: Sequence[str]) -> list[Finding]:
     output = _capture(
-        ["ruff", "check", "--no-cache", "--output-format=json", *paths],
+        [
+            "ruff",
+            "check",
+            "--config",
+            str(ROOT / "pyproject.toml"),
+            "--no-cache",
+            "--output-format=json",
+            *paths,
+        ],
         allowed={0, 1},
     )
     payload = json.loads(output or "[]")
@@ -41,6 +50,8 @@ def _bandit_findings() -> list[Finding]:
         ["bandit", "-q", "-r", *SOURCE_PATHS, "-f", "json"], allowed={0, 1}
     )
     payload = json.loads(output or "{}")
+    if errors := payload.get("errors"):
+        _die("Bandit failed to scan source:\n  " + "\n  ".join(map(str, errors)))
     return [
         _finding_key(
             "bandit",
@@ -73,7 +84,7 @@ def _radon_complexity() -> dict[str, int]:
 def _vulture_findings() -> list[str]:
     output = _capture(
         ["vulture", *SOURCE_PATHS, "--min-confidence", "80"],
-        allowed={0, 1, 3},
+        allowed={0, 3},
     )
     return sorted(
         line.replace(str(ROOT), ".").strip()
@@ -86,7 +97,6 @@ def _tracked_files() -> list[str]:
     excluded = {
         ".secrets.baseline",
         "quality/baseline.json",
-        "quality/pyrefly-baseline.json",
     }
     return [
         path

@@ -87,7 +87,6 @@ reactor:
   power_ports:
   - port_id: source_rf
     zone_id: source
-    coupling_target: source
     model:
       kind: experimental.icp
       frequency_Hz: 13560000.0
@@ -167,11 +166,8 @@ recipe:
 models:
   electrons:
     kind: experimental.approximate_two_term
-    mixture_key_species:
-    - Ar
     cache:
       max_entries: 4
-      fraction_decimals: 4
     energy_grid:
       min_eV: 0.001
       max_eV: 160.0

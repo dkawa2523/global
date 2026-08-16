@@ -21,6 +21,35 @@ TD_TO_V_M2 = 1.0e-21
 _MAX_TERMINAL_BIN_PROBABILITY = 1.0e-3
 
 
+def _validate_collision_identity(
+    collision_id: str,
+    target_species: str,
+    kind: str,
+) -> None:
+    if not collision_id or not target_species:
+        raise ValueError("collision_id and target_species must not be empty")
+    if kind not in {"momentum", "inelastic"}:
+        raise ValueError("collision kind must be 'momentum' or 'inelastic'")
+
+
+def _validate_collision_tables(energy: np.ndarray, sigma: np.ndarray) -> None:
+    if energy.ndim != 1 or energy.size < 2 or sigma.shape != energy.shape:
+        raise ValueError(
+            "collision tables must be equal 1D arrays with at least two rows"
+        )
+    if not np.all(np.isfinite(energy)) or not np.all(np.isfinite(sigma)):
+        raise ValueError("collision tables must contain only finite values")
+    if np.any(energy < 0.0) or np.any(np.diff(energy) <= 0.0):
+        raise ValueError("collision energy must be nonnegative and strictly increasing")
+    if np.any(sigma < 0.0):
+        raise ValueError("cross sections must be nonnegative")
+
+
+def _validate_collision_energy_loss(energy_loss_eV: float) -> None:
+    if not math.isfinite(energy_loss_eV) or energy_loss_eV < 0.0:
+        raise ValueError("energy_loss_eV must be finite and nonnegative")
+
+
 def _validate_energy_grid(
     energy_min_eV: float, energy_max_eV: float, energy_points: int
 ) -> None:
@@ -92,24 +121,13 @@ class ElectronCollision:
     def __post_init__(self) -> None:
         energy = np.array(self.energy_eV, dtype=float, copy=True)
         sigma = np.array(self.cross_section_m2, dtype=float, copy=True)
-        if not self.collision_id or not self.target_species:
-            raise ValueError("collision_id and target_species must not be empty")
-        if self.kind not in {"momentum", "inelastic"}:
-            raise ValueError("collision kind must be 'momentum' or 'inelastic'")
-        if energy.ndim != 1 or energy.size < 2 or sigma.shape != energy.shape:
-            raise ValueError(
-                "collision tables must be equal 1D arrays with at least two rows"
-            )
-        if not np.all(np.isfinite(energy)) or not np.all(np.isfinite(sigma)):
-            raise ValueError("collision tables must contain only finite values")
-        if np.any(energy < 0.0) or np.any(np.diff(energy) <= 0.0):
-            raise ValueError(
-                "collision energy must be nonnegative and strictly increasing"
-            )
-        if np.any(sigma < 0.0):
-            raise ValueError("cross sections must be nonnegative")
-        if not math.isfinite(self.energy_loss_eV) or self.energy_loss_eV < 0.0:
-            raise ValueError("energy_loss_eV must be finite and nonnegative")
+        _validate_collision_identity(
+            self.collision_id,
+            self.target_species,
+            self.kind,
+        )
+        _validate_collision_tables(energy, sigma)
+        _validate_collision_energy_loss(self.energy_loss_eV)
         energy.setflags(write=False)
         sigma.setflags(write=False)
         object.__setattr__(self, "energy_eV", energy)
@@ -126,6 +144,39 @@ class ElectronCollision:
             ),
             dtype=float,
         )
+
+
+def _validated_target_mixture(
+    collisions: Sequence[ElectronCollision],
+    target_densities_m3: Mapping[str, float],
+) -> tuple[float, dict[str, float], dict[str, float]]:
+    target_ids = {collision.target_species for collision in collisions}
+    densities = {
+        target: float(target_densities_m3.get(target, 0.0)) for target in target_ids
+    }
+    if any(not math.isfinite(value) or value < 0.0 for value in densities.values()):
+        raise ValueError("target densities must be finite and nonnegative")
+    total_density = sum(densities.values())
+    if total_density <= 0.0:
+        raise ValueError("at least one collision target must have positive density")
+    fractions = {target: value / total_density for target, value in densities.items()}
+    return total_density, densities, fractions
+
+
+def _target_momentum_collisions(
+    collisions: Sequence[ElectronCollision],
+    target: str,
+) -> list[ElectronCollision]:
+    target_momentum = [
+        collision
+        for collision in collisions
+        if collision.target_species == target and collision.kind == "momentum"
+    ]
+    if not target_momentum:
+        raise ValueError(
+            f"positive-density target {target!r} needs a momentum cross section"
+        )
+    return target_momentum
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,33 +275,17 @@ class ApproximateTwoTermEEDF:
     def _mixture(
         self, target_densities_m3: Mapping[str, float]
     ) -> tuple[float, dict[str, float], np.ndarray, np.ndarray]:
-        target_ids = {collision.target_species for collision in self.collisions}
-        densities = {
-            target: float(target_densities_m3.get(target, 0.0)) for target in target_ids
-        }
-        if any(not math.isfinite(value) or value < 0.0 for value in densities.values()):
-            raise ValueError("target densities must be finite and nonnegative")
-        total_density = sum(densities.values())
-        if total_density <= 0.0:
-            raise ValueError("at least one collision target must have positive density")
-        fractions = {
-            target: value / total_density for target, value in densities.items()
-        }
+        total_density, densities, fractions = _validated_target_mixture(
+            self.collisions,
+            target_densities_m3,
+        )
 
         momentum = np.zeros_like(self.energy_eV)
         loss_sigma_eV = np.zeros_like(self.energy_eV)
         for target, fraction in fractions.items():
             if fraction == 0.0:
                 continue
-            target_momentum = [
-                collision
-                for collision in self.collisions
-                if collision.target_species == target and collision.kind == "momentum"
-            ]
-            if not target_momentum:
-                raise ValueError(
-                    f"positive-density target {target!r} needs a momentum cross section"
-                )
+            target_momentum = _target_momentum_collisions(self.collisions, target)
             for collision in target_momentum:
                 momentum += fraction * self._sigma_by_id[collision.collision_id]
             for collision in self.collisions:

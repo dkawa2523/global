@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import numpy as np
 
 from plasma_global.core.result import SimulationResult
+from plasma_global.postprocess import (
+    _derive_observables_and_diagnostics,
+    derive_observables_and_diagnostics,
+)
 
 _PARTICLE_LEDGER = "particle_ledger_normalized"
 _ELECTRON_ENERGY_LEDGER = "electron_energy_ledger_normalized"
@@ -25,12 +30,6 @@ def _initial_maxima(model: Any, include_detailed_ledgers: bool) -> dict[str, flo
     return maxima
 
 
-def _uses_prescribed_electrons(model: Any) -> bool:
-    return model.electron_density_provider is not None or any(
-        segment.prescribed_electron_density_m3_by_zone for segment in model.segments
-    )
-
-
 def _surface_source_vectors(compiled: Any) -> dict[str, np.ndarray]:
     model = compiled.model
     surface_model = model.surface_model
@@ -47,20 +46,6 @@ def _surface_source_vectors(compiled: Any) -> dict[str, np.ndarray]:
             source[species_index] += area_over_volume * delta
         sources[f"{kernel.reaction.id}@{surface.surface_id}"] = source
     return sources
-
-
-def _charge_residual(
-    model: Any, state: np.ndarray, evaluation: Any, zone: Any
-) -> float:
-    zone_id = zone.zone_id
-    density = state[model.layout.density_slices[zone_id]]
-    electrons = evaluation.electron_states[zone_id]
-    scale = max(
-        electrons.density_m3
-        + float(np.dot(np.abs(model.charges), np.maximum(density, 0.0))),
-        1.0,
-    )
-    return abs(evaluation.charge_residual_m3_by_zone[zone_id]) / scale
 
 
 def _wall_species_source(
@@ -186,10 +171,53 @@ def _update_detailed_maxima(
         maxima[_HEAVY_ENERGY_LEDGER] = max(maxima[_HEAVY_ENERGY_LEDGER], residual)
 
 
-def _segment_index_for_time(model: Any, time_s: float, current: int) -> int:
-    while current + 1 < len(model.segments) and time_s > model.segments[current].end_s:
-        current += 1
-    return current
+class _DetailedLedgerDiagnostics:
+    """Accumulate conservation ledgers from evaluations already needed by output."""
+
+    def __init__(self, compiled: Any) -> None:
+        self.model = compiled.model
+        self.maxima = _initial_maxima(self.model, True)
+        del self.maxima["charge_closure_normalized"]
+        self.species_index = {
+            name: index for index, name in enumerate(self.model.species_ids)
+        }
+        self.boundary_products = {
+            reaction.id: reaction.products
+            for reaction in compiled.chemistry_data.boundary_reactions
+        }
+        self.surface_sources = _surface_source_vectors(compiled)
+
+    def observe(self, _state: np.ndarray, evaluation: Any) -> None:
+        for zone in self.model.zones:
+            _update_detailed_maxima(
+                self.maxima,
+                self.model,
+                evaluation,
+                zone.zone_id,
+                self.species_index,
+                self.boundary_products,
+                self.surface_sources,
+            )
+
+
+def _derive_observables_and_runtime_diagnostics(
+    compiled: Any,
+    result: SimulationResult,
+    names: Iterable[str],
+) -> tuple[Mapping[str, np.ndarray], dict[str, float]]:
+    """Derive selected output and detailed ledgers in one model replay."""
+
+    detailed = _DetailedLedgerDiagnostics(compiled)
+    observables, maxima = _derive_observables_and_diagnostics(
+        compiled.model,
+        result.time_s,
+        result.state,
+        names,
+        collect_ledger=True,
+        evaluation_observer=detailed.observe,
+    )
+    maxima.update(detailed.maxima)
+    return observables, maxima
 
 
 def runtime_diagnostic_maxima(
@@ -200,43 +228,11 @@ def runtime_diagnostic_maxima(
 ) -> dict[str, float]:
     """Evaluate charge closure and optional particle/energy ledger closure."""
 
-    model = compiled.model
-    maxima = _initial_maxima(model, include_detailed_ledgers)
-    if not include_detailed_ledgers and not _uses_prescribed_electrons(model):
-        return maxima
-
-    species_index = {name: index for index, name in enumerate(model.species_ids)}
-    boundary_products = {
-        reaction.id: reaction.products
-        for reaction in compiled.chemistry_data.boundary_reactions
-    }
-    surface_sources = (
-        _surface_source_vectors(compiled) if include_detailed_ledgers else {}
-    )
-
-    segment_index = 0
-    for time_s, state in zip(result.time_s, result.state, strict=True):
-        segment_index = _segment_index_for_time(model, time_s, segment_index)
-        evaluation = model.evaluate(
-            float(time_s),
-            state,
-            model.segments[segment_index],
-            collect_ledger=include_detailed_ledgers,
-        )
-        for zone in model.zones:
-            zone_id = zone.zone_id
-            residual = _charge_residual(model, state, evaluation, zone)
-            maxima["charge_closure_normalized"] = max(
-                maxima["charge_closure_normalized"], residual
-            )
-            if include_detailed_ledgers:
-                _update_detailed_maxima(
-                    maxima,
-                    model,
-                    evaluation,
-                    zone_id,
-                    species_index,
-                    boundary_products,
-                    surface_sources,
-                )
-    return maxima
+    if include_detailed_ledgers:
+        return _derive_observables_and_runtime_diagnostics(compiled, result, ())[1]
+    return derive_observables_and_diagnostics(
+        compiled.model,
+        result.time_s,
+        result.state,
+        (),
+    )[1]

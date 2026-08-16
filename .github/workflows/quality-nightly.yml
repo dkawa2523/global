@@ -32,7 +32,7 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run seeded, stress, and mutation checks
-        run: uv run --frozen quality-nightly --native
+        run: uv run --frozen python -m tools.quality nightly --native
 
       - name: Upload nightly reports
         if: always()

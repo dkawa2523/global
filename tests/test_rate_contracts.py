@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from plasma_global.core.exceptions import ModelConfigurationError, StateDomainError
+from plasma_global.errors import ModelConfigurationError, StateDomainError
 from plasma_global.models.rates import ConstantRate, DensityView, RateContext
 
 

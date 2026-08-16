@@ -32,7 +32,7 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run the clean-checkout PR gate
-        run: uv run --frozen quality-pr
+        run: uv run --frozen python -m tools.quality pr
 
       - name: Upload quality reports
         if: always()

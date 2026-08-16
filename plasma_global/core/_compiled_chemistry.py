@@ -9,8 +9,10 @@ from typing import Protocol, cast
 
 import numpy as np
 
-from plasma_global.core.exceptions import ModelConfigurationError
+from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.rates import ConstantRate, RateEvaluator
+
+ReactantPowers = tuple[tuple[int, float], ...]
 
 
 class ChemistrySource(Protocol):
@@ -64,6 +66,7 @@ class CompiledChemistryData:
     masses_kg: np.ndarray
     stoichiometry: np.ndarray
     reactant_orders: np.ndarray
+    reactant_powers_by_reaction: tuple[ReactantPowers, ...]
     electron_orders: np.ndarray
     electron_energy_transfer_eV: np.ndarray
     energy_loss_eV: np.ndarray
@@ -237,6 +240,21 @@ def _compiled_reaction_zones(
     )
 
 
+def _reactant_powers_by_reaction(
+    reactant_orders: np.ndarray,
+) -> tuple[ReactantPowers, ...]:
+    """Compile only nonzero heavy-reactant powers in species order."""
+
+    return tuple(
+        tuple(
+            (species_index, float(order))
+            for species_index, order in enumerate(reaction_orders)
+            if order != 0.0
+        )
+        for reaction_orders in reactant_orders
+    )
+
+
 def compile_chemistry_data(source: ChemistrySource) -> CompiledChemistryData:
     """Validate and copy one chemistry source without mutating the runtime model."""
 
@@ -260,6 +278,9 @@ def compile_chemistry_data(source: ChemistrySource) -> CompiledChemistryData:
         masses_kg=arrays.masses_kg,
         stoichiometry=arrays.stoichiometry,
         reactant_orders=arrays.reactant_orders,
+        reactant_powers_by_reaction=_reactant_powers_by_reaction(
+            arrays.reactant_orders
+        ),
         electron_orders=arrays.electron_orders,
         electron_energy_transfer_eV=electron_transfer,
         energy_loss_eV=_legacy_energy_loss(electron_transfer),

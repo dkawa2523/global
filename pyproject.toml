@@ -34,19 +34,17 @@ dev = [
   "pytest-cov>=6.0",
   "radon>=6.0",
   "ruff>=0.5",
+  "setuptools>=68",
   "types-PyYAML>=6.0",
   "vulture>=2.13",
+  "wheel",
 ]
 
 [project.scripts]
 plasma-global = "plasma_global.cli:main"
-quality-baseline = "tools.quality:baseline_main"
-quality-fast = "tools.quality:fast_main"
-quality-nightly = "tools.quality:nightly_main"
-quality-pr = "tools.quality:pr_main"
 
 [tool.setuptools.packages.find]
-include = ["plasma_global*", "tools*"]
+include = ["plasma_global*"]
 exclude = ["*.assets", "*.assets.*", "*.__pycache__", "*.__pycache__.*"]
 
 [tool.setuptools]
@@ -54,15 +52,11 @@ include-package-data = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q -m 'not external_benchmark and not nightly'"
+addopts = "-q -m 'not nightly'"
 markers = [
-  "external_benchmark: tests for optional external benchmark helpers",
   "nightly: deterministic stress tests reserved for the nightly quality job",
   "property: property-based tests repeated with multiple nightly seeds",
 ]
-
-[tool.deptry]
-optional_dependencies_dev_groups = ["dev", "docs"]
 
 [tool.ruff]
 target-version = "py311"
@@ -95,6 +89,9 @@ max-complexity = 10
 preset = "strict"
 min-severity = "warn"
 project-includes = ["plasma_global/**/*.py", "tools/**/*.py"]
+
+[tool.pyrefly.errors]
+unnecessary-type-conversion = false
 
 [tool.coverage.run]
 branch = true

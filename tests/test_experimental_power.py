@@ -102,7 +102,12 @@ def test_ccp_power_and_ion_energy_increase_with_voltage() -> None:
 
     assert high.electron_power_W > low.electron_power_W >= 0.0
     assert (
-        high.observables["mean_ion_energy_eV"] > low.observables["mean_ion_energy_eV"]
+        high.observables["estimated_mean_ion_energy_eV"]
+        > low.observables["estimated_mean_ion_energy_eV"]
+    )
+    assert (
+        high.observables["mean_ion_energy_eV"]
+        == high.observables["estimated_mean_ion_energy_eV"]
     )
     assert high.observables["self_bias_V"] < 0.0
     assert high.electron_power_W <= high.observables["delivered_power_W"]
@@ -143,6 +148,79 @@ def test_ccp_power_command_is_absorbed_power_not_delivered_power() -> None:
     )
 
 
+def test_ccp_reduced_field_uses_the_resistive_bulk_voltage() -> None:
+    port = CCPPowerPort(
+        port_id="ccp",
+        zone_id="plasma",
+        frequency_Hz=13.56e6,
+        zone_volume_m3=0.02,
+        powered_area_m2=0.02,
+        grounded_area_m2=0.10,
+        electrode_gap_m=0.04,
+        dominant_ion_mass_kg=6.63e-26,
+    )
+    state = _state()
+    result = port.evaluate(
+        0.0,
+        state,
+        CompiledPowerCommand(kind="voltage", voltage_V=300.0),
+    )
+
+    bulk_voltage = (
+        result.observables["rf_current_rms_A"]
+        * result.observables["bulk_resistance_ohm"]
+    )
+    expected_field_Td = (
+        bulk_voltage / port.electrode_gap_m / state.neutral_density_m3 / 1.0e-21
+    )
+    assert result.reduced_field_Td == pytest.approx(expected_field_Td)
+
+
+@pytest.mark.parametrize("kind", ["power", "voltage"])
+def test_ccp_rejects_positive_commands_without_electrons(kind: str) -> None:
+    port = CCPPowerPort(
+        port_id="ccp",
+        zone_id="plasma",
+        frequency_Hz=13.56e6,
+        zone_volume_m3=0.02,
+        powered_area_m2=0.02,
+        grounded_area_m2=0.10,
+        electrode_gap_m=0.04,
+        dominant_ion_mass_kg=6.63e-26,
+    )
+    command = (
+        CompiledPowerCommand(kind="power", power_W=100.0)
+        if kind == "power"
+        else CompiledPowerCommand(kind="voltage", voltage_V=100.0)
+    )
+
+    with pytest.raises(ModelDomainError, match="positive electron density"):
+        port.evaluate(0.0, _state(0.0), command)
+
+
+def test_ccp_zero_command_has_a_cold_zero_electron_boundary() -> None:
+    port = CCPPowerPort(
+        port_id="ccp",
+        zone_id="plasma",
+        frequency_Hz=13.56e6,
+        zone_volume_m3=0.02,
+        powered_area_m2=0.02,
+        grounded_area_m2=0.10,
+        electrode_gap_m=0.04,
+        dominant_ion_mass_kg=6.63e-26,
+    )
+    zero = port.evaluate(
+        0.0,
+        _state(0.0),
+        CompiledPowerCommand(kind="power", power_W=0.0),
+    )
+    assert zero.electron_power_W == 0.0
+    assert zero.reduced_field_Td == 0.0
+    assert zero.observables["estimated_mean_ion_energy_eV"] == 0.0
+    assert zero.observables["plasma_potential_V"] == 0.0
+    assert zero.observables["ion_flux_m2_s"] == 0.0
+
+
 def test_icp_coupling_trend_and_zone_split_conserve_absorbed_power() -> None:
     port = ICPPowerPort(
         port_id="icp",
@@ -170,3 +248,50 @@ def test_icp_coupling_trend_and_zone_split_conserve_absorbed_power() -> None:
     assert np.isfinite(
         [*distribution.values(), *high_density.observables.values()]
     ).all()
+
+
+def test_icp_has_continuous_zero_density_and_zero_power_limits() -> None:
+    port = ICPPowerPort(port_id="icp", zone_id="source")
+    vacuum = port.evaluate(
+        0.0,
+        _state(0.0),
+        CompiledPowerCommand(kind="power", power_W=100.0),
+    )
+    weak = port.evaluate(
+        0.0,
+        _state(),
+        CompiledPowerCommand(kind="power", power_W=1.0e-12),
+    )
+
+    assert vacuum.electron_power_W == 0.0
+    assert vacuum.reduced_field_Td == 0.0
+    assert vacuum.observables["reflected_power_W"] == pytest.approx(100.0)
+    assert weak.electron_power_W < 1.0e-12
+    assert weak.reduced_field_Td < 1.0e-9
+    assert weak.observables["plasma_potential_V"] < 1.0e-9
+
+
+def test_icp_absorbed_power_is_continuous_across_the_e_h_transition() -> None:
+    port = ICPPowerPort(port_id="icp", zone_id="source")
+    delivered_power_W = 300.0
+    transition_density = (
+        -np.log(1.0 - 0.55 / np.sqrt(delivered_power_W / 150.0)) / 2.2 * 1.0e17
+    )
+    below = port.evaluate(
+        0.0,
+        _state(transition_density * (1.0 - 1.0e-6)),
+        CompiledPowerCommand(kind="power", power_W=delivered_power_W),
+    )
+    above = port.evaluate(
+        0.0,
+        _state(transition_density * (1.0 + 1.0e-6)),
+        CompiledPowerCommand(kind="power", power_W=delivered_power_W),
+    )
+
+    assert below.observables["mode_H"] < 0.5 < above.observables["mode_H"]
+    assert above.observables["mode_H"] == pytest.approx(
+        below.observables["mode_H"], abs=1.0e-5
+    )
+    assert above.observables["absorbed_power_W"] == pytest.approx(
+        below.observables["absorbed_power_W"], rel=1.0e-5
+    )

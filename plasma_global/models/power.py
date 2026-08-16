@@ -9,32 +9,22 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from plasma_global.errors import (
     CaseValidationError,
-    CouplingConvergenceError,
-    ModelDomainError,
 )
 from plasma_global.models._power_coupling import (
-    _ZonePowerInputs,
-    _ZonePowerIteration,
-    _ZonePowerResult,
-    advance_coupled_field,
     command_field_capability,
     commands_are_time_dependent,
-    field_feedback,
     group_ports,
-    normalize_id,
     normalized_identities,
-    python_float,
     validate_field_sources,
 )
 from plasma_global.models._power_ports import E_CHARGE as E_CHARGE
 from plasma_global.models._power_ports import TD_TO_V_M2 as TD_TO_V_M2
 from plasma_global.models._power_ports import (
     _PortEvaluation,
-    _source_voltage,
     dc_series_evaluation,
     external_table_evaluation,
     prescribed_power_evaluation,
@@ -109,13 +99,8 @@ class CompiledPowerCommand:
             return self.reduced_field_capability
         if self.kind != "external_table":
             return None
-        return _table_reduced_field_capability(self.external_table)
-
-
-def _table_reduced_field_capability(
-    table: ExternalTableBinding | ExternalTableSample | None,
-) -> bool | None:
-    return None if table is None else table.produces_reduced_field
+        table = cast(ExternalTableBinding | ExternalTableSample, self.external_table)
+        return table.produces_reduced_field
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,52 +206,12 @@ def _power_port_result(
     )
 
 
-def _kinetics_for_power_state(
-    zone_id: str,
-    inputs: _ZonePowerInputs,
-    reduced_field_Td: float | None,
-) -> ElectronKineticsResult | None:
-    """Evaluate the configured kinetics table at the iteration coordinate."""
-
-    kinetics = inputs.kinetics
-    if kinetics is None:
-        return None
-    if kinetics.lookup == "local_field":
-        if reduced_field_Td is None:
-            raise ModelDomainError(f"Zone {zone_id!r} local-field table needs E/N")
-        if reduced_field_Td == 0.0 and kinetics.axis[0] > 0.0:
-            return kinetics.zero_field_result()
-        return kinetics.evaluate(reduced_field_Td=reduced_field_Td)
-    if kinetics.lookup == "mean_energy":
-        if inputs.mean_energy_eV is None:
-            raise ModelDomainError(
-                f"Zone {zone_id!r} mean-energy table needs mean_energy_eV"
-            )
-        return kinetics.evaluate(mean_energy_eV=inputs.mean_energy_eV)
-    raise CaseValidationError(f"Unsupported kinetics lookup {kinetics.lookup!r}")
-
-
-def _mean_energy_from_inputs(
-    zone_id: str,
-    inputs: _ZonePowerInputs,
-    reduced_field_Td: float | None,
-) -> float:
-    """Resolve direct or local-field mean energy when no table is configured."""
-
-    if inputs.mean_energy_eV is not None:
-        return python_float(inputs.mean_energy_eV)
-    if reduced_field_Td is None or inputs.mean_energy_from_field is None:
-        raise ModelDomainError(
-            f"Zone {zone_id!r} needs a local-field mean-energy model"
-        )
-    return python_float(inputs.mean_energy_from_field(reduced_field_Td))
-
-
-def _zone_iteration_is_terminal(
-    exact_zero_field: bool,
-    iteration: _ZonePowerIteration[PowerState, PowerPortResult],
-) -> bool:
-    return exact_zero_field or not iteration.field_is_coupled
+@dataclass(frozen=True, slots=True)
+class _ZonePowerDistributor:
+    port_id: str
+    source_zone_id: str
+    static_target_zone_ids: tuple[str, ...] | None
+    distribute: Callable[[PowerPortResult], Mapping[str, float]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,14 +305,6 @@ class DCSeriesPort:
         )
         return _power_port_result(self.port_id, self.zone_id, evaluated)
 
-    def _source_voltage(self, command: CompiledPowerCommand | None) -> float:
-        return _source_voltage(
-            port_id=self.port_id,
-            default_voltage_V=self.default_voltage_V,
-            command_kind=None if command is None else command.kind,
-            command_voltage_V=None if command is None else command.voltage_V,
-        )
-
     def solve_local_field(
         self,
         *,
@@ -446,6 +383,9 @@ class PowerCoordinator:
     max_iterations: int = 12
     _ports_by_zone: Mapping[str, tuple[PowerPort, ...]] = field(init=False, repr=False)
     _port_ids: frozenset[str] = field(init=False, repr=False)
+    _zone_power_distributors: tuple[_ZonePowerDistributor, ...] = field(
+        init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         ports, zones, port_ids = normalized_identities(self.ports, self.zone_ids)
@@ -456,10 +396,31 @@ class PowerCoordinator:
         grouped = group_ports(ports, zones)
         for zone_id, zone_ports in grouped.items():
             validate_field_sources(zone_id, zone_ports, {})
+        distributors: list[_ZonePowerDistributor] = []
+        for port in ports:
+            distribute = getattr(port, "power_by_zone", None)
+            if callable(distribute):
+                static_targets = getattr(port, "_static_power_target_zone_ids", None)
+                distributors.append(
+                    _ZonePowerDistributor(
+                        port_id=str(port.port_id),
+                        source_zone_id=str(port.zone_id),
+                        static_target_zone_ids=(
+                            None
+                            if static_targets is None
+                            else tuple(str(value) for value in static_targets)
+                        ),
+                        distribute=cast(
+                            Callable[[PowerPortResult], Mapping[str, float]],
+                            distribute,
+                        ),
+                    )
+                )
         object.__setattr__(self, "ports", ports)
         object.__setattr__(self, "zone_ids", zones)
         object.__setattr__(self, "_ports_by_zone", frozen_mapping(grouped))
         object.__setattr__(self, "_port_ids", frozenset(port_ids))
+        object.__setattr__(self, "_zone_power_distributors", tuple(distributors))
 
     def validate_commands(self, commands: Mapping[str, CompiledPowerCommand]) -> None:
         """Validate one compiled segment command set outside the ODE hot path."""
@@ -471,12 +432,6 @@ class PowerCoordinator:
             )
         for zone_id, zone_ports in self._ports_by_zone.items():
             validate_field_sources(zone_id, zone_ports, commands)
-
-    @property
-    def is_time_dependent(self) -> bool:
-        """Whether any configured port has explicit dependence on wall time."""
-
-        return any(port.time_dependent for port in self.ports)
 
     def commands_are_time_dependent(
         self, commands: Mapping[str, CompiledPowerCommand]
@@ -490,235 +445,10 @@ class PowerCoordinator:
     ) -> bool:
         """Return whether one segment guarantees E/N for the requested zone."""
 
-        for port in self._ports_by_zone[normalize_id(zone_id)]:
-            command = commands.get(normalize_id(port.port_id))
-            if command_field_capability(port, command):
-                return True
-        return False
-
-    @staticmethod
-    def _evaluate_port(
-        port: PowerPort,
-        time_s: float,
-        state: PowerState,
-        command: CompiledPowerCommand | None,
-    ) -> PowerPortResult:
-        if command is not None and command.kind == "off":
-            return PowerPortResult(
-                port_id=normalize_id(port.port_id),
-                zone_id=normalize_id(port.zone_id),
-                electron_power_W=0.0,
-                gas_power_W=0.0,
-                reduced_field_Td=(
-                    0.0 if command_field_capability(port, command) else None
-                ),
-            )
-        return port.evaluate(time_s, state, command)
-
-    def _initial_reduced_field(
-        self,
-        zone_id: str,
-        commands: Mapping[str, CompiledPowerCommand],
-        inputs: _ZonePowerInputs,
-    ) -> float | None:
-        field = inputs.prescribed_field_Td
-        kinetics = inputs.kinetics
-        if kinetics is None or kinetics.lookup != "local_field":
-            return field
-        if field is None:
-            field = float(kinetics.axis[len(kinetics.axis) // 2])
-
-        zone_ports = self._ports_by_zone[zone_id]
-        if len(zone_ports) != 1 or not isinstance(zone_ports[0], DCSeriesPort):
-            return field
-        port = zone_ports[0]
-        command = commands.get(normalize_id(port.port_id))
-        if command is not None and command.kind == "off":
-            return field
-        return port.solve_local_field(
-            electron_density_m3=inputs.electron_density_m3,
-            neutral_density_m3=inputs.neutral_density_m3,
-            kinetics=kinetics,
-            command=command,
-        )
-
-    def _has_exact_zero_field_command(
-        self, zone_id: str, commands: Mapping[str, CompiledPowerCommand]
-    ) -> bool:
-        """Return whether an off command fixes this zone's field at zero."""
-
         return any(
-            (command := commands.get(normalize_id(port.port_id))) is not None
-            and command.kind == "off"
-            and command_field_capability(port, command)
-            for port in self._ports_by_zone[zone_id]
+            command_field_capability(port, commands.get(str(port.port_id)))
+            for port in self._ports_by_zone[str(zone_id)]
         )
-
-    @staticmethod
-    def _require_energy_source(
-        zone_id: str,
-        inputs: _ZonePowerInputs,
-        reduced_field_Td: float | None,
-    ) -> None:
-        if (
-            inputs.mean_energy_eV is None
-            and inputs.kinetics is None
-            and reduced_field_Td is None
-        ):
-            raise ModelDomainError(
-                f"Zone {zone_id!r} needs E/N or an electron-energy value "
-                "for power coupling"
-            )
-
-    @staticmethod
-    def _power_state_for_iteration(
-        zone_id: str,
-        inputs: _ZonePowerInputs,
-        reduced_field_Td: float | None,
-    ) -> tuple[PowerState, ElectronKineticsResult | None]:
-        kinetics_result = _kinetics_for_power_state(zone_id, inputs, reduced_field_Td)
-        if kinetics_result is not None:
-            local_mean_energy_eV = python_float(kinetics_result.mean_energy_eV)
-            mobility_m2_V_s = kinetics_result.mobility_m2_V_s
-        else:
-            local_mean_energy_eV = _mean_energy_from_inputs(
-                zone_id, inputs, reduced_field_Td
-            )
-            mobility_m2_V_s = None
-
-        return (
-            PowerState(
-                electron_density_m3=inputs.electron_density_m3,
-                neutral_density_m3=inputs.neutral_density_m3,
-                electron_temperature_eV=(2.0 / 3.0) * local_mean_energy_eV,
-                electron_mobility_m2_V_s=mobility_m2_V_s,
-            ),
-            kinetics_result,
-        )
-
-    def _evaluate_zone_ports(
-        self,
-        zone_id: str,
-        time_s: float,
-        state: PowerState,
-        commands: Mapping[str, CompiledPowerCommand],
-    ) -> tuple[PowerPortResult, ...]:
-        results: list[PowerPortResult] = []
-        for port in self._ports_by_zone[zone_id]:
-            result = self._evaluate_port(
-                port,
-                time_s,
-                state,
-                commands.get(normalize_id(port.port_id)),
-            )
-            if (
-                result.port_id != normalize_id(port.port_id)
-                or result.zone_id != zone_id
-            ):
-                raise ModelDomainError(
-                    f"Port {port.port_id!r} returned mismatched identity "
-                    f"({result.port_id!r}, {result.zone_id!r})"
-                )
-            results.append(result)
-        return tuple(results)
-
-    def _evaluate_iteration(
-        self,
-        zone_id: str,
-        time_s: float,
-        commands: Mapping[str, CompiledPowerCommand],
-        inputs: _ZonePowerInputs,
-        reduced_field_Td: float | None,
-    ) -> _ZonePowerIteration[PowerState, PowerPortResult]:
-        state, kinetics_result = self._power_state_for_iteration(
-            zone_id, inputs, reduced_field_Td
-        )
-        port_results = self._evaluate_zone_ports(zone_id, time_s, state, commands)
-        electron_power_W = inputs.base_electron_power_W + sum(
-            result.electron_power_W for result in port_results
-        )
-        next_field, port_produced_field = field_feedback(
-            zone_id, port_results, inputs.prescribed_field_Td
-        )
-        local_field_kinetics = (
-            inputs.kinetics is not None and inputs.kinetics.lookup == "local_field"
-        )
-        if local_field_kinetics and next_field is None:
-            raise ModelDomainError(
-                f"Zone {zone_id!r} local-field kinetics has no E/N-producing "
-                "port or prescribed E/N"
-            )
-        return _ZonePowerIteration(
-            power_state=state,
-            kinetics=kinetics_result,
-            port_results=port_results,
-            electron_power_W=electron_power_W,
-            next_field_Td=next_field,
-            field_is_coupled=port_produced_field and local_field_kinetics,
-        )
-
-    def _zone_iteration_start(
-        self,
-        zone_id: str,
-        commands: Mapping[str, CompiledPowerCommand],
-        inputs: _ZonePowerInputs,
-    ) -> tuple[bool, float | None]:
-        exact_zero_field = self._has_exact_zero_field_command(zone_id, commands)
-        reduced_field_Td = (
-            0.0
-            if exact_zero_field
-            else self._initial_reduced_field(zone_id, commands, inputs)
-        )
-        self._require_energy_source(zone_id, inputs, reduced_field_Td)
-        return exact_zero_field, reduced_field_Td
-
-    def _evaluate_zone(
-        self,
-        zone_id: str,
-        time_s: float,
-        commands: Mapping[str, CompiledPowerCommand],
-        inputs: _ZonePowerInputs,
-    ) -> _ZonePowerResult[PowerState, PowerPortResult]:
-        exact_zero_field, reduced_field_Td = self._zone_iteration_start(
-            zone_id, commands, inputs
-        )
-
-        previous_mobility: float | None = None
-        previous_power: float | None = None
-        last_residual = math.inf
-        for iteration_count in range(1, self.max_iterations + 1):
-            iteration = self._evaluate_iteration(
-                zone_id, time_s, commands, inputs, reduced_field_Td
-            )
-            if _zone_iteration_is_terminal(exact_zero_field, iteration):
-                break
-            mobility = iteration.power_state.electron_mobility_m2_V_s
-            reduced_field_Td, last_residual = advance_coupled_field(
-                zone_id=zone_id,
-                current_field_Td=reduced_field_Td,
-                iteration=iteration,
-                previous_mobility_m2_V_s=previous_mobility,
-                previous_electron_power_W=previous_power,
-            )
-            if iteration_count > 1 and last_residual <= self.coupling_rtol:
-                # Re-evaluate every coupled quantity at the field we return.
-                # The converged iteration above was evaluated at the preceding
-                # fixed-point proposal.
-                iteration = self._evaluate_iteration(
-                    zone_id, time_s, commands, inputs, reduced_field_Td
-                )
-                break
-            previous_mobility = mobility
-            previous_power = iteration.electron_power_W
-        else:
-            zone_port_ids = [port.port_id for port in self._ports_by_zone[zone_id]]
-            raise CouplingConvergenceError(
-                f"Power/EEDF coupling in zone {zone_id!r} did not converge after "
-                f"{self.max_iterations} iterations for ports {zone_port_ids} "
-                f"(relative residual={last_residual:.3e})"
-            )
-
-        return iteration.as_zone_result(reduced_field_Td, iteration_count)
 
     def evaluate(
         self,
@@ -734,48 +464,21 @@ class PowerCoordinator:
         mean_energy_from_field_by_zone: Mapping[str, Callable[[float], float]]
         | None = None,
     ) -> PowerCouplingResult:
-        base_power = prescribed_electron_power_W_by_zone or {}
-        prescribed_field = prescribed_reduced_field_Td_by_zone or {}
-        kinetics_models = kinetics_by_zone or {}
-        field_models = mean_energy_from_field_by_zone or {}
-        electron_power: dict[str, float] = {}
-        gas_power: dict[str, float] = {}
-        effective_field: dict[str, float] = {}
-        power_states: dict[str, PowerState] = {}
-        port_results: dict[str, PowerPortResult] = {}
-        iterations: dict[str, int] = {}
-        final_kinetics: dict[str, ElectronKineticsResult] = {}
+        # Imported lazily so the private engine can construct these public
+        # value types without a module-initialization cycle.
+        from plasma_global.models._power_coordinator import evaluate_power_coupling
 
-        for zone_id in self.zone_ids:
-            inputs = _ZonePowerInputs(
-                electron_density_m3=electron_density_m3_by_zone[zone_id],
-                neutral_density_m3=python_float(neutral_density_m3_by_zone[zone_id]),
-                mean_energy_eV=mean_energy_eV_by_zone.get(zone_id),
-                base_electron_power_W=python_float(base_power.get(zone_id, 0.0)),
-                prescribed_field_Td=prescribed_field.get(zone_id),
-                kinetics=kinetics_models.get(zone_id),
-                mean_energy_from_field=field_models.get(zone_id),
-            )
-            result = self._evaluate_zone(zone_id, time_s, commands, inputs)
-            electron_power[zone_id] = result.electron_power_W
-            gas_power[zone_id] = result.gas_power_W
-            power_states[zone_id] = result.power_state
-            iterations[zone_id] = result.iterations
-            if result.reduced_field_Td is not None:
-                effective_field[zone_id] = result.reduced_field_Td
-            if result.kinetics is not None:
-                final_kinetics[zone_id] = result.kinetics
-            for port_result in result.port_results:
-                port_results[port_result.port_id] = port_result
-
-        return PowerCouplingResult(
-            electron_power_W_by_zone=electron_power,
-            gas_power_W_by_zone=gas_power,
-            reduced_field_Td_by_zone=effective_field,
-            power_state_by_zone=power_states,
-            kinetics_by_zone=final_kinetics,
-            port_results=port_results,
-            iterations_by_zone=iterations,
+        return evaluate_power_coupling(
+            self,
+            time_s=time_s,
+            commands=commands,
+            electron_density_m3_by_zone=electron_density_m3_by_zone,
+            neutral_density_m3_by_zone=neutral_density_m3_by_zone,
+            mean_energy_eV_by_zone=mean_energy_eV_by_zone,
+            prescribed_electron_power_W_by_zone=(prescribed_electron_power_W_by_zone),
+            prescribed_reduced_field_Td_by_zone=(prescribed_reduced_field_Td_by_zone),
+            kinetics_by_zone=kinetics_by_zone,
+            mean_energy_from_field_by_zone=mean_energy_from_field_by_zone,
         )
 
 

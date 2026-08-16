@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from numbers import Real
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -17,6 +18,109 @@ if TYPE_CHECKING:
 
 
 _ONSET_THRESHOLD_KINDS = frozenset({"dissociation", "excitation", "ionization"})
+_CROSS_SECTION_KINDS = frozenset(
+    {
+        "momentum_transfer",
+        "attachment",
+        "dissociation",
+        "deexcitation",
+        "excitation",
+        "ionization",
+    }
+)
+
+
+def _finite_nonnegative_scalar(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return False
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        return False
+    return bool(np.isfinite(number) and number >= 0.0)
+
+
+def _cross_section_label(where: str | None, cross_section_id: object) -> str:
+    return f"cross section {cross_section_id!r}" if where is None else where
+
+
+def _nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _numeric_curve(
+    energy_eV: object, sigma_m2: object
+) -> tuple[np.ndarray, np.ndarray] | None:
+    try:
+        raw_energy = np.asarray(energy_eV)
+        raw_sigma = np.asarray(sigma_m2)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    raw_arrays = (raw_energy, raw_sigma)
+    if any(values.dtype.kind in {"b", "c", "S", "U", "V"} for values in raw_arrays):
+        return None
+    if any(
+        values.dtype.kind == "O"
+        and any(
+            isinstance(value, bool) or not isinstance(value, Real)
+            for value in values.flat
+        )
+        for values in raw_arrays
+    ):
+        return None
+    try:
+        return (
+            np.asarray(raw_energy, dtype=float),
+            np.asarray(raw_sigma, dtype=float),
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _curve_data_error(label: str, energy: np.ndarray, sigma: np.ndarray) -> str | None:
+    if not all((energy.ndim == 1, sigma.shape == energy.shape, energy.size >= 2)):
+        return (
+            f"{label} energy_eV and sigma_m2 must be equal one-dimensional "
+            "arrays with at least two values"
+        )
+    if not all((np.all(np.isfinite(energy)), np.all(np.isfinite(sigma)))):
+        return f"{label} contains non-finite values"
+    if any((np.any(energy < 0.0), np.any(np.diff(energy) <= 0.0))):
+        return f"{label} energy must be nonnegative, strictly increasing, and unique"
+    if np.any(sigma < 0.0):
+        return f"{label} contains negative cross sections"
+    return None
+
+
+def cross_section_data_error(
+    *,
+    cross_section_id: object,
+    kind: object,
+    target: object,
+    threshold_eV: object,
+    energy_eV: object,
+    sigma_m2: object,
+    where: str | None = None,
+) -> str | None:
+    """Describe malformed canonical cross-section data without mutating it."""
+
+    label = _cross_section_label(where, cross_section_id)
+    curve = _numeric_curve(energy_eV, sigma_m2)
+    if curve is None:
+        return f"{label} energy_eV and sigma_m2 must be numeric arrays"
+    energy, sigma = curve
+    curve_error = _curve_data_error(label, energy, sigma)
+    if curve_error is not None:
+        return curve_error
+    if not _nonempty_string(cross_section_id):
+        return f"{label} id must be a non-empty string"
+    if not isinstance(kind, str) or kind not in _CROSS_SECTION_KINDS:
+        return f"{label} has unsupported kind {kind!r}"
+    if not _nonempty_string(target):
+        return f"{label} target must be a non-empty string"
+    if not _finite_nonnegative_scalar(threshold_eV):
+        return f"{label} has invalid threshold"
+    return None
 
 
 def has_onset_threshold(cross_section: CrossSectionData) -> bool:
@@ -133,6 +237,16 @@ def normalized_cross_section_curve(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return one immutable lower-support policy for all electron closures."""
 
+    data_error = cross_section_data_error(
+        cross_section_id=cross_section.id,
+        kind=cross_section.kind,
+        target=cross_section.target,
+        threshold_eV=cross_section.threshold_eV,
+        energy_eV=cross_section.energy_eV,
+        sigma_m2=cross_section.sigma_m2,
+    )
+    if data_error is not None:
+        raise ValueError(data_error)
     support_error = cross_section_support_error(cross_section)
     if support_error is not None:
         raise ValueError(support_error)
@@ -220,6 +334,7 @@ def surface_reaction_shape_error(
 
 
 __all__ = [
+    "cross_section_data_error",
     "cross_section_support_error",
     "has_onset_threshold",
     "normalized_cross_section_curve",

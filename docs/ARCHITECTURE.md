@@ -8,13 +8,19 @@
 
 ```text
 case.yaml
-  -> input/load.py + input/schema.py       strict schema v3
-  -> chemistry/data.py + chemistry/compile.py
+  -> input/load.py + input/schema.py       stable schema-v3 facade
+     -> input/_schema_*.py                  domain input declarations
+  -> chemistry/data.py + chemistry/compile.py   public chemistry facades
+     -> chemistry/_data_* + _rate_* + _compile_validation.py
   -> build.py                              composition root
-  -> core/compiled.py + models/            immutable numerical model
-  -> core/solver.py                        segmented SciPy BDF
+     -> input/compile_*.py                  thin compiler facades
+  -> core/compiled.py + models/            immutable public numerical model
+     -> core/_runtime_*.py                  prepared terms and RHS assembly
+  -> core/solver.py                        segmented SciPy BDF facade
+     -> core/_solver_sampling.py + _solver_domain.py + _solver_result.py
   -> core/result.py                        immutable result
-  -> output.py / audit.py                  persistence / detailed audit
+  -> output.py / audit.py                  stable public facades
+     -> _result_*.py / _audit_*.py          formats and audit phases
 ```
 
 公開 Python API は次の 3 操作だけです。
@@ -31,20 +37,33 @@ paths = write_result(result, "runs/case")  # result.h5 + summary.yaml
 
 | 場所 | 責務 |
 |---|---|
-| `input/schema.py` | strict・frozen な v3 入力型と相互参照の検証 |
+| `input/schema.py` | 公開入力型を再exportするstable facadeと、`CaseSpec`全体の相互参照検証 |
+| `input/_schema_base.py` / `_schema_{power,reactor,recipe,models,run}.py` | 共通制約と、power・reactor・recipe・物理model・実行制御ごとのstrict/frozen宣言 |
 | `input/load.py` | YAML、単一 `include`、宣言元基準の相対 path 解決 |
-| `chemistry/data.py` | canonical SI chemistry と外部表の厳格な読込み |
-| `chemistry/compile.py` | 化学量論、反応次数、rate evaluator、Jacobian 依存関係の配列化 |
-| `input/compile_reactor.py` | zone、wall/surface、transport、power port の構築 |
-| `input/compile_recipe.py` | step、pulse、table/profile 不連続点を固定 segment へ bind |
-| `build.py` | `CaseSpec` から完全初期化済み `CompiledCase` を一度だけ構築 |
-| `core/compiled.py` | state layout、RHS、wall/surface flux ledger、energy ledger |
-| `core/solver.py` | segment ごとの BDF、内部 state scaling、sparsity、sampling |
+| `chemistry/data.py` | 公開 chemistry DTO と読込み facade |
+| `chemistry/_data_csv.py` / `_data_manifest.py` | CSV の厳格なdecode / manifest・path・外部表の組立て |
+| `chemistry/compile.py` | 公開 compiled DTO と immutable 配列の組立て |
+| `chemistry/_rate_evaluators.py` / `_compile_validation.py` | rate 数値核 / 化学量論・次数・単位の検証 |
+| `input/compile_reactor.py` | 初期組成と reactor compiler の公開 facade |
+| `input/_compile_reactor_components.py` | zone、wall/surface、transport の静的構築 |
+| `input/compile_recipe.py` | recipe timeline と segment の公開 facade |
+| `input/_compile_recipe_transport.py` / `_compile_recipe_power.py` | transport source / power command の固定化 |
+| `input/migrate_v2.py` / `_migrate_v2_*.py` | 公開migration facade / power・reactor・recipe・asset変換 |
+| `build.py` | `CaseSpec` から `CompiledCase` を一度だけ構築する composition root |
+| `_build_electrons.py` / `_build_metadata.py` | electron closure / artifact metadata の組立て |
+| `core/compiled.py` | state layout と公開 evaluation facade |
+| `core/_runtime_state.py` / `_runtime_electrons.py` / `_runtime_sources.py` | state準備 / electron coupling / 物理source評価 |
+| `core/_runtime_assembly.py` | RHS と ledger の唯一の組立て境界 |
+| `core/solver.py` | segment BDF の orchestration facade |
+| `core/_solver_sampling.py` / `_solver_domain.py` / `_solver_result.py` | sampling grid / accepted-state domain正規化 / history・metadata変換 |
+| `models/kinetics.py` / `_kinetics_table.py` | 公開electron lookup / HDF5読込み・不変配列契約 |
+| `models/*.py` | 公開物理型と facade。private kernel/coordinator は `_*.py` に分離 |
 | `postprocess.py` | 明示選択された observable と通常診断の一回の評価 |
 | `core/result.py` | solver 非依存、time-major、read-only の結果契約 |
-| `output.py` | 固定 HDF5、summary、明示的 CSV export / plot |
-| `audit.py` | 実行を伴う詳細診断、反応保存則、file checksum provenance |
-| `experimental/` | 明示 opt-in の近似 EEDF、RF/CCP/ICP、外部電子密度、拡張状態、event stop |
+| `output.py` | HDF5、summary、CSV、plot のstable facade |
+| `_result_hdf5.py` / `_result_summary.py` / `_result_csv.py` / `_result_plot.py` | format別のI/O実装 |
+| `audit.py` / `_audit_*.py` | audit facade / 分類・保存則・result検査 |
+| `experimental/*.py` | 公開opt-in型とfacade。宣言compile・power kernel・film/inventory実行はprivate moduleに分離 |
 
 `core` は `input` と `experimental` を import しません。experimental model も入力時に
 標準 model と同じ小さな実行契約へ変換され、RHS には Pydantic model や YAML 辞書を

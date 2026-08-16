@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from plasma_global.errors import MigrationError
-from plasma_global.input.migrate_v2 import _port_model, _power_command
+from plasma_global.input._migrate_v2_power_commands import power_command
+from plasma_global.input._migrate_v2_power_models import port_model
 
 
 def _legacy_port(
@@ -35,7 +36,7 @@ def _model(
 ) -> tuple[dict, set[str], set[str]]:
     used_external: set[str] = set()
     unused: set[str] = set()
-    result = _port_model(
+    result = port_model(
         port=port,
         backend=backend,
         recipe=_legacy_recipe() if recipe is None else recipe,
@@ -58,7 +59,7 @@ def _command(
     used_external: set[str] = set()
     unused: set[str] = set()
     warnings: list[str] = []
-    result = _power_command(
+    result = power_command(
         values=values,
         kind=kind,
         base_dir=tmp_path,

@@ -156,7 +156,8 @@ def _load_document(
     include = raw.pop("include", None)
     if include is not None and not isinstance(include, str):
         raise CaseLoadError(
-            f"{source}: include must be one path string; lists and mappings are not allowed"
+            f"{source}: include must be one path string; "
+            "lists and mappings are not allowed"
         )
 
     local = _resolve_declared_paths(raw, source)

@@ -1,14 +1,32 @@
-# Quality baselines
+# Quality exceptions
 
-The tracked baselines separate accepted legacy debt from regressions. Ordinary
-quality commands never rewrite these files.
+Ordinary quality commands never rewrite tracked exception files. Ruff and
+Vulture must remain clean, coverage.py's combined statement-and-branch metric
+has a fixed 85% floor, changed production lines require 90% coverage, and new
+code has a cyclomatic-complexity limit of 10.
 
-Run `uv run quality-baseline` only after reviewing every new diagnostic. The
-command first requires tests, architecture checks, dependency audit, and all
-non-baselinable checks to pass. Pull-request CI also compares baseline changes
-with the target branch and rejects weaker thresholds or newly accepted debt.
+`baseline.json` contains only the reviewed Bandit findings in the trusted
+quality runner and the small set of existing complexity exceptions above 10.
+The intentionally redundant boundary conversions are disabled once in the
+Pyrefly configuration. Detect-secrets keeps its native reviewed baseline
+because that format carries review identity.
 
-The initial repository measurement was 195 passing tests, 80.739627% branch
-coverage, 735 raw Ruff findings, 56 Pyrefly errors, 47 functions over complexity
-10, 25 Bandit findings, no vulnerable dependencies, one audited secret-scan
-false positive, and no Vulture candidates at 80% confidence.
+The policy diff check is intentionally syntactic: it rejects newly added
+suppression, secret-allowlist, and direct skip/xfail syntax. Test semantics are
+enforced by execution, coverage, mutation checks, and review rather than a
+home-grown AST implication engine.
+
+Run repository gates through the single development runner:
+
+```text
+python -m tools.quality fast
+python -m tools.quality pr
+python -m tools.quality baseline
+python -m tools.quality nightly --native
+```
+
+Run `baseline` only after reviewing every remaining exception. The command
+first runs formatting, lint, import architecture, dependency audit, tests,
+coverage, complexity, and dead-code detection. Pull-request CI rejects new
+Bandit findings, new or worsened complexity exceptions, and a larger secret
+baseline.

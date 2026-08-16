@@ -88,6 +88,9 @@ knots は BDF segment 境界になります。
 吸収される実電力です。RF は `coupling_efficiency` から source-side real powerを逆算します。
 CCP の lossless sheath は実電力を消費しないため、real source powerは吸収電力と等しく、
 reactive成分を含む (V_{rms}I_{rms}) は別observable `apparent_power_VA` に記録します。
+CCP の `estimated_mean_ion_energy_eV` は診断専用で、wall/surface kineticsには接続しません。
+`mean_ion_energy_eV` は同じ値を返す後方互換aliasです。ion-assisted surfaceは独立したwall closureの
+ion energyを使用します。
 `external_table` と prescribed profile は strict numeric CSV を読み、重複 header、余剰列、
 欠損 cell、非有限値を compile 時に拒否します。bounds は既定で error です。経験モデルは必ず
 `experimental.*` を明示し、audit が `experimental` と分類して provenance を残します。
@@ -106,9 +109,18 @@ rate、transport、mean energy を代数評価し、electron-energy state を持
 cross-section最終energyより先への外挿は行いません。末端energy binの確率質量が `1e-3` を超える
 分布も、energy gridが未解像として拒否します。既定field gridは `1..100 Td` であり、より高いfieldを
 使う場合は断面積supportと `energy_grid.max_eV` を物理的に検証して明示指定します。
-正のfieldだけを持つprepared tableでportがoffの
-場合はcold boundary（mean energy/rateは0）を使い、明示0-field nodeを持つ一般tableではそのnodeを
-そのまま評価します。
+prepared tableには0-field cold boundary（mean energy/rateは0、mobilityは最初の正field値）を追加し、
+最初の正field grid点まで連続補間します。これによりpower modelが消灯へ連続的に近づいてもtable下限で
+停止しません。明示0-field nodeを持つ一般tableでは入力tableのnodeをそのまま評価します。
+`table` の `mobility_reference_neutral_density_m3` はtable内の絶対mobilityを測定・生成した
+中性gas密度です。runtimeでは `mobility * neutral_density` を保存するよう現在密度へ換算します。
+省略できるのは全zoneの初期中性密度が等しく、その値を基準として採用できる場合だけです。
+`experimental.approximate_two_term` は正の初期密度を持つ全neutral speciesにelectron collision
+cross sectionを要求し、cross sectionのないspeciesをE/N分母から黙って除外しません。
+prepared tableのidentityは全collision targetの初期組成比（丸めなし）です。同じ組成比のzoneは
+tableを共有し、絶対mobilityだけを各zoneの現在neutral densityへ反比例換算します。
+`cache.max_entries` はこの異なる組成比の上限であり、総密度だけが異なるzoneは消費しません。
+tableは初期組成比に固定され、runtimeの組成変化による再生成・補間は行いません。
 
 `gas_energy: fixed` は zone temperature を固定します。`evolved` は experimental 分類で、
 重粒子内部エネルギーを state とし、gas species 全ての `cv_over_kb`、反応・弾性加熱、flow、
@@ -174,8 +186,9 @@ transferを継承します。非zero transferは反応物または生成物にel
 専用の`gas_heating_eV`を使用し、boundaryではこのfieldも非zeroなら拒否します。
 現行result artifactは互換性のためledger名 `reaction_energy_loss_J_m3_s` を維持します。この値は
 符号付きtransferの負値なので、superelastic反応による電子加熱では負になります。
-curve CSV は exact header `energy_eV,sigma_m2`、有限・非負断面積、厳密昇順 energy を要求します。
-sort、負値 clip、非有限行の黙殺はしません。LXCat / BOLSIG / ZDPlaskin の変換は
+curve CSV と公開 `CrossSectionData` は、同長の1次元配列、有限・非負断面積、非負かつ
+厳密昇順のenergyを同じ契約で要求します。CSV headerはexact `energy_eV,sigma_m2` です。
+sort、負値 clip、非有限値の黙殺はしません。LXCat / BOLSIG / ZDPlaskin の変換は
 `tools/importers/` で offline に行います。
 
 `excitation`, `dissociation`, `ionization` の正の `threshold_eV` は反応onsetです。それ未満に

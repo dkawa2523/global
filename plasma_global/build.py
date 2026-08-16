@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from types import MappingProxyType
 from typing import Any, assert_never
 
-import yaml
 from pydantic import ValidationError
 
-from plasma_global._audit_runtime import runtime_diagnostic_maxima
-from plasma_global._provenance import build_artifact_provenance
+from plasma_global._audit_runtime import _derive_observables_and_runtime_diagnostics
+from plasma_global._build_electrons import (
+    compile_electron_density,
+    compile_electrons,
+)
+from plasma_global._build_metadata import build_metadata, solver_settings
 from plasma_global.chemistry.compile import CompiledChemistry, compile_chemistry
 from plasma_global.chemistry.data import ChemistryData, load_chemistry
 from plasma_global.core.compiled import CompiledGlobalModel
@@ -30,33 +32,17 @@ from plasma_global.input.compile_reactor import (
 )
 from plasma_global.input.compile_recipe import compile_recipe
 from plasma_global.input.schema import (
-    ApproximateTwoTermElectronModel,
     CaseSpec,
     EvolvedGasEnergy,
     FixedGasEnergy,
-    MaxwellianElectronModel,
-    PrescribedElectronDensity,
-    QuasiNeutralElectronDensity,
-    TableElectronModel,
-)
-from plasma_global.input.schema import (
-    ElectronEnergyClosure as ElectronEnergyClosureConfig,
-)
-from plasma_global.input.schema import (
-    LocalFieldClosure as LocalFieldClosureConfig,
 )
 from plasma_global.models.elastic import (
     compile_elastic_heating,
-    momentum_cross_section_ids,
-)
-from plasma_global.models.electrons import (
-    ElectronClosure,
-    ElectronEnergyClosure,
-    LocalFieldClosure,
 )
 from plasma_global.models.external_table import ExternalTableStore
-from plasma_global.models.kinetics import TabulatedElectronKinetics
-from plasma_global.models.walls import BOHM_H_FACTOR_CLOSURE_VERSION
+from plasma_global.models.kinetics import (
+    TabulatedElectronKinetics as TabulatedElectronKinetics,
+)
 from plasma_global.postprocess import (
     derive_observables_and_diagnostics,
     validate_summary_selection,
@@ -83,6 +69,8 @@ class CompiledCase:
 def _compile_initial_state(
     case: CaseSpec, initial_densities: Mapping[str, Mapping[str, float]]
 ) -> InitialState:
+    """Lower validated schema values to the solver's initial-state contract."""
+
     gas_energy = case.models.gas_energy
     if isinstance(gas_energy, EvolvedGasEnergy):
         gas_temperatures = {
@@ -98,7 +86,7 @@ def _compile_initial_state(
             for zone in case.reactor.zones
         },
         mean_energy_eV_by_zone={
-            zone.zone_id: float(zone.initial_mean_energy_eV)
+            zone.zone_id: zone.initial_mean_energy_eV
             for zone in case.reactor.zones
             if zone.initial_mean_energy_eV is not None
         },
@@ -112,108 +100,6 @@ def _compile_initial_state(
             else {}
         ),
     )
-
-
-def _required_table_rate_ids(chemistry_data: ChemistryData) -> tuple[str, ...]:
-    values: set[str] = set()
-    for reaction in chemistry_data.gas_reactions:
-        model = chemistry_data.rate_models[str(reaction.rate_model)]
-        if model.kind == "electron_impact":
-            values.add(str(model.parameters["cross_section"]))
-    return tuple(sorted(values))
-
-
-def _compile_electrons(
-    case: CaseSpec,
-    chemistry_data: ChemistryData,
-    initial_densities: Mapping[str, Mapping[str, float]],
-) -> tuple[
-    ElectronClosure,
-    Mapping[str, TabulatedElectronKinetics],
-    Mapping[str, Any],
-]:
-    config = case.models.electrons
-    closure = case.models.electron_closure
-    if isinstance(config, MaxwellianElectronModel):
-        if not isinstance(closure, ElectronEnergyClosureConfig):
-            raise CaseValidationError(
-                "maxwellian electrons require the electron_energy closure"
-            )
-        return ElectronEnergyClosure(), MappingProxyType({}), MappingProxyType({})
-    if isinstance(config, ApproximateTwoTermElectronModel):
-        if not isinstance(closure, LocalFieldClosureConfig):
-            raise CaseValidationError(
-                "experimental.approximate_two_term requires the local_field closure"
-            )
-        from plasma_global.experimental.prepared_kinetics import (
-            prepare_approximate_two_term_kinetics,
-        )
-
-        prepared = prepare_approximate_two_term_kinetics(
-            chemistry_data,
-            initial_densities,
-            mixture_key_species=config.mixture_key_species,
-            cache_max_entries=config.cache.max_entries,
-            fraction_decimals=config.cache.fraction_decimals,
-            energy_min_eV=config.energy_grid.min_eV,
-            energy_max_eV=config.energy_grid.max_eV,
-            energy_points=config.energy_grid.n,
-            field_min_Td=config.reduced_field_grid.min_Td,
-            field_max_Td=config.reduced_field_grid.max_Td,
-            field_points=config.reduced_field_grid.n,
-            max_iterations=config.max_shape_iterations,
-        )
-        representative = next(iter(prepared.by_zone.values()))
-        return (
-            LocalFieldClosure(representative.mean_energy_from_field),
-            prepared.by_zone,
-            prepared.provenance,
-        )
-    if isinstance(config, TableElectronModel):
-        table = TabulatedElectronKinetics.from_hdf5(
-            config.file,
-            lookup=config.lookup,
-            bounds=config.bounds_policy,
-            required_rate_ids=_required_table_rate_ids(chemistry_data),
-            optional_rate_ids=tuple(
-                sorted(
-                    cross_section.id
-                    for cross_section in chemistry_data.cross_sections.values()
-                    if cross_section.kind == "momentum_transfer"
-                )
-            ),
-        )
-        by_zone = MappingProxyType({zone.zone_id: table for zone in case.reactor.zones})
-        if isinstance(closure, ElectronEnergyClosureConfig):
-            return ElectronEnergyClosure(), by_zone, MappingProxyType({})
-        if isinstance(closure, LocalFieldClosureConfig):
-            return (
-                LocalFieldClosure(table.mean_energy_from_field),
-                by_zone,
-                MappingProxyType({}),
-            )
-        assert_never(closure)
-    assert_never(config)
-
-
-def _compile_electron_density(case: CaseSpec) -> Any | None:
-    config = case.models.electron_density
-    if isinstance(config, QuasiNeutralElectronDensity):
-        return None
-    if isinstance(config, PrescribedElectronDensity):
-        from plasma_global.experimental.profile import PrescribedElectronProfile
-
-        profile = PrescribedElectronProfile.from_csv(
-            config.file,
-            zone_columns=config.zone_columns or None,
-            interpolation=config.interpolation,
-            bounds="hold" if config.hold == "edge" else "error",
-        )
-        for zone in case.reactor.zones:
-            profile.density(case.recipe.start_time_s, zone.zone_id)
-            profile.density(case.recipe.end_time_s, zone.zone_id)
-        return profile
-    assert_never(config)
 
 
 def _validated_case_snapshot(case: CaseSpec) -> CaseSpec:
@@ -234,120 +120,6 @@ def _validated_case_snapshot(case: CaseSpec) -> CaseSpec:
     return snapshot
 
 
-def _effective_case_yaml(case: CaseSpec) -> str:
-    return yaml.safe_dump(
-        case.model_dump(mode="json", exclude_none=True),
-        sort_keys=False,
-        allow_unicode=True,
-    )
-
-
-def _wall_transport_closure_provenance(case: CaseSpec) -> dict[str, Any] | None:
-    surface_modes = {
-        surface.surface_id: (
-            "auto" if surface.wall_transport.h_factor == "auto" else "numeric"
-        )
-        for surface in case.reactor.surfaces
-        if surface.wall_transport.kind == "bohm"
-    }
-    if not surface_modes:
-        return None
-    return {
-        "bohm_h_factor": {
-            "version": BOHM_H_FACTOR_CLOSURE_VERSION,
-            "surface_modes": surface_modes,
-        }
-    }
-
-
-def _model_ids(
-    case: CaseSpec,
-    chemistry: CompiledChemistry,
-    experimental_features: tuple[str, ...],
-) -> dict[str, Any]:
-    return {
-        "electrons": case.models.electrons.kind,
-        "electron_closure": case.models.electron_closure.kind,
-        "electron_density": case.models.electron_density.kind,
-        "gas_energy": case.models.gas_energy.kind,
-        "surface_kinetics": (
-            "compiled" if case.models.surface_kinetics is not None else None
-        ),
-        "power_ports": {
-            port.port_id: port.model.kind for port in case.reactor.power_ports
-        },
-        "wall_transport": {
-            surface.surface_id: surface.wall_transport.kind
-            for surface in case.reactor.surfaces
-        },
-        "elastic_heating": (
-            "momentum_cross_sections" if momentum_cross_section_ids(chemistry) else None
-        ),
-        "experimental_accumulator": experimental_features or None,
-        "experimental_stop_policy": (
-            "experimental.stop_when_quasi_steady"
-            if case.experimental is not None
-            and case.experimental.stop_when_quasi_steady is not None
-            else None
-        ),
-    }
-
-
-def _metadata(
-    case: CaseSpec,
-    chemistry_data: ChemistryData,
-    chemistry: CompiledChemistry,
-    missing_momentum_targets: tuple[str, ...],
-    electron_kinetics_provenance: Mapping[str, Any],
-    experimental_features: tuple[str, ...],
-) -> Mapping[str, Any]:
-    domain_provenance: dict[str, Any] = {
-        "case_source": None if case.source_path is None else str(case.source_path),
-        "included_files": [str(path) for path in case.included_files],
-        "chemistry_manifest": str(case.chemistry.manifest),
-        "chemistry": dict(chemistry.provenance),
-        "missing_momentum_cross_section_targets": missing_momentum_targets,
-    }
-    wall_transport_closure = _wall_transport_closure_provenance(case)
-    if wall_transport_closure is not None:
-        domain_provenance["wall_transport_closure"] = wall_transport_closure
-    if electron_kinetics_provenance:
-        domain_provenance["electron_kinetics"] = dict(electron_kinetics_provenance)
-    provenance = build_artifact_provenance(
-        case,
-        chemistry_data,
-        domain_provenance,
-    )
-    return MappingProxyType(
-        {
-            "effective_case_yaml": _effective_case_yaml(case),
-            "model_ids": _model_ids(case, chemistry, experimental_features),
-            "provenance": provenance,
-            "summary_series": tuple(case.output.summary_series),
-        }
-    )
-
-
-def _solver_settings(case: CaseSpec) -> SolverSettings:
-    stop = (
-        None if case.experimental is None else case.experimental.stop_when_quasi_steady
-    )
-    return SolverSettings(
-        rtol=case.solver.rtol,
-        atol=case.solver.atol,
-        first_step_s=case.solver.first_step_s,
-        max_step_s=case.solver.max_step_s,
-        sample_interval_s=case.solver.sample_interval_s,
-        save_at_s=(
-            None if case.solver.save_at_s is None else tuple(case.solver.save_at_s)
-        ),
-        experimental_quasi_steady_threshold_s_inv=(
-            None if stop is None else stop.relative_rhs_norm_s_inv
-        ),
-        experimental_quasi_steady_min_time_s=(0.0 if stop is None else stop.min_time_s),
-    )
-
-
 def compile_case(case: CaseSpec) -> CompiledCase:
     """Compile a validated v3 case without creating outputs or running an ODE."""
 
@@ -361,9 +133,8 @@ def compile_case(case: CaseSpec) -> CompiledCase:
         chemistry_data,
         chemistry,
         external_tables,
-        initial_densities,
     )
-    electron_density_profile = _compile_electron_density(case)
+    electron_density_profile = compile_electron_density(case)
     segments = compile_recipe(
         case,
         chemistry_data,
@@ -372,7 +143,7 @@ def compile_case(case: CaseSpec) -> CompiledCase:
         prescribed_electron_profile=electron_density_profile,
     )
     initial_state = _compile_initial_state(case, initial_densities)
-    electron_closure, kinetics, electron_kinetics_provenance = _compile_electrons(
+    electron_closure, kinetics, electron_kinetics_provenance = compile_electrons(
         case, chemistry_data, initial_densities
     )
     electron_density_provider = (
@@ -408,15 +179,15 @@ def compile_case(case: CaseSpec) -> CompiledCase:
     )
     # Fail at compilation, not after output creation or the first RHS call.
     model.initial_state(initial_state)
-    solver_settings = _solver_settings(case)
+    settings = solver_settings(case)
     return CompiledCase(
         case=case,
         chemistry_data=chemistry_data,
         chemistry=chemistry,
         model=model,
         initial_state=initial_state,
-        solver_settings=solver_settings,
-        metadata=_metadata(
+        solver_settings=settings,
+        metadata=build_metadata(
             case,
             chemistry_data,
             chemistry,
@@ -437,12 +208,19 @@ def _simulate_compiled_case(
         compiled.initial_state,
         compiled.solver_settings,
     )
-    observables, normal_diagnostics = derive_observables_and_diagnostics(
-        compiled.model,
-        result.time_s,
-        result.state,
-        compiled.case.output.observables,
-    )
+    if detailed_audit:
+        observables, runtime_diagnostics = _derive_observables_and_runtime_diagnostics(
+            compiled,
+            result,
+            compiled.case.output.observables,
+        )
+    else:
+        observables, runtime_diagnostics = derive_observables_and_diagnostics(
+            compiled.model,
+            result.time_s,
+            result.state,
+            compiled.case.output.observables,
+        )
     metadata = {**result.metadata, **compiled.metadata}
     metadata["provenance"] = {
         **dict(result.metadata.get("provenance", {})),
@@ -454,15 +232,7 @@ def _simulate_compiled_case(
             "code": result.status.code,
             "message": result.status.message,
         },
-        "conservation_max_abs_residual": (
-            runtime_diagnostic_maxima(
-                compiled,
-                result,
-                include_detailed_ledgers=True,
-            )
-            if detailed_audit
-            else normal_diagnostics
-        ),
+        "conservation_max_abs_residual": runtime_diagnostics,
     }
     return replace(result, observables=observables, metadata=metadata)
 

@@ -14,10 +14,14 @@ from plasma_global.chemistry.data import (
 )
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
-from plasma_global.core.exceptions import ModelConfigurationError, StateDomainError
 from plasma_global.core.solver import solve_compiled_model
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
-from plasma_global.errors import ModelDomainError
+from plasma_global.errors import (
+    ModelConfigurationError,
+    ModelDomainError,
+    StateDomainError,
+)
+from plasma_global.experimental.power import CCPPowerPort
 from plasma_global.models.electrons import ElectronEnergyClosure, ElectronState
 from plasma_global.models.gas_energy import BOLTZMANN_J_K, HeavyEnergyClosure
 from plasma_global.models.power import (
@@ -467,6 +471,110 @@ def test_surface_sticking_adds_independent_coverage_and_conserves_event_rate() -
     ].surface_reaction_heating_J_m3_s == pytest.approx(2.0 * rate * 0.25 * E_CHARGE)
 
 
+def test_stiff_surface_adsorption_saturates_without_leaving_site_simplex() -> None:
+    surface = compiled_surface(ion_assisted=False, initial_coverage=0.0)
+    model = CompiledGlobalModel(
+        chemistry=inert_chemistry(),
+        zones=(Zone("z", 1.0, 400.0),),
+        segments=(RecipeSegment("saturate", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+        surface_model=surface,
+    )
+    result = solve_compiled_model(
+        model,
+        initial_state(ads_coverage=0.0),
+        SolverSettings(
+            rtol=1.0e-8,
+            atol=1.0e-10,
+            save_at_s=(0.0, 0.02, 1.0),
+        ),
+    )
+
+    density_index = model.layout.density_slices["z"].start
+    coverage_index = model.layout.surface_coverage_indices[("wall", "Ads")]
+    coverage = result.state[:, coverage_index]
+    total_particles_m3 = result.state[:, density_index] + 2.0e19 * coverage
+
+    assert np.all(coverage <= 1.0)
+    assert coverage[-1] > 1.0 - 1.0e-8
+    np.testing.assert_allclose(total_particles_m3, 1.0e20, rtol=2.0e-10)
+
+    invalid = model.initial_state(initial_state(ads_coverage=0.0))
+    invalid[coverage_index] = 1.01
+    with pytest.raises(ModelConfigurationError, match="surface coverage domain"):
+        solve_compiled_model(model, invalid)
+
+
+def test_competing_adsorbates_share_the_saturated_site_simplex() -> None:
+    base = surface_chemistry(ion_assisted=False)
+    alt_species = SpeciesData(
+        "Alt",
+        "surface",
+        0,
+        36.0,
+        {"X": 1.0, "site": 1.0},
+        surfaces=("wall",),
+    )
+    alt_reaction = ReactionData(
+        "stick_alt",
+        {"A": 1.0, "site": 1.0},
+        {"Alt": 1.0},
+        "stick_alt",
+        None,
+        surfaces=("wall",),
+    )
+    alt_rate = RateModelData("stick_alt", "sticking", {"value": 0.1})
+    chemistry = ChemistryData(
+        source=base.source,
+        species=(*base.species, alt_species),
+        gas_reactions=(),
+        boundary_reactions=(),
+        surface_reactions=(*base.surface_reactions, alt_reaction),
+        rate_models={**base.rate_models, alt_rate.id: alt_rate},
+        cross_sections={},
+    )
+    surface = CompiledSurfaceModel(
+        chemistry=chemistry,
+        gas_species_ids=("A", "ion"),
+        gas_masses_kg=np.array([6.0e-26, 6.0e-26]),
+        zone_ids=("z",),
+        zone_volumes_m3=np.array([1.0]),
+        surfaces=(
+            SurfaceGeometry(
+                "wall",
+                "z",
+                area_m2=2.0,
+                site_density_m2=1.0e19,
+                temperature_K=300.0,
+            ),
+        ),
+    )
+    model = CompiledGlobalModel(
+        chemistry=inert_chemistry(),
+        zones=(Zone("z", 1.0, 400.0),),
+        segments=(RecipeSegment("compete", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+        surface_model=surface,
+    )
+    result = solve_compiled_model(
+        model,
+        InitialState(
+            densities_m3_by_zone={"z": {"A": 1.0e20, "ion": 1.0e15}},
+            mean_energy_eV_by_zone={"z": 3.0},
+            surface_coverages={"wall": {"Ads": 0.0, "Alt": 0.0}},
+        ),
+        SolverSettings(rtol=1.0e-8, atol=1.0e-10, save_at_s=(0.0, 1.0)),
+    )
+
+    ads = result.state[:, model.layout.surface_coverage_indices[("wall", "Ads")]]
+    alt = result.state[:, model.layout.surface_coverage_indices[("wall", "Alt")]]
+    gas = result.state[:, model.layout.density_slices["z"].start]
+
+    assert np.all(ads + alt <= 1.0)
+    assert ads[-1] == pytest.approx(2.0 * alt[-1], rel=2.0e-9)
+    np.testing.assert_allclose(gas + 2.0e19 * (ads + alt), 1.0e20, rtol=2.0e-10)
+
+
 def test_wall_flux_is_shared_with_ion_assisted_surface_without_double_ion_loss() -> (
     None
 ):
@@ -480,13 +588,35 @@ def test_wall_flux_is_shared_with_ion_assisted_surface_without_double_ion_loss()
         prescribed_frequency_s_inv=0.5,
         reactions=(BoundaryReaction("neutralize", "ion", products={"A": 1.0}),),
     )
+    segment = RecipeSegment(
+        "etch",
+        0.0,
+        1.0,
+        port_commands={"bias": CompiledPowerCommand(kind="voltage", voltage_V=300.0)},
+    )
+    coordinator = PowerCoordinator(
+        ports=(
+            CCPPowerPort(
+                port_id="bias",
+                zone_id="z",
+                frequency_Hz=13.56e6,
+                zone_volume_m3=1.0,
+                powered_area_m2=1.0,
+                grounded_area_m2=1.0,
+                electrode_gap_m=0.5,
+                dominant_ion_mass_kg=6.0e-26,
+            ),
+        ),
+        zone_ids=("z",),
+    )
     model = CompiledGlobalModel(
         chemistry=inert_chemistry(),
         zones=(Zone("z", 1.0),),
-        segments=(RecipeSegment("etch", 0.0, 1.0),),
+        segments=(segment,),
         electron_closure=ElectronEnergyClosure(),
         wall_boundaries=(wall,),
         surface_model=surface,
+        power_coordinator=coordinator,
     )
     state = model.initial_state(initial_state())
     evaluated = model.evaluate(0.0, state, model.segments[0])
@@ -496,8 +626,15 @@ def test_wall_flux_is_shared_with_ion_assisted_surface_without_double_ion_loss()
     ion_index = model.layout.density_slices["z"].start + 1
     neutral_index = model.layout.density_slices["z"].start
     incident_rate_m3_s = 1.0e15 * 0.5
+    assert evaluated.power_coupling is not None
+    ccp = evaluated.power_coupling.port_results["bias"]
 
     assert record.surface_id == "wall"
+    assert ccp.observables["estimated_mean_ion_energy_eV"] != pytest.approx(10.0)
+    assert (
+        ccp.observables["mean_ion_energy_eV"]
+        == ccp.observables["estimated_mean_ion_energy_eV"]
+    )
     assert record.incident_flux_m2_s == pytest.approx(incident_rate_m3_s / 2.0)
     assert event_rate_m2_s == pytest.approx(record.incident_flux_m2_s * 0.5)
     assert evaluated.derivative[ion_index] == pytest.approx(-incident_rate_m3_s)
@@ -580,10 +717,8 @@ def test_single_positive_ion_bohm_wall_computes_floating_sheath_energy() -> None
             None,
         ),
     )
-    expected_sheath_eV = (
-        0.5
-        * electron_temperature_eV
-        * np.log(ion_mass_kg / (2.0 * np.pi * ELECTRON_MASS_KG))
+    expected_sheath_eV = electron_temperature_eV * np.log(
+        np.sqrt(ion_mass_kg / (2.0 * np.pi * ELECTRON_MASS_KG)) / 0.61
     )
     expected_loss = (
         wall.records[0].incident_rate_m3_s
@@ -595,19 +730,10 @@ def test_single_positive_ion_bohm_wall_computes_floating_sheath_energy() -> None
     assert wall.electron_energy_loss_J_m3_s == pytest.approx(expected_loss)
 
 
-def test_explicit_or_nonstandard_wall_energy_keeps_legacy_value() -> None:
+def test_active_multiply_charged_bohm_wall_requires_explicit_sheath_energy() -> None:
     electrons = ElectronState(2.0e15, 3.0, 2.0, 1.0e-3, None)
     explicit = _evaluate_compiled_wall(
         boundary=WallBoundary("z", 2.0, sheath_energy_eV=7.5),
-        volume_m3=1.0,
-        species_ids=("A", "ion"),
-        charges=np.array([0.0, 1.0]),
-        masses_kg=np.array([6.6e-26, 6.6e-26]),
-        densities_m3=np.array([1.0e20, 2.0e15]),
-        electrons=electrons,
-    )
-    multiply_charged = _evaluate_compiled_wall(
-        boundary=WallBoundary("z", 2.0),
         volume_m3=1.0,
         species_ids=("A", "ion"),
         charges=np.array([0.0, 2.0]),
@@ -615,13 +741,89 @@ def test_explicit_or_nonstandard_wall_energy_keeps_legacy_value() -> None:
         densities_m3=np.array([1.0e20, 2.0e15]),
         electrons=electrons,
     )
-
     assert explicit.sheath_energy_eV == 7.5
-    assert multiply_charged.sheath_energy_eV == 0.0
+    with pytest.raises(StateDomainError, match="explicit sheath_energy_eV"):
+        _evaluate_compiled_wall(
+            boundary=WallBoundary("z", 2.0),
+            volume_m3=1.0,
+            species_ids=("A", "ion"),
+            charges=np.array([0.0, 2.0]),
+            masses_kg=np.array([6.6e-26, 6.6e-26]),
+            densities_m3=np.array([1.0e20, 2.0e15]),
+            electrons=electrons,
+        )
+
+
+def test_zero_density_extra_ion_does_not_change_floating_sheath() -> None:
+    electrons = ElectronState(2.0e15, 3.0, 2.0, 1.0e-3, None)
+    baseline = _evaluate_compiled_wall(
+        boundary=WallBoundary("z", 2.0),
+        volume_m3=1.0,
+        species_ids=("A", "ion"),
+        charges=np.array([0.0, 1.0]),
+        masses_kg=np.array([6.6e-26, 6.6e-26]),
+        densities_m3=np.array([1.0e20, 2.0e15]),
+        electrons=electrons,
+    )
+    extra = _evaluate_compiled_wall(
+        boundary=WallBoundary("z", 2.0),
+        volume_m3=1.0,
+        species_ids=("A", "ion", "unused_ion", "unused_negative_ion"),
+        charges=np.array([0.0, 1.0, 2.0, -1.0]),
+        masses_kg=np.array([6.6e-26, 6.6e-26, 1.3e-25, 6.6e-26]),
+        densities_m3=np.array([1.0e20, 2.0e15, 0.0, 0.0]),
+        electrons=electrons,
+    )
+
+    assert extra.sheath_energy_eV == pytest.approx(baseline.sheath_energy_eV)
+    assert extra.electron_energy_loss_J_m3_s == pytest.approx(
+        baseline.electron_energy_loss_J_m3_s
+    )
+
+
+def test_floating_sheath_balances_multiple_singly_charged_ion_fluxes() -> None:
+    electron_temperature_eV = 2.0
+    electron_density_m3 = 3.0e15
+    ion_densities = np.array([1.0e15, 2.0e15])
+    ion_masses = np.array([6.6e-26, 1.3e-25])
+    wall = _evaluate_compiled_wall(
+        boundary=WallBoundary("z", 2.0, bohm_factor=0.61),
+        volume_m3=1.0,
+        species_ids=("A", "light_ion", "heavy_ion"),
+        charges=np.array([0.0, 1.0, 1.0]),
+        masses_kg=np.array([6.6e-26, *ion_masses]),
+        densities_m3=np.array([1.0e20, *ion_densities]),
+        electrons=ElectronState(
+            electron_density_m3, 3.0, electron_temperature_eV, 1.0e-3, None
+        ),
+    )
+    ion_current_flux = np.sum(
+        0.61 * ion_densities * np.sqrt(E_CHARGE * electron_temperature_eV / ion_masses)
+    )
+    electron_flux = electron_density_m3 * np.sqrt(
+        E_CHARGE * electron_temperature_eV / (2.0 * np.pi * ELECTRON_MASS_KG)
+    )
+
+    assert wall.sheath_energy_eV == pytest.approx(
+        electron_temperature_eV * np.log(electron_flux / ion_current_flux)
+    )
+
+
+def test_floating_sheath_fails_when_runtime_current_has_no_solution() -> None:
+    with pytest.raises(StateDomainError, match="no nonnegative solution"):
+        _evaluate_compiled_wall(
+            boundary=WallBoundary("z", 2.0),
+            volume_m3=1.0,
+            species_ids=("A", "ion"),
+            charges=np.array([0.0, 1.0]),
+            masses_kg=np.array([6.6e-26, 6.6e-26]),
+            densities_m3=np.array([1.0e20, 2.0e15]),
+            electrons=ElectronState(1.0e6, 3.0, 2.0, 1.0e-3, None),
+        )
 
 
 def test_wall_uses_nonnegative_ion_view_and_charge_weighted_bohm_speed() -> None:
-    boundary = WallBoundary("z", 2.0, bohm_factor=0.61)
+    boundary = WallBoundary("z", 2.0, bohm_factor=0.61, sheath_energy_eV=1.0)
     electron_state = ElectronState(2.0e15, 3.0, 2.0, 1.0e-3, None)
     negative = _evaluate_compiled_wall(
         boundary=boundary,
@@ -652,6 +854,7 @@ def test_compiled_wall_receives_roundoff_clipped_reaction_density() -> None:
     wall = WallBoundary(
         "z",
         2.0,
+        sheath_energy_eV=1.0,
         reactions=(BoundaryReaction("neutralize", "ion", {"A": 1.0}),),
     )
     model = CompiledGlobalModel(

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import inspect
+import pickle
 from pathlib import Path
 
 import pytest
 import yaml
 
 from plasma_global import simulate, write_result
+from plasma_global.input import schema
 from plasma_global.input.load import CaseLoadError, load_case
 from plasma_global.input.migrate_v2 import (
     migrate_v2,
@@ -53,6 +56,20 @@ ZDP_REACTIONS = (
     "ZDP_ARSTAR_THREE_BODY_QUENCH",
     "ZDP_ARPLUS_CLUSTERING",
 )
+
+
+def test_public_schema_models_keep_facade_identity_and_pickle_path() -> None:
+    model_names = {
+        name for name in schema.__all__ if inspect.isclass(getattr(schema, name))
+    }
+    model_names.update({"CacheConfig", "EnergyGridConfig", "ReducedFieldGridConfig"})
+
+    for name in model_names:
+        model = getattr(schema, name)
+        assert model.__module__ == "plasma_global.input.schema"
+        payload = pickle.dumps(model)
+        assert b"plasma_global.input.schema" in payload
+        assert name.encode() in payload
 
 
 def _case() -> dict:
@@ -453,6 +470,11 @@ def test_v2_migration_produces_valid_standalone_v3_yaml(tmp_path: Path) -> None:
     assert result.case.experimental.wall_inventory.initial_by_surface["wafer"] == {
         "F_reservoir": 0.0
     }
+    targets = {
+        port.port_id: port.coupling_target for port in result.case.reactor.power_ports
+    }
+    assert targets == {"source_rf": "", "wafer_bias": "wafer"}
+    assert "reactor.power_ports[0].coupling_target" in result.report.unused_keys
     assert "wafer:*" not in result.case.reactor.surfaces[0].initial_coverages
 
     destination = write_v3_case(result, tmp_path / "migrated.yaml")
@@ -570,6 +592,11 @@ def test_v2_power_command_migration_preserves_control_specific_setpoints() -> No
             "plasma_potential_per_sqrt_W": 0.0,
         },
     }
+    assert all(not port.coupling_target for port in result.case.reactor.power_ports)
+    assert {
+        "reactor.power_ports[0].coupling_target",
+        "reactor.power_ports[1].coupling_target",
+    } <= set(result.report.unused_keys)
     commands = [
         step.model_dump(mode="python", exclude_none=True)["commands"]["power_ports"]
         for step in result.case.recipe.steps
@@ -629,6 +656,8 @@ def test_v2_dc_command_migration_keeps_static_circuit_data_on_the_port() -> None
         "power_absorption_fraction": 1.0,
         "electron_mobility_m2_V_s": 0.45,
     }
+    assert not port.coupling_target
+    assert "reactor.power_ports[0].coupling_target" in result.report.unused_keys
     assert command.model_dump(mode="python", exclude_none=True) == {
         "kind": "dc_series",
         "off_voltage_V": 0.0,

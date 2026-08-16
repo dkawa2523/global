@@ -8,7 +8,7 @@ import pytest
 from plasma_global.build import compile_case
 from plasma_global.core.transport import SCCM_TO_PARTICLES_PER_S
 from plasma_global.errors import CaseValidationError
-from plasma_global.input.compile_recipe import _resolved_port_command
+from plasma_global.input._compile_recipe_power import _resolved_port_command
 from plasma_global.input.load import load_case
 from plasma_global.input.schema import (
     CaseSpec,

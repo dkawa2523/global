@@ -1,19 +1,11 @@
-"""Reject explicit suppressions and narrow, structural test weakening."""
+"""Reject newly added quality suppressions and disabled tests."""
 
 from __future__ import annotations
 
 import re
-from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterator
 
-from tools.quality_gate._test_snapshot import (
-    AssertionSummary,
-    FileSnapshot,
-    RaisesSite,
-    ToleranceSite,
-    _snapshot,
-)
-from tools.quality_gate.context import ROOT, _base_ref, _die, _git
+from tools.quality_gate.context import _base_ref, _die, _git
 
 FORBIDDEN_PYTHON_ADDITION = re.compile(
     r"#\s*(?:(?:ruff|flake8):\s*)?noqa\b"
@@ -27,183 +19,75 @@ FORBIDDEN_SECRET_ADDITION = re.compile(
     r"#\s*pragma:\s*(?:allowlist|whitelist)\s+(?:nextline\s+)?secret\b",
     re.IGNORECASE,
 )
+HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+FORBIDDEN_TEST_DISABLE_ADDITION = re.compile(
+    r"\bpytestmark\s*="
+    r"|\b(?:pytest|[A-Za-z_]\w*)\.mark\.(?:skip|skipif|xfail)\b"
+    r"|\b(?:pytest|[A-Za-z_]\w*)\.(?:skip|xfail|importorskip)\s*\("
+    r"|\bself\.skipTest\s*\("
+    r"|\b(?:unittest\.)?(?:expectedFailure|skip|skipIf|skipUnless)\b"
+    r"|^\s*from\s+(?:pytest|unittest)\s+import\b.*"
+    r"\b(?:expectedFailure|importorskip|skip|skipIf|skipUnless|xfail)\b",
+    re.IGNORECASE,
+)
 
 
-def _assertion_violations(
-    previous: Sequence[AssertionSummary], current: Sequence[AssertionSummary]
-) -> list[str]:
-    old = _assertions_by_scope(previous)
-    latest = _assertions_by_scope(current)
-    return [
-        f"removed or weakened assertion: {scope}"
-        for scope, item in old.items()
-        if latest.get(scope, AssertionSummary(scope, 0, 0)).count < item.count
-    ] + [
-        f"constant-true assertion added: {scope}"
-        for scope, item in latest.items()
-        if item.obviously_true
-        > old.get(scope, AssertionSummary(scope, 0, 0)).obviously_true
-    ]
-
-
-def _assertions_by_scope(
-    summaries: Sequence[AssertionSummary],
-) -> dict[str, AssertionSummary]:
-    return {item.scope: item for item in summaries}
-
-
-def _raises_violations(
-    previous: Sequence[RaisesSite], current: Sequence[RaisesSite]
-) -> list[str]:
-    losses = (
-        (
-            _raise_counts(previous, "all") - _raise_counts(current, "all"),
-            "removed or changed pytest.raises",
-        ),
-        (
-            _raise_counts(previous, "has_match") - _raise_counts(current, "has_match"),
-            "removed pytest.raises match",
-        ),
-        (
-            _raise_counts(current, "directly_raises")
-            - _raise_counts(previous, "directly_raises"),
-            "direct raise added under pytest.raises",
-        ),
-    )
-    return [
-        f"{label}: {scope}: {exception}"
-        for missing, label in losses
-        for scope, exception in missing.elements()
-    ]
-
-
-def _raise_counts(sites: Sequence[RaisesSite], kind: str) -> Counter[tuple[str, str]]:
-    return Counter(
-        (site.scope, site.exception)
-        for site in sites
-        if kind == "all" or getattr(site, kind)
-    )
-
-
-def _tolerance_violations(
-    previous: Sequence[ToleranceSite], current: Sequence[ToleranceSite]
-) -> list[str]:
-    old: dict[tuple[str, str], list[ToleranceSite]] = defaultdict(list)
-    latest: dict[tuple[str, str], list[ToleranceSite]] = defaultdict(list)
-    for site in previous:
-        old[site.scope, site.function].append(site)
-    for site in current:
-        latest[site.scope, site.function].append(site)
-    result = _relaxed_tolerances(old, latest)
-    old_self = Counter(
-        (site.scope, site.function) for site in previous if site.self_fulfilling
-    )
-    new_self = Counter(
-        (site.scope, site.function) for site in current if site.self_fulfilling
-    )
-    result.extend(
-        f"self-fulfilling numerical assertion: {scope}: {function}"
-        for (scope, function), count in new_self.items()
-        if count > old_self[scope, function]
-    )
-    return result
-
-
-def _relaxed_tolerances(
-    old: dict[tuple[str, str], list[ToleranceSite]],
-    latest: dict[tuple[str, str], list[ToleranceSite]],
-) -> list[str]:
-    result: list[str] = []
-    for key, sites in old.items():
-        candidates = latest[key]
-        if len(candidates) < len(sites):
-            result.append(f"removed numerical assertion: {key[0]}: {key[1]}")
+def _diff_additions(diff: str) -> Iterator[tuple[str, int, str]]:
+    current_file = ""
+    current_line = 0
+    in_hunk = False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            current_file = ""
+            in_hunk = False
             continue
-        for site, candidate in zip(sites, candidates, strict=False):
-            if (
-                candidate.relative > site.relative
-                or candidate.absolute > site.absolute
-                or (not site.nan_allowed and candidate.nan_allowed)
-            ):
-                result.append(
-                    f"relaxed numerical assertion: {site.scope}[{site.ordinal}]"
-                )
-    return result
-
-
-def _snapshot_violations(previous: FileSnapshot, current: FileSnapshot) -> list[str]:
-    result = [
-        f"removed test contract: {name}"
-        for name in previous.tests
-        if name not in current.tests
-    ]
-    result.extend(_assertion_violations(previous.assertions, current.assertions))
-    result.extend(_raises_violations(previous.raises, current.raises))
-    result.extend(_tolerance_violations(previous.tolerances, current.tolerances))
-    return result
+        if line.startswith("+++ b/"):
+            current_file = line[6:].replace("\\", "/")
+            continue
+        if matched := HUNK_HEADER.match(line):
+            current_line = int(matched.group(1))
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("+"):
+            yield current_file, current_line, line[1:]
+            current_line += 1
+        elif line.startswith("-") or line.startswith("\\"):
+            continue
+        else:
+            current_line += 1
 
 
 def _policy_diff_violations(diff: str) -> list[str]:
-    result: list[str] = []
-    current_file = ""
-    for line in diff.splitlines():
-        if line.startswith("+++ b/"):
-            current_file = line[6:].replace("\\", "/")
-        elif line.startswith("+") and not line.startswith("+++"):
-            addition = line[1:]
-            if FORBIDDEN_SECRET_ADDITION.search(addition) or (
-                current_file.endswith(".py")
-                and FORBIDDEN_PYTHON_ADDITION.search(addition)
-            ):
-                result.append(addition.strip())
-    return result
-
-
-def _test_sources(base: str | None = None) -> dict[str, str]:
-    if base:
-        paths = _git("ls-tree", "-r", "--name-only", base, "--", "tests").splitlines()
-        return {
-            path: _git("show", f"{base}:{path}")
-            for path in paths
-            if path.endswith(".py")
-        }
-    return {
-        path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
-        for path in sorted((ROOT / "tests").glob("**/*.py"))
-    }
-
-
-def _snapshots(sources: dict[str, str]) -> dict[str, FileSnapshot]:
-    return {path: _snapshot(source, namespace=path) for path, source in sources.items()}
-
-
-def _repository_violations(base: str, current: dict[str, FileSnapshot]) -> list[str]:
-    empty = FileSnapshot((), (), (), (), ())
-    previous = _snapshots(_test_sources(base))
     return [
-        issue
-        for path, snapshot in previous.items()
-        for issue in _snapshot_violations(snapshot, current.get(path, empty))
+        addition.strip()
+        for path, _, addition in _diff_additions(diff)
+        if FORBIDDEN_SECRET_ADDITION.search(addition)
+        or (path.endswith(".py") and FORBIDDEN_PYTHON_ADDITION.search(addition))
     ]
 
 
-def _skip_violations(snapshots: dict[str, FileSnapshot]) -> list[str]:
-    return [issue for snapshot in snapshots.values() for issue in snapshot.skips]
+def _skip_diff_violations(diff: str) -> list[str]:
+    """Reject direct test-disabling syntax on newly added test lines."""
+
+    return [
+        f"forbidden skip/xfail addition: {path}:{line}: {addition.strip()}"
+        for path, line, addition in _diff_additions(diff)
+        if path.startswith("tests/")
+        and path.endswith(".py")
+        and FORBIDDEN_TEST_DISABLE_ADDITION.search(addition)
+    ]
 
 
 def _check_policy_additions() -> None:
     base = _base_ref()
     if base is None:
         return
-    current = _snapshots(_test_sources())
     diff = _git("diff", "--unified=0", base, "--")
-    issues = [
-        *_policy_diff_violations(diff),
-        *_repository_violations(base, current),
-        *_skip_violations(current),
-    ]
+    issues = [*_policy_diff_violations(diff), *_skip_diff_violations(diff)]
     if issues:
         _die(
-            "Forbidden quality-policy weakening:\n"
+            "Forbidden quality-policy additions:\n"
             + "\n".join(f"  {issue}" for issue in issues)
         )

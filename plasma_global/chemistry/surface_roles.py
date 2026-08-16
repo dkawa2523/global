@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from plasma_global.chemistry.data import SpeciesData
+from plasma_global.chemistry.data import SpeciesData
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,4 +55,34 @@ def surface_species_roles(
     )
 
 
-__all__ = ["SurfaceSpeciesRoles", "surface_species_roles"]
+def _surface_initial_state_error(
+    surface_id: str,
+    initial_coverages: Mapping[str, float],
+    roles: SurfaceSpeciesRoles,
+) -> str | None:
+    """Return the shared independent-coverage validation error, if any."""
+
+    supplied = set(initial_coverages)
+    if explicit_free := supplied & set(roles.free_site_ids):
+        return (
+            f"surface {surface_id!r} must not initialize algebraic "
+            f"free site(s) {sorted(explicit_free)}"
+        )
+    if unknown := supplied - set(roles.independent_ids):
+        return (
+            f"surface {surface_id!r} initializes unknown or dependent "
+            f"coverage species {sorted(unknown)}"
+        )
+    occupied = sum(
+        roles.occupancy_by_species[species_id] * coverage
+        for species_id, coverage in initial_coverages.items()
+    )
+    if occupied > 1.0 + 1.0e-12:
+        return f"surface {surface_id!r} initial site occupancy exceeds one"
+    return None
+
+
+__all__ = [
+    "SurfaceSpeciesRoles",
+    "surface_species_roles",
+]

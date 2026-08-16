@@ -100,7 +100,9 @@ class _AssetStager:
         self.staging_directory.mkdir(parents=True, exist_ok=True)
         try:
             if electron_table:
-                from tools.importers.rate_table import convert_v2_rate_table_h5
+                from plasma_global.input._migrate_v2_rate_table import (
+                    convert_v2_rate_table_h5,
+                )
 
                 _, dropped = convert_v2_rate_table_h5(source, temporary_path)
                 if dropped:
@@ -184,12 +186,12 @@ def migrate_v2_to_yaml(
 
     from plasma_global.chemistry.compile import compile_chemistry
     from plasma_global.chemistry.data import load_chemistry
+    from plasma_global.input._migrate_v2_chemistry import convert_v2_chemistry
     from plasma_global.input.migrate_v2 import (
         MigrationReport,
         MigrationResult,
         migrate_v2,
     )
-    from tools.importers.chemistry_v2 import convert_v2_chemistry
 
     target = Path(destination).resolve(strict=False)
     target.parent.mkdir(parents=True, exist_ok=True)

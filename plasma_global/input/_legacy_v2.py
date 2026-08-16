@@ -1,9 +1,6 @@
-"""Small, read-only schema-v2 reader used only by :mod:`migrate_v2`.
+"""Read-only schema-v2 compatibility boundary for :mod:`migrate_v2`.
 
-The production loader intentionally understands schema v3 only.  This module
-keeps the one-way migration command self-contained after the former runtime
-configuration, reactor, and workflow packages are removed.  It resolves the
-shipped v2 structure but never constructs a numerical model.
+It parses legacy inputs but never constructs a numerical model.
 """
 
 from __future__ import annotations
@@ -80,18 +77,14 @@ def _load_with_includes(path: Path, stack: tuple[Path, ...] = ()) -> dict[str, A
         raise MigrationError(f"{source} uses both include and includes")
     selected = include if include is not None else includes
     if selected is None:
-        selected_paths: list[object] = []
+        selected = list[object]()
     elif isinstance(selected, (str, Path)):
-        selected_paths = [selected]
-    elif isinstance(selected, list):
-        selected_paths = selected
-    else:
+        selected = [selected]
+    if not isinstance(selected, list):
         raise MigrationError(f"{source}: legacy include must be a path or path list")
     merged: dict[str, Any] = {}
-    for item in selected_paths:
-        include_path = Path(str(item))
-        if not include_path.is_absolute():
-            include_path = source.parent / include_path
+    for item in selected:
+        include_path = source.parent / Path(str(item))
         merged = _merge(merged, _load_with_includes(include_path, (*stack, source)))
     return _merge(merged, raw)
 
@@ -106,9 +99,32 @@ def _path(base: Path, value: object, where: str) -> Path:
 
 
 def _defaults(raw: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
-    result = dict(defaults)
-    result.update(raw)
-    return result
+    return {**defaults, **raw}
+
+
+def _read_csv(path: Path, label: str) -> list[dict[str, str]]:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            return list(csv.DictReader(stream))
+    except OSError as exc:
+        raise MigrationError(f"cannot read legacy {label} {path}: {exc}") from exc
+
+
+def _species(row: dict[str, str], path: Path) -> SimpleNamespace:
+    species_id = str(row.get("canonical_id") or "").strip()
+    if not species_id:
+        raise MigrationError(f"{path} contains a species without canonical_id")
+    tags = {
+        item.strip()
+        for item in str(row.get("state_tags") or "").replace(";", "|").split("|")
+        if item.strip()
+    }
+    return _namespace(
+        canonical_id=species_id,
+        charge=int(float(row.get("charge") or 0)),
+        phase=str(row.get("phase") or "gas"),
+        state_tags=tags,
+    )
 
 
 def _load_species(
@@ -120,37 +136,54 @@ def _load_species(
         manifest.get("species_file"),
         "legacy chemistry species_file",
     )
-    try:
-        with species_path.open("r", encoding="utf-8-sig", newline="") as stream:
-            rows = list(csv.DictReader(stream))
-    except OSError as exc:
-        raise MigrationError(
-            f"cannot read legacy species {species_path}: {exc}"
-        ) from exc
     gas: list[SimpleNamespace] = []
     surface: list[SimpleNamespace] = []
-    for row in rows:
-        species_id = str(row.get("canonical_id") or "").strip()
-        if not species_id:
-            raise MigrationError(
-                f"{species_path} contains a species without canonical_id"
-            )
-        tags = {
-            item.strip()
-            for item in str(row.get("state_tags") or "").replace(";", "|").split("|")
-            if item.strip()
-        }
-        item = _namespace(
-            canonical_id=species_id,
-            charge=int(float(row.get("charge") or 0)),
-            phase=str(row.get("phase") or "gas"),
-            state_tags=tags,
-        )
+    for row in _read_csv(species_path, "species"):
+        item = _species(row, species_path)
         if item.phase == "surface":
             surface.append(item)
-        elif species_id != "e":
+        elif item.canonical_id != "e":
             gas.append(item)
     return gas, surface
+
+
+def _gas_reactants(equation: str, gas_species_ids: set[str]) -> list[str]:
+    reactants: list[str] = []
+    for token in equation.split("->", 1)[0].split("+"):
+        fields = token.strip().split(maxsplit=1)
+        species_id = (
+            fields[1]
+            if len(fields) == 2 and fields[0].replace(".", "", 1).isdigit()
+            else token.strip()
+        )
+        if species_id in gas_species_ids:
+            reactants.append(species_id)
+    return reactants
+
+
+def _surface_reaction(
+    row: dict[str, str],
+    path: Path,
+    line: int,
+    gas_species_ids: set[str],
+) -> SimpleNamespace:
+    reaction_id = str(row.get("reaction_id") or "").strip()
+    equation = str(row.get("equation") or "")
+    if not reaction_id or equation.count("->") != 1:
+        raise MigrationError(f"{path}:{line} has an invalid reaction ID/equation")
+    enabled = str(row.get("enabled") or "true").strip().lower()
+    if enabled not in {"true", "false", "1", "0", "yes", "no"}:
+        raise MigrationError(f"{path}:{line} has an invalid enabled value")
+    return _namespace(
+        reaction_id=reaction_id,
+        gas_reactants=_gas_reactants(equation, gas_species_ids),
+        surface_filter=[
+            item.strip()
+            for item in str(row.get("surface_filter") or "").split("|")
+            if item.strip()
+        ],
+        enabled=enabled in {"true", "1", "yes"},
+    )
 
 
 def _load_surface_reactions(
@@ -165,46 +198,14 @@ def _load_surface_reactions(
         filename,
         "legacy chemistry surface_reactions_file",
     )
-    try:
-        with path.open("r", encoding="utf-8-sig", newline="") as stream:
-            rows = list(csv.DictReader(stream))
-    except OSError as exc:
-        raise MigrationError(
-            f"cannot read legacy surface reactions {path}: {exc}"
-        ) from exc
-    reactions: list[SimpleNamespace] = []
-    for line, row in enumerate(rows, start=2):
-        reaction_id = str(row.get("reaction_id") or "").strip()
-        equation = str(row.get("equation") or "")
-        if not reaction_id or equation.count("->") != 1:
-            raise MigrationError(f"{path}:{line} has an invalid reaction ID/equation")
-        enabled_text = str(row.get("enabled") or "true").strip().lower()
-        if enabled_text not in {"true", "false", "1", "0", "yes", "no"}:
-            raise MigrationError(f"{path}:{line} has an invalid enabled value")
-        lhs = equation.split("->", 1)[0]
-        reactants: list[str] = []
-        for token in lhs.split("+"):
-            fields = token.strip().split(maxsplit=1)
-            species_id = (
-                fields[1]
-                if len(fields) == 2 and fields[0].replace(".", "", 1).isdigit()
-                else token.strip()
-            )
-            if species_id in gas_species_ids:
-                reactants.append(species_id)
-        reactions.append(
-            _namespace(
-                reaction_id=reaction_id,
-                gas_reactants=reactants,
-                surface_filter=[
-                    item.strip()
-                    for item in str(row.get("surface_filter") or "").split("|")
-                    if item.strip()
-                ],
-                enabled=enabled_text in {"true", "1", "yes"},
-            )
-        )
-    return reactions
+    return [
+        _surface_reaction(row, path, line, gas_species_ids)
+        for line, row in enumerate(_read_csv(path, "surface reactions"), start=2)
+    ]
+
+
+def _as_dict(value: object) -> dict[str, Any]:
+    return dict(value or {})
 
 
 def _load_chamber(path: Path) -> SimpleNamespace:
@@ -220,7 +221,7 @@ def _load_chamber(path: Path) -> SimpleNamespace:
                 pressure_Pa=float(item.get("pressure_Pa", 0.0)),
                 gas_temperature_K=float(item.get("gas_temperature_K", 300.0)),
                 role=str(item.get("role", "process")),
-                initial_densities_m3=dict(item.get("initial_densities_m3") or {}),
+                initial_densities_m3=_as_dict(item.get("initial_densities_m3")),
             )
         )
     edges = []
@@ -247,9 +248,9 @@ def _load_chamber(path: Path) -> SimpleNamespace:
                 material=str(item.get("material", "")),
                 temperature_K=float(item.get("temperature_K", 300.0)),
                 site_density_m2=float(item.get("site_density_m2", 0.0)),
-                initial_coverages=dict(item.get("initial_coverages") or {}),
-                initial_inventory=dict(item.get("initial_inventory") or {}),
-                models=dict(item.get("models") or {}),
+                initial_coverages=_as_dict(item.get("initial_coverages")),
+                initial_inventory=_as_dict(item.get("initial_inventory")),
+                models=_as_dict(item.get("models")),
             )
         )
     inlets = []
@@ -259,7 +260,7 @@ def _load_chamber(path: Path) -> SimpleNamespace:
             _namespace(
                 inlet_id=str(item.get("inlet_id", "")),
                 zone_id=str(item.get("zone_id", "")),
-                flow_sccm=dict(item.get("flow_sccm") or {}),
+                flow_sccm=_as_dict(item.get("flow_sccm")),
                 temperature_K=float(item.get("temperature_K", 300.0)),
             )
         )
@@ -282,7 +283,7 @@ def _load_chamber(path: Path) -> SimpleNamespace:
                 kind=str(item.get("kind", "")),
                 zone_id=str(item.get("zone_id", "")),
                 coupling_target=str(item.get("coupling_target", "")),
-                parameters=dict(item.get("parameters") or {}),
+                parameters=_as_dict(item.get("parameters")),
             )
         )
     return _namespace(
@@ -374,6 +375,17 @@ def _swarm(raw: dict[str, Any]) -> SimpleNamespace:
     )
 
 
+def _extension_records(manifest_path: Path) -> tuple[list[Any], list[Any]]:
+    manifest = _read_yaml(manifest_path)
+    extension = manifest.get("extensions") or manifest.get("extensions_file")
+    if isinstance(extension, str):
+        extension = _read_yaml(
+            _path(manifest_path.parent, extension, "chemistry.extensions")
+        )
+    data = extension if isinstance(extension, dict) else dict[str, Any]()
+    return list(data.get("state_variables") or []), list(data.get("processes") or [])
+
+
 def load_legacy_v2_case(path: str | Path) -> SimpleNamespace:
     """Read enough of schema v2 to produce one explicit schema-v3 document."""
 
@@ -399,9 +411,6 @@ def load_legacy_v2_case(path: str | Path) -> SimpleNamespace:
         source.parent,
         chemistry_entry.get("manifest"),
         "files.chemistry.manifest",
-    )
-    output_path = _path(
-        source.parent, files.get("output_dir", "./outputs"), "files.output_dir"
     )
     external = {
         str(key): str(_path(source.parent, value, f"files.external_inputs.{key}"))
@@ -454,19 +463,7 @@ def load_legacy_v2_case(path: str | Path) -> SimpleNamespace:
     surface_reactions = _load_surface_reactions(
         chemistry_path, {str(species.canonical_id) for species in gas_species}
     )
-    manifest = _read_yaml(chemistry_path)
-    extensions = manifest.get("extensions") or manifest.get("extensions_file")
-    state_variables: list[Any] = []
-    processes: list[Any] = []
-    if isinstance(extensions, str):
-        extension_data = _read_yaml(
-            _path(chemistry_path.parent, extensions, "chemistry.extensions")
-        )
-        state_variables = list(extension_data.get("state_variables") or [])
-        processes = list(extension_data.get("processes") or [])
-    elif isinstance(extensions, dict):
-        state_variables = list(extensions.get("state_variables") or [])
-        processes = list(extensions.get("processes") or [])
+    state_variables, processes = _extension_records(chemistry_path)
 
     chamber = _load_chamber(chamber_path)
     recipe = _load_recipe(recipe_path)
@@ -494,13 +491,10 @@ def load_legacy_v2_case(path: str | Path) -> SimpleNamespace:
             processes=processes,
         ),
         resolved_paths=_namespace(
-            source_config=str(source),
             base_dir=str(source.parent),
-            chamber_file=str(chamber_path),
             recipe_file=str(recipe_path),
             chemistry_manifest=str(chemistry_path),
             chemistry_dir=str(chemistry_path.parent),
-            output_dir=str(output_path),
             external_inputs=external,
         ),
     )

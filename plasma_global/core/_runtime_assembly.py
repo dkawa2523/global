@@ -33,6 +33,7 @@ class PreparedEvaluationState:
     charge_residual_by_zone: dict[str, float]
     neutral_density_by_zone: dict[str, float]
     mean_energy_for_power: dict[str, float | None]
+    electron_state_by_zone: dict[str, ElectronState | None]
     gas_temperature_by_zone: np.ndarray
 
 
@@ -48,6 +49,7 @@ class PreparedZoneState:
     charge_residual: float
     neutral_density: float
     mean_energy_for_power: float | None
+    electron_state: ElectronState | None
 
 
 @dataclass(frozen=True, slots=True)

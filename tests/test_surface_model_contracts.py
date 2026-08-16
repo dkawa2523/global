@@ -123,6 +123,24 @@ def test_layout_preserves_surface_and_species_order_and_multisite_balance() -> N
     assert model.coverage(state, "wall_a", "site") == pytest.approx(0.6)
 
 
+def test_solver_continuation_preserves_multisite_surface_composition() -> None:
+    pair = SpeciesData("Pair", "surface", 0, 80.0, {"X": 2.0, "site": 2.0})
+    chemistry = _chemistry(species=_species(pair))
+    model = _model(
+        chemistry,
+        (SurfaceGeometry("wall", "z", 1.0, 1.0e19, 300.0),),
+    )
+    coverage = np.array([[0.8, 0.2], [0.3, 0.2]])
+
+    model._continue_solver_coverages(coverage)
+
+    np.testing.assert_allclose(coverage[0], [2.0 / 3.0, 1.0 / 6.0])
+    np.testing.assert_array_equal(coverage[1], [0.3, 0.2])
+    np.testing.assert_allclose(coverage @ np.array([1.0, 2.0]), [1.0, 0.7])
+    with pytest.raises(ValueError, match="coverage state has the wrong shape"):
+        model._continue_solver_coverages(np.zeros(3))
+
+
 def test_reactions_aggregate_particle_event_heat_and_coverage_rates() -> None:
     stick_model = RateModelData(
         "stick",

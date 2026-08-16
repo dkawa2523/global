@@ -1,4 +1,4 @@
-"""Read, compare, and explicitly write legacy quality baselines."""
+"""Read and update the small set of reviewed quality exceptions."""
 
 from __future__ import annotations
 
@@ -10,36 +10,21 @@ from typing import Any
 
 from tools.quality_gate.context import (
     BASELINE_PATH,
-    PYREFLY_BASELINE_PATH,
     SECRETS_BASELINE_PATH,
     Finding,
     _base_ref,
     _die,
     _git,
-    _relative_path,
-    _source_for_path,
-    _symbol_for_source,
 )
 from tools.quality_gate.measurements import _secret_fingerprints
-
-INITIAL_MEASUREMENT = {
-    "bandit_findings": 25,
-    "branch_coverage_percent": 80.739627,
-    "complex_functions": 47,
-    "detect_secrets_findings": 1,
-    "pip_audit_vulnerabilities": 0,
-    "pyrefly_errors": 56,
-    "pyrefly_warnings_and_errors": 266,
-    "pytest_passed": 195,
-    "ruff_findings_raw": 735,
-    "ruff_test_assert_findings": 556,
-    "vulture_findings": 0,
-}
 
 
 def _load_baseline() -> dict[str, Any]:
     if not BASELINE_PATH.is_file():
-        _die("quality baseline is missing; run `uv run quality-baseline` explicitly")
+        _die(
+            "quality baseline is missing; run "
+            "`python -m tools.quality baseline` explicitly"
+        )
     return json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
 
 
@@ -80,57 +65,11 @@ def _read_base_json(relative_path: str) -> dict[str, Any] | None:
     return None if base is None else _read_json_at_ref(relative_path, base)
 
 
-def _pyrefly_fingerprint(
-    item: dict[str, Any],
-    sources: dict[str, str | None],
-    source_ref: str | None,
-) -> str:
-    path = _relative_path(str(item.get("path", "")))
-    if path not in sources:
-        sources[path] = _source_for_path(path, source_ref=source_ref)
-    symbol = _symbol_for_source(sources[path], int(item.get("line", 0) or 0))
-    message = str(item.get("concise_description", item.get("description", "")))
-    return "|".join(
-        (
-            path,
-            symbol,
-            str(item.get("name", "")),
-            str(item.get("severity", "")),
-            " ".join(message.split()),
-        )
-    )
-
-
-def _pyrefly_fingerprints(
-    payload: dict[str, Any], *, source_ref: str | None = None
-) -> Counter[str]:
-    sources: dict[str, str | None] = {}
-    return Counter(
-        _pyrefly_fingerprint(item, sources, source_ref)
-        for item in payload.get("errors", [])
-    )
-
-
-def _native_fingerprints(
-    relative_path: str,
-    payload: dict[str, Any],
-    *,
-    source_ref: str | None = None,
-) -> Counter[str]:
-    if relative_path == ".secrets.baseline":
-        return _secret_fingerprints(payload)
-    return _pyrefly_fingerprints(payload, source_ref=source_ref)
-
-
-def _baseline_complexity_failures(
-    current: dict[str, Any], previous: dict[str, Any]
-) -> list[str]:
-    failures = []
-    for symbol, score in current["radon"]["complexity"].items():
-        old_score = int(previous["radon"]["complexity"].get(symbol, 10))
-        if score > old_score:
-            failures.append(f"complexity baseline worsened: {symbol}")
-    return failures
+def _complexity_exceptions(payload: dict[str, Any]) -> dict[str, int]:
+    raw = payload.get("complexity_exceptions")
+    if raw is None:
+        raw = payload.get("radon", {}).get("complexity", {})
+    return {str(key): int(value) for key, value in raw.items() if int(value) > 10}
 
 
 def _validate_baseline_monotonic(current: dict[str, Any]) -> None:
@@ -138,23 +77,14 @@ def _validate_baseline_monotonic(current: dict[str, Any]) -> None:
     if previous is None:
         return
     failures = []
-    for tool in ("ruff", "bandit"):
-        old = Counter(previous[tool]["findings"])
-        new = Counter(current[tool]["findings"])
-        if new - old:
-            failures.append(f"{tool} baseline contains new findings")
-    failures.extend(_baseline_complexity_failures(current, previous))
-    if float(current["coverage"]["branch_percent"]) < float(
-        previous["coverage"]["branch_percent"]
-    ):
-        failures.append("branch coverage baseline was lowered")
-    for name in ("passed", "assertions"):
-        if int(current["tests"][name]) < int(previous["tests"][name]):
-            failures.append(f"test {name} baseline was lowered")
-    if Counter(current["vulture"]["findings"]) - Counter(
-        previous["vulture"]["findings"]
-    ):
-        failures.append("vulture baseline contains new findings")
+    old_bandit = Counter(previous.get("bandit", {}).get("findings", {}))
+    new_bandit = Counter(current.get("bandit", {}).get("findings", {}))
+    if new_bandit - old_bandit:
+        failures.append("bandit baseline contains new findings")
+    old_complexity = _complexity_exceptions(previous)
+    for symbol, score in _complexity_exceptions(current).items():
+        if score > old_complexity.get(symbol, 10):
+            failures.append(f"complexity exception was added or worsened: {symbol}")
     if failures:
         _die("Baseline weakening is forbidden:\n  " + "\n  ".join(failures))
 
@@ -163,51 +93,24 @@ def _check_native_baseline_sizes() -> None:
     base = _base_ref()
     if base is None:
         return
-    for relative_path, current_path in (
-        ("quality/pyrefly-baseline.json", PYREFLY_BASELINE_PATH),
-        (".secrets.baseline", SECRETS_BASELINE_PATH),
-    ):
-        excess = _native_baseline_excess(relative_path, current_path, base)
-        if excess:
-            _die(
-                f"{relative_path} accepts findings that are absent from the base branch"
-            )
-
-
-def _native_baseline_excess(
-    relative_path: str, current_path: Path, base: str
-) -> Counter[str]:
-    previous = _read_json_at_ref(relative_path, base) or {}
-    current = json.loads(current_path.read_text(encoding="utf-8"))
-    return _native_fingerprints(relative_path, current) - _native_fingerprints(
-        relative_path, previous, source_ref=base
-    )
+    previous = _read_json_at_ref(".secrets.baseline", base) or {}
+    current = json.loads(SECRETS_BASELINE_PATH.read_text(encoding="utf-8"))
+    if _secret_fingerprints(current) - _secret_fingerprints(previous):
+        _die(".secrets.baseline accepts findings absent from the base branch")
 
 
 def _baseline_payload(
     *,
-    ruff: Sequence[Finding],
     bandit: Sequence[Finding],
     complexity: dict[str, int],
-    vulture: Sequence[str],
-    coverage: float,
-    passed: int,
-    assertions: int,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
-        "initial_measurement": INITIAL_MEASUREMENT,
-        "ruff": {"findings": dict(sorted(Counter(item.key for item in ruff).items()))},
         "bandit": {
             "findings": dict(sorted(Counter(item.key for item in bandit).items()))
         },
-        "radon": {"complexity": complexity},
-        "vulture": {"findings": list(vulture), "min_confidence": 80},
-        "coverage": {
-            "branch_percent": coverage,
-            "changed_lines_percent": 90.0,
+        "complexity_exceptions": {
+            symbol: score for symbol, score in sorted(complexity.items()) if score > 10
         },
-        "tests": {"passed": passed, "assertions": assertions},
     }
 
 

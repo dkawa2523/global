@@ -200,7 +200,7 @@ def solve_dc_series_local_field(
     """Solve the series-circuit E/N equation on a piecewise-linear table."""
 
     axis = np.asarray(kinetics.axis, dtype=float)
-    mobility = np.asarray(kinetics.mobility_m2_V_s, dtype=float)
+    mobility = np.asarray(kinetics.mobility_curve(neutral_density_m3), dtype=float)
     if mobility.shape != axis.shape:
         raise CaseValidationError(
             "local-field kinetics mobility must share the E/N axis"

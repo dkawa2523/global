@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pytest
 
+from plasma_global.chemistry.compile import compile_chemistry
+from plasma_global.chemistry.data import (
+    ChemistryData,
+    CrossSectionData,
+    ReactionData,
+    SpeciesData,
+)
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
 from plasma_global.core.solver import solve_compiled_model
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
+from plasma_global.models.elastic import compile_elastic_heating
 from plasma_global.models.electrons import (
     ELEMENTARY_CHARGE_C,
     ElectronEnergyClosure,
@@ -276,9 +285,70 @@ def test_bohm_wall_loss_matches_exponential_decay_to_1e_5() -> None:
     assert error <= 1.0e-5
 
 
-def test_halving_solver_tolerances_changes_main_quantities_and_peak_time_within_limits() -> (
-    None
-):
+def test_standard_bohm_afterglow_reaches_cold_extinction() -> None:
+    momentum = CrossSectionData(
+        "A_momentum",
+        "momentum_transfer",
+        "A",
+        0.0,
+        0.0,
+        np.array([0.0, 100.0]),
+        np.array([1.0e-20, 1.0e-20]),
+    )
+    chemistry = compile_chemistry(
+        ChemistryData(
+            source=Path("cold-afterglow.yaml"),
+            species=(
+                SpeciesData("e", "gas", -1, 0.00054858, {}),
+                SpeciesData("A", "gas", 0, 40.0, {"X": 1.0}),
+                SpeciesData("ion", "gas", 1, 40.0, {"X": 1.0}),
+            ),
+            gas_reactions=(),
+            boundary_reactions=(
+                ReactionData("neutralize", {"ion": 1.0}, {"A": 1.0}, None, None),
+            ),
+            surface_reactions=(),
+            rate_models={},
+            cross_sections={momentum.id: momentum},
+        )
+    )
+    elastic_heating, missing_targets = compile_elastic_heating(chemistry)
+    assert elastic_heating is not None
+    assert missing_targets == ()
+    segment = RecipeSegment("afterglow", 0.0, 0.1)
+    model = CompiledGlobalModel(
+        chemistry=chemistry,
+        zones=(Zone("plasma", 0.01),),
+        segments=(segment,),
+        electron_closure=ElectronEnergyClosure(),
+        wall_boundaries=(
+            WallBoundary(
+                "plasma",
+                0.1,
+                reactions=(BoundaryReaction("neutralize", "ion", {"A": 1.0}),),
+            ),
+        ),
+        elastic_heating_evaluator=elastic_heating,
+    )
+    result = solve_compiled_model(
+        model,
+        InitialState(
+            densities_m3_by_zone={"plasma": {"A": 1.0e24, "ion": 1.0e15}},
+            mean_energy_eV_by_zone={"plasma": 3.0},
+        ),
+        SolverSettings(
+            rtol=1.0e-6,
+            atol=1.0e-14,
+            save_at_s=(0.0, segment.end_s),
+        ),
+    )
+    final = model.evaluate(segment.end_s, result.state[-1], segment)
+
+    assert result.status.success
+    assert final.electron_states["plasma"].mean_energy_eV <= 1.0e-3
+
+
+def test_solver_tolerance_halving_stays_within_acceptance_limits() -> None:
     k1, k2 = 2.0, 0.5
     chemistry = ChemistryFixture(
         species_ids=("A", "B", "C", "ion"),

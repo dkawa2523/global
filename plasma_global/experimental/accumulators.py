@@ -1,23 +1,31 @@
-"""Generic state processes and extensive surface-event accumulators."""
+"""Public declarations for generic states and surface-event accumulation."""
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import Protocol
 
 import numpy as np
 
-
-def _owner_tuple(values: Sequence[str]) -> tuple[str, ...]:
-    owners = tuple(str(value) for value in values)
-    if not owners or any(not owner for owner in owners):
-        raise ValueError("state owners must be nonempty strings")
-    if len(set(owners)) != len(owners):
-        raise ValueError("state owners must be unique")
-    return owners
+from plasma_global.experimental._declarative_state import (
+    build_generic_state_layout,
+    evaluate_generic_state_rhs,
+    freeze_process_drivers,
+    normalize_process_owners,
+    validate_constant_source,
+    validate_driven_source,
+    validate_relaxation,
+    validate_state_declaration,
+)
+from plasma_global.experimental._surface_inventory import (
+    accumulate_surface_events,
+    freeze_surface_accumulation,
+    gas_density_sources,
+    particle_balance,
+    validate_monolayer_thickness,
+    validate_surface_event,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,27 +39,17 @@ class GenericState:
     upper_bound: float | None = None
 
     def __post_init__(self) -> None:
-        if not self.state_id:
-            raise ValueError("state_id must not be empty")
-        owners = _owner_tuple(self.owners)
-        bounds = tuple(
-            value for value in (self.lower_bound, self.upper_bound) if value is not None
+        object.__setattr__(
+            self,
+            "owners",
+            validate_state_declaration(
+                self.state_id,
+                self.owners,
+                self.initial,
+                self.lower_bound,
+                self.upper_bound,
+            ),
         )
-        if not math.isfinite(self.initial) or any(
-            not math.isfinite(value) for value in bounds
-        ):
-            raise ValueError("state initial value and bounds must be finite")
-        if self.lower_bound is not None and self.initial < self.lower_bound:
-            raise ValueError("state initial value is below its lower bound")
-        if self.upper_bound is not None and self.initial > self.upper_bound:
-            raise ValueError("state initial value is above its upper bound")
-        if (
-            self.lower_bound is not None
-            and self.upper_bound is not None
-            and self.upper_bound < self.lower_bound
-        ):
-            raise ValueError("state upper bound is below its lower bound")
-        object.__setattr__(self, "owners", owners)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,15 +59,7 @@ class ProcessContext:
     drivers: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        frozen: dict[str, Mapping[str, float]] = {}
-        for name, values in self.drivers.items():
-            converted = {str(owner): float(value) for owner, value in values.items()}
-            if not name or any(
-                not math.isfinite(value) for value in converted.values()
-            ):
-                raise ValueError("process drivers must have a name and finite values")
-            frozen[str(name)] = MappingProxyType(converted)
-        object.__setattr__(self, "drivers", MappingProxyType(frozen))
+        object.__setattr__(self, "drivers", freeze_process_drivers(self.drivers))
 
     def value(self, driver: str, owner: str) -> float:
         values = self.drivers.get(driver)
@@ -101,9 +91,8 @@ class ConstantSource:
     owners: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        if not self.target_state or not math.isfinite(self.rate_per_s):
-            raise ValueError("constant source target and rate must be valid")
-        object.__setattr__(self, "owners", tuple(str(owner) for owner in self.owners))
+        validate_constant_source(self.target_state, self.rate_per_s)
+        object.__setattr__(self, "owners", normalize_process_owners(self.owners))
 
     def rate(
         self, *, owner: str, current_value: float, context: ProcessContext
@@ -120,11 +109,8 @@ class LinearRelaxation:
     owners: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        if not self.target_state or not math.isfinite(self.equilibrium):
-            raise ValueError("relaxation target and equilibrium must be valid")
-        if not math.isfinite(self.time_constant_s) or self.time_constant_s <= 0.0:
-            raise ValueError("time_constant_s must be finite and positive")
-        object.__setattr__(self, "owners", tuple(str(owner) for owner in self.owners))
+        validate_relaxation(self.target_state, self.equilibrium, self.time_constant_s)
+        object.__setattr__(self, "owners", normalize_process_owners(self.owners))
 
     def rate(
         self, *, owner: str, current_value: float, context: ProcessContext
@@ -143,15 +129,8 @@ class DrivenSource:
     owners: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        if (
-            not self.target_state
-            or not self.driver
-            or not math.isfinite(self.coefficient)
-        ):
-            raise ValueError(
-                "driven source target, driver, and coefficient must be valid"
-            )
-        object.__setattr__(self, "owners", tuple(str(owner) for owner in self.owners))
+        validate_driven_source(self.target_state, self.driver, self.coefficient)
+        object.__setattr__(self, "owners", normalize_process_owners(self.owners))
 
     def rate(
         self, *, owner: str, current_value: float, context: ProcessContext
@@ -167,42 +146,20 @@ class GenericStateAccumulator:
     states: Sequence[GenericState]
     processes: Sequence[StateProcess] = ()
     labels: tuple[str, ...] = field(init=False)
+    lower_bounds: tuple[float | None, ...] = field(init=False)
+    upper_bounds: tuple[float | None, ...] = field(init=False)
     index: Mapping[tuple[str, str], int] = field(init=False, repr=False)
     _initial: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        states = tuple(self.states)
-        processes = tuple(self.processes)
-        if not states:
-            raise ValueError("at least one generic state is required")
-        if len({state.state_id for state in states}) != len(states):
-            raise ValueError("generic state IDs must be unique")
-        owner_by_state = {state.state_id: set(state.owners) for state in states}
-        labels: list[str] = []
-        index: dict[tuple[str, str], int] = {}
-        initial: list[float] = []
-        for state in states:
-            for owner in state.owners:
-                index[state.state_id, owner] = len(labels)
-                labels.append(f"{state.state_id}[{owner}]")
-                initial.append(state.initial)
-        for process in processes:
-            if process.target_state not in owner_by_state:
-                raise ValueError(
-                    f"process targets unknown state {process.target_state!r}"
-                )
-            unknown = set(process.owners) - owner_by_state[process.target_state]
-            if unknown:
-                raise ValueError(
-                    f"process for {process.target_state!r} selects unknown owners {sorted(unknown)}"
-                )
-        initial_array = np.asarray(initial, dtype=float)
-        initial_array.setflags(write=False)
-        object.__setattr__(self, "states", states)
-        object.__setattr__(self, "processes", processes)
-        object.__setattr__(self, "labels", tuple(labels))
-        object.__setattr__(self, "index", MappingProxyType(index))
-        object.__setattr__(self, "_initial", initial_array)
+        layout = build_generic_state_layout(self.states, self.processes)
+        object.__setattr__(self, "states", layout.states)
+        object.__setattr__(self, "processes", layout.processes)
+        object.__setattr__(self, "labels", layout.labels)
+        object.__setattr__(self, "lower_bounds", layout.lower_bounds)
+        object.__setattr__(self, "upper_bounds", layout.upper_bounds)
+        object.__setattr__(self, "index", layout.index)
+        object.__setattr__(self, "_initial", layout.initial)
 
     def initial_state(self) -> np.ndarray:
         return self._initial.copy()
@@ -210,41 +167,15 @@ class GenericStateAccumulator:
     def rhs(
         self, values: np.ndarray, context: ProcessContext | None = None
     ) -> np.ndarray:
-        state = np.asarray(values, dtype=float)
-        if state.shape != self._initial.shape or not np.all(np.isfinite(state)):
-            raise ValueError(
-                "generic state vector has the wrong shape or non-finite values"
-            )
-        evaluation_context = ProcessContext() if context is None else context
-        derivative = np.zeros_like(state)
-        state_by_id = {item.state_id: item for item in self.states}
-        for declared in self.states:
-            for owner in declared.owners:
-                value = float(state[self.index[declared.state_id, owner]])
-                if declared.lower_bound is not None and value < declared.lower_bound:
-                    raise ValueError(
-                        f"{declared.state_id}[{owner}] is below its declared domain"
-                    )
-                if declared.upper_bound is not None and value > declared.upper_bound:
-                    raise ValueError(
-                        f"{declared.state_id}[{owner}] is above its declared domain"
-                    )
-        for process in self.processes:
-            owners = tuple(process.owners) or tuple(
-                state_by_id[process.target_state].owners
-            )
-            for owner in owners:
-                position = self.index[process.target_state, owner]
-                derivative[position] += process.rate(
-                    owner=owner,
-                    current_value=float(state[position]),
-                    context=evaluation_context,
-                )
-        if not np.all(np.isfinite(derivative)):
-            raise FloatingPointError(
-                "generic process evaluation returned a non-finite rate"
-            )
-        return derivative
+        return evaluate_generic_state_rhs(
+            values,
+            reference=self._initial,
+            states=self.states,
+            processes=self.processes,
+            index=self.index,
+            context=context,
+            context_factory=ProcessContext,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,32 +193,19 @@ class SurfaceEventRate:
     film_layers_per_event: float = 0.0
 
     def __post_init__(self) -> None:
-        if not self.event_id or not self.zone_id or not self.surface_id:
-            raise ValueError("surface event, zone, and surface IDs must not be empty")
-        if not math.isfinite(self.rate_m2_s) or self.rate_m2_s < 0.0:
-            raise ValueError("surface event rate must be finite and nonnegative")
-        if not math.isfinite(self.area_m2) or self.area_m2 <= 0.0:
-            raise ValueError("surface area must be finite and positive")
-        if not math.isfinite(self.site_density_m2) or self.site_density_m2 <= 0.0:
-            raise ValueError("surface site density must be finite and positive")
-        gas = {
-            str(key): float(value)
-            for key, value in self.gas_particles_per_event.items()
-        }
-        inventory = {
-            str(key): float(value)
-            for key, value in self.inventory_particles_per_event.items()
-        }
-        if any(not key for key in (*gas, *inventory)) or any(
-            not math.isfinite(value) for value in (*gas.values(), *inventory.values())
-        ):
-            raise ValueError("surface event stoichiometry must be named and finite")
-        if not math.isfinite(self.film_layers_per_event):
-            raise ValueError("film_layers_per_event must be finite")
-        object.__setattr__(self, "gas_particles_per_event", MappingProxyType(gas))
-        object.__setattr__(
-            self, "inventory_particles_per_event", MappingProxyType(inventory)
+        gas, inventory = validate_surface_event(
+            event_id=self.event_id,
+            zone_id=self.zone_id,
+            surface_id=self.surface_id,
+            rate_m2_s=self.rate_m2_s,
+            area_m2=self.area_m2,
+            site_density_m2=self.site_density_m2,
+            gas_particles_per_event=self.gas_particles_per_event,
+            inventory_particles_per_event=self.inventory_particles_per_event,
+            film_layers_per_event=self.film_layers_per_event,
         )
+        object.__setattr__(self, "gas_particles_per_event", gas)
+        object.__setattr__(self, "inventory_particles_per_event", inventory)
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,51 +215,26 @@ class SurfaceAccumulation:
     film_growth_m_s: Mapping[str, float]
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "gas_particle_rate_s",
-            MappingProxyType(dict(self.gas_particle_rate_s)),
+        gas, inventory, film = freeze_surface_accumulation(
+            self.gas_particle_rate_s,
+            self.inventory_particle_rate_s,
+            self.film_growth_m_s,
         )
-        object.__setattr__(
-            self,
-            "inventory_particle_rate_s",
-            MappingProxyType(dict(self.inventory_particle_rate_s)),
-        )
-        object.__setattr__(
-            self, "film_growth_m_s", MappingProxyType(dict(self.film_growth_m_s))
-        )
-        values = (
-            *self.gas_particle_rate_s.values(),
-            *self.inventory_particle_rate_s.values(),
-            *self.film_growth_m_s.values(),
-        )
-        if any(not math.isfinite(value) for value in values):
-            raise ValueError("surface accumulation must be finite")
+        object.__setattr__(self, "gas_particle_rate_s", gas)
+        object.__setattr__(self, "inventory_particle_rate_s", inventory)
+        object.__setattr__(self, "film_growth_m_s", film)
 
     def particle_balance_s(self, species_id: str) -> float:
-        gas = sum(
-            value
-            for (_zone_id, species), value in self.gas_particle_rate_s.items()
-            if species == species_id
+        return particle_balance(
+            species_id,
+            self.gas_particle_rate_s,
+            self.inventory_particle_rate_s,
         )
-        inventory = sum(
-            value
-            for (_surface_id, species), value in self.inventory_particle_rate_s.items()
-            if species == species_id
-        )
-        return gas + inventory
 
     def gas_density_source(
         self, volume_m3_by_zone: Mapping[str, float]
     ) -> Mapping[tuple[str, str], float]:
-        sources: dict[tuple[str, str], float] = {}
-        for key, particle_rate in self.gas_particle_rate_s.items():
-            zone_id, _species_id = key
-            volume = float(volume_m3_by_zone[zone_id])
-            if not math.isfinite(volume) or volume <= 0.0:
-                raise ValueError(f"zone {zone_id!r} volume must be finite and positive")
-            sources[key] = particle_rate / volume
-        return MappingProxyType(sources)
+        return gas_density_sources(self.gas_particle_rate_s, volume_m3_by_zone)
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,33 +242,12 @@ class FilmInventoryAccumulator:
     monolayer_thickness_m: float = 3.0e-10
 
     def __post_init__(self) -> None:
-        if (
-            not math.isfinite(self.monolayer_thickness_m)
-            or self.monolayer_thickness_m <= 0.0
-        ):
-            raise ValueError("monolayer_thickness_m must be finite and positive")
+        validate_monolayer_thickness(self.monolayer_thickness_m)
 
     def accumulate(self, events: Sequence[SurfaceEventRate]) -> SurfaceAccumulation:
-        gas: dict[tuple[str, str], float] = {}
-        inventory: dict[tuple[str, str], float] = {}
-        film: dict[str, float] = {}
-        for event in events:
-            extensive_rate_s = event.area_m2 * event.rate_m2_s
-            for species_id, coefficient in event.gas_particles_per_event.items():
-                key = event.zone_id, species_id
-                gas[key] = gas.get(key, 0.0) + coefficient * extensive_rate_s
-            for species_id, coefficient in event.inventory_particles_per_event.items():
-                key = event.surface_id, species_id
-                inventory[key] = (
-                    inventory.get(key, 0.0) + coefficient * extensive_rate_s
-                )
-            growth = (
-                self.monolayer_thickness_m
-                * event.film_layers_per_event
-                * event.rate_m2_s
-                / event.site_density_m2
-            )
-            film[event.surface_id] = film.get(event.surface_id, 0.0) + growth
+        gas, inventory, film = accumulate_surface_events(
+            events, self.monolayer_thickness_m
+        )
         return SurfaceAccumulation(gas, inventory, film)
 
 

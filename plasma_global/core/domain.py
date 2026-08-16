@@ -7,14 +7,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from itertools import pairwise
 from types import MappingProxyType
-from typing import TYPE_CHECKING, SupportsFloat
+from typing import SupportsFloat
 
-from plasma_global.core.exceptions import ModelConfigurationError
+from plasma_global.core.transport import SegmentTransport
+from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.power import CompiledPowerCommand
-
-if TYPE_CHECKING:
-    from plasma_global.core.transport import SegmentTransport
-
 
 _MIN_BDF_RTOL = 100.0 * math.ulp(1.0)
 
@@ -25,6 +22,39 @@ def _frozen_float_mapping(
     converted = {str(key): float(value) for key, value in values.items()}
     if any(not math.isfinite(value) for value in converted.values()):
         raise ModelConfigurationError(f"{field_name} must contain only finite values")
+    return MappingProxyType(converted)
+
+
+def _frozen_power_commands(
+    commands: Mapping[str, CompiledPowerCommand],
+) -> Mapping[str, CompiledPowerCommand]:
+    converted = {str(key): value for key, value in commands.items()}
+    if any(not key for key in converted):
+        raise ModelConfigurationError("port_commands must not contain empty port IDs")
+    if any(
+        not isinstance(command, CompiledPowerCommand) for command in converted.values()
+    ):
+        raise ModelConfigurationError(
+            "port_commands must contain only compiled power commands"
+        )
+    return MappingProxyType(converted)
+
+
+def _frozen_nonnegative_groups(
+    values: Mapping[str, Mapping[str, float]],
+    *,
+    field_name: str,
+    invalid_message: str,
+) -> Mapping[str, Mapping[str, float]]:
+    converted: dict[str, Mapping[str, float]] = {}
+    for group_id, group_values in values.items():
+        frozen = _frozen_float_mapping(
+            group_values,
+            field_name=f"{field_name}[{group_id!r}]",
+        )
+        if any(value < 0.0 for value in frozen.values()):
+            raise ModelConfigurationError(invalid_message.format(id=group_id))
+        converted[str(group_id)] = frozen
     return MappingProxyType(converted)
 
 
@@ -77,70 +107,53 @@ class RecipeSegment:
             raise ModelConfigurationError(
                 f"Recipe segment {self.segment_id!r} must have end_s > start_s"
             )
-        power = _frozen_float_mapping(
-            self.absorbed_power_W_by_zone, field_name="absorbed_power_W_by_zone"
+        mapping_contracts = (
+            (
+                "absorbed_power_W_by_zone",
+                self.absorbed_power_W_by_zone,
+                True,
+                "negative absorbed power",
+            ),
+            (
+                "reduced_field_Td_by_zone",
+                self.reduced_field_Td_by_zone,
+                True,
+                "negative reduced field",
+            ),
+            (
+                "surface_temperature_K_by_surface",
+                self.surface_temperature_K_by_surface,
+                False,
+                "nonpositive surface temperature",
+            ),
+            (
+                "wall_temperature_K_by_zone",
+                self.wall_temperature_K_by_zone,
+                False,
+                "nonpositive wall temperature",
+            ),
+            (
+                "prescribed_electron_density_m3_by_zone",
+                self.prescribed_electron_density_m3_by_zone,
+                True,
+                "negative electron density",
+            ),
         )
-        field_values = _frozen_float_mapping(
-            self.reduced_field_Td_by_zone, field_name="reduced_field_Td_by_zone"
-        )
-        surface_temperatures = _frozen_float_mapping(
-            self.surface_temperature_K_by_surface,
-            field_name="surface_temperature_K_by_surface",
-        )
-        wall_temperatures = _frozen_float_mapping(
-            self.wall_temperature_K_by_zone,
-            field_name="wall_temperature_K_by_zone",
-        )
-        electron_densities = _frozen_float_mapping(
-            self.prescribed_electron_density_m3_by_zone,
-            field_name="prescribed_electron_density_m3_by_zone",
-        )
-        if any(value < 0.0 for value in power.values()):
-            raise ModelConfigurationError(
-                f"Recipe segment {self.segment_id!r} contains negative absorbed power"
+        for field_name, values, allow_zero, invalid_description in mapping_contracts:
+            frozen = _frozen_float_mapping(values, field_name=field_name)
+            invalid = any(
+                value < 0.0 if allow_zero else value <= 0.0 for value in frozen.values()
             )
-        if any(value < 0.0 for value in field_values.values()):
-            raise ModelConfigurationError(
-                f"Recipe segment {self.segment_id!r} contains negative reduced field"
-            )
-        if any(value <= 0.0 for value in surface_temperatures.values()):
-            raise ModelConfigurationError(
-                f"Recipe segment {self.segment_id!r} contains nonpositive surface temperature"
-            )
-        if any(value <= 0.0 for value in wall_temperatures.values()):
-            raise ModelConfigurationError(
-                f"Recipe segment {self.segment_id!r} contains nonpositive wall temperature"
-            )
-        if any(value < 0.0 for value in electron_densities.values()):
-            raise ModelConfigurationError(
-                f"Recipe segment {self.segment_id!r} contains negative electron density"
-            )
-        object.__setattr__(self, "absorbed_power_W_by_zone", power)
-        object.__setattr__(self, "reduced_field_Td_by_zone", field_values)
+            if invalid:
+                raise ModelConfigurationError(
+                    f"Recipe segment {self.segment_id!r} contains {invalid_description}"
+                )
+            object.__setattr__(self, field_name, frozen)
         object.__setattr__(
             self,
-            "surface_temperature_K_by_surface",
-            surface_temperatures,
+            "port_commands",
+            _frozen_power_commands(self.port_commands),
         )
-        object.__setattr__(self, "wall_temperature_K_by_zone", wall_temperatures)
-        object.__setattr__(
-            self,
-            "prescribed_electron_density_m3_by_zone",
-            electron_densities,
-        )
-        commands = {str(key): value for key, value in self.port_commands.items()}
-        if any(not key for key in commands):
-            raise ModelConfigurationError(
-                "port_commands must not contain empty port IDs"
-            )
-        if any(
-            not isinstance(command, CompiledPowerCommand)
-            for command in commands.values()
-        ):
-            raise ModelConfigurationError(
-                "port_commands must contain only compiled power commands"
-            )
-        object.__setattr__(self, "port_commands", MappingProxyType(commands))
 
 
 @dataclass(frozen=True)
@@ -153,16 +166,11 @@ class InitialState:
     surface_coverages: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        density_data: dict[str, Mapping[str, float]] = {}
-        for zone_id, values in self.densities_m3_by_zone.items():
-            frozen = _frozen_float_mapping(
-                values, field_name=f"densities_m3_by_zone[{zone_id!r}]"
-            )
-            if any(value < 0.0 for value in frozen.values()):
-                raise ModelConfigurationError(
-                    f"Initial densities in zone {zone_id!r} must be non-negative"
-                )
-            density_data[str(zone_id)] = frozen
+        densities = _frozen_nonnegative_groups(
+            self.densities_m3_by_zone,
+            field_name="densities_m3_by_zone",
+            invalid_message="Initial densities in zone {id!r} must be non-negative",
+        )
         energies = _frozen_float_mapping(
             self.mean_energy_eV_by_zone, field_name="mean_energy_eV_by_zone"
         )
@@ -176,20 +184,15 @@ class InitialState:
         )
         if any(value <= 0.0 for value in gas_temperatures.values()):
             raise ModelConfigurationError("Initial gas temperatures must be positive")
-        coverages: dict[str, Mapping[str, float]] = {}
-        for surface_id, values in self.surface_coverages.items():
-            frozen = _frozen_float_mapping(
-                values, field_name=f"surface_coverages[{surface_id!r}]"
-            )
-            if any(value < 0.0 for value in frozen.values()):
-                raise ModelConfigurationError(
-                    f"Initial coverages on surface {surface_id!r} must be nonnegative"
-                )
-            coverages[str(surface_id)] = frozen
-        object.__setattr__(self, "densities_m3_by_zone", MappingProxyType(density_data))
+        coverages = _frozen_nonnegative_groups(
+            self.surface_coverages,
+            field_name="surface_coverages",
+            invalid_message=("Initial coverages on surface {id!r} must be nonnegative"),
+        )
+        object.__setattr__(self, "densities_m3_by_zone", densities)
         object.__setattr__(self, "mean_energy_eV_by_zone", energies)
         object.__setattr__(self, "gas_temperature_K_by_zone", gas_temperatures)
-        object.__setattr__(self, "surface_coverages", MappingProxyType(coverages))
+        object.__setattr__(self, "surface_coverages", coverages)
 
 
 def _validate_solver_tolerances(rtol: float, atol: float) -> None:

@@ -4,11 +4,14 @@ from pathlib import Path
 
 import pytest
 
-import tools.importers.chemistry_v2 as chemistry_v2
 from plasma_global.chemistry.compile import compile_chemistry
 from plasma_global.chemistry.data import load_chemistry
 from plasma_global.errors import MigrationError
-from tools.importers.chemistry_v2 import convert_v2_chemistry
+from plasma_global.input import (
+    _migrate_v2_chemistry_cross_sections as cross_sections,
+)
+from plasma_global.input import _migrate_v2_chemistry_models as models
+from plasma_global.input._migrate_v2_chemistry import convert_v2_chemistry
 
 ROOT = Path(__file__).resolve().parents[1]
 V2_FIXTURES = ROOT / "tests" / "fixtures" / "v2"
@@ -200,9 +203,7 @@ def test_ambiguous_v2_scientific_data_requires_an_explicit_mapping(
 def test_converts_each_legacy_rate_family(
     tmp_path: Path, legacy: dict[str, object], expected: dict[str, object]
 ) -> None:
-    assert (
-        chemistry_v2._convert_rate_model("rate", legacy, tmp_path, tmp_path) == expected
-    )
+    assert models._convert_rate_model("rate", legacy, tmp_path, tmp_path) == expected
 
 
 def test_tabulated_rate_conversion_publishes_canonical_table(tmp_path: Path) -> None:
@@ -211,7 +212,7 @@ def test_tabulated_rate_conversion_publishes_canonical_table(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    converted = chemistry_v2._convert_rate_model(
+    converted = models._convert_rate_model(
         "table",
         {
             "backend": "tabulated_1d",
@@ -246,7 +247,7 @@ def test_cross_section_conversion_selects_segment_and_removes_exact_duplicates(
     )
     destination = tmp_path / "output" / "canonical.csv"
 
-    chemistry_v2._write_canonical_cross_section(source, destination, segment_index=1)
+    cross_sections._write_canonical_cross_section(source, destination, segment_index=1)
 
     assert destination.read_text(encoding="utf-8") == (
         "energy_eV,sigma_m2\n0.0,2.0\n2.0,3.0\n"
@@ -264,7 +265,7 @@ def test_momentum_conversion_rejects_missing_low_energy_support(
     destination = tmp_path / "canonical.csv"
 
     with pytest.raises(MigrationError, match="must explicitly cover 0 eV"):
-        chemistry_v2._write_canonical_cross_section(
+        cross_sections._write_canonical_cross_section(
             source, destination, require_zero_energy=True
         )
 
@@ -281,7 +282,7 @@ def test_momentum_conversion_preserves_explicit_zero_energy_support(
     )
     destination = tmp_path / "canonical.csv"
 
-    chemistry_v2._write_canonical_cross_section(
+    cross_sections._write_canonical_cross_section(
         source, destination, require_zero_energy=True
     )
 
@@ -317,7 +318,7 @@ def test_cross_section_reader_preserves_data_validation_errors(
     source.write_text(contents, encoding="utf-8")
 
     with pytest.raises(MigrationError) as error:
-        chemistry_v2._read_cross_section_segments(source)
+        cross_sections._read_cross_section_segments(source)
 
     assert str(error.value) == f"cross section {source}:2 {message}"
 
@@ -361,7 +362,7 @@ def test_cross_section_canonicalization_preserves_selection_errors(
     source = tmp_path / "legacy.csv"
 
     with pytest.raises(MigrationError) as error:
-        chemistry_v2._canonical_cross_section_rows(source, segments, segment_index)
+        cross_sections._canonical_cross_section_rows(source, segments, segment_index)
 
     assert str(error.value) == f"cross section {source} {message}"
 
@@ -406,7 +407,7 @@ def test_legacy_cv_inference_preserves_species_classification(
 ) -> None:
     row.setdefault("canonical_id", "species")
 
-    assert chemistry_v2._legacy_cv_over_kb(row) == expected
+    assert models._legacy_cv_over_kb(row) == expected
 
 
 @pytest.mark.parametrize(
@@ -435,6 +436,6 @@ def test_legacy_cv_inference_preserves_invalid_formula_errors(
     }
 
     with pytest.raises(MigrationError) as error:
-        chemistry_v2._legacy_cv_over_kb(row)
+        models._legacy_cv_over_kb(row)
 
     assert str(error.value) == f"species species {message}"

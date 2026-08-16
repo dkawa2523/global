@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from plasma_global.core.domain import RecipeSegment
-from plasma_global.core.exceptions import ModelConfigurationError
+from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.walls import BoundaryReaction, WallBoundary
 
 if TYPE_CHECKING:
@@ -277,23 +277,29 @@ class DomainValidator:
         self, segment: RecipeSegment, known_zones: set[str]
     ) -> None:
         model = self.model
-        if (
-            model.electron_closure.mode == "local_field"
-            and model.power_coordinator is None
-        ):
-            missing = known_zones - set(segment.reduced_field_Td_by_zone)
+        coordinator = model.power_coordinator
+        if model.electron_closure.mode == "local_field":
+            prescribed = set(segment.reduced_field_Td_by_zone)
+            missing = {
+                zone_id
+                for zone_id in known_zones - prescribed
+                if coordinator is None
+                or not coordinator.has_reduced_field_source(
+                    zone_id, segment.port_commands
+                )
+            }
             if missing:
                 raise ModelConfigurationError(
                     f"local_field segment {segment.segment_id!r} lacks E/N for zones "
                     f"{sorted(missing)}"
                 )
-        if model.power_coordinator is None and segment.port_commands:
+        if coordinator is None and segment.port_commands:
             raise ModelConfigurationError(
                 f"Segment {segment.segment_id!r} has port commands but no "
                 "PowerCoordinator"
             )
-        if model.power_coordinator is not None:
-            model.power_coordinator.validate_commands(segment.port_commands)
+        if coordinator is not None:
+            coordinator.validate_commands(segment.port_commands)
 
     def _electron_closure(self) -> None:
         closure = self.model.electron_closure

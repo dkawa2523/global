@@ -85,6 +85,24 @@ def _write_chemistry(directory: Path) -> Path:
     return manifest
 
 
+def _add_helium_momentum(manifest: Path) -> None:
+    species_path = manifest.parent / "species.csv"
+    species_path.write_text(
+        species_path.read_text(encoding="utf-8") + "He,gas,0,4.0026,He:1,\n",
+        encoding="utf-8",
+    )
+    cross_sections = manifest.parent / "cross_sections.yaml"
+    cross_sections.write_text(
+        cross_sections.read_text(encoding="utf-8") + "  - id: xs_he_momentum\n"
+        "    kind: momentum_transfer\n"
+        "    target: He\n"
+        "    threshold_eV: 0.0\n"
+        "    energy_loss_eV: 0.0\n"
+        "    file: momentum.csv\n",
+        encoding="utf-8",
+    )
+
+
 def _approximate_case(manifest: Path) -> CaseSpec:
     data = load_case(MINIMAL_CASE).model_dump(mode="python")
     data["chemistry"]["manifest"] = manifest
@@ -102,8 +120,7 @@ def _approximate_case(manifest: Path) -> CaseSpec:
     }
     data["models"]["electrons"] = {
         "kind": "experimental.approximate_two_term",
-        "mixture_key_species": ["Ar"],
-        "cache": {"max_entries": 2, "fraction_decimals": 4},
+        "cache": {"max_entries": 2},
         "energy_grid": {"min_eV": 1.0e-3, "max_eV": 100.0, "n": 32},
         "reduced_field_grid": {"min_Td": 5.0, "max_Td": 100.0, "n": 4},
         "max_shape_iterations": 48,
@@ -152,18 +169,19 @@ def test_compilation_prepares_eedf_once_and_rhs_only_interpolates(
     assert provenance["closure"] == "local_field"
 
 
-def test_distinct_initial_neutral_mixtures_get_distinct_immutable_tables(
+def test_tables_are_shared_by_composition_and_mobility_scales_with_density(
     tmp_path: Path,
 ) -> None:
-    chemistry = load_chemistry(_write_chemistry(tmp_path / "chemistry"))
+    manifest = _write_chemistry(tmp_path / "chemistry")
+    _add_helium_momentum(manifest)
+    chemistry = load_chemistry(manifest)
     prepared = prepare_approximate_two_term_kinetics(
         chemistry,
         {
-            "same_a": {"Ar": 2.0e20},
-            "same_b": {"Ar": 2.0e20},
-            "different": {"Ar": 1.0e20},
+            "same_a": {"Ar": 2.0e20, "He": 2.0e20},
+            "same_b": {"Ar": 1.0e20, "He": 1.0e20},
+            "different": {"Ar": 3.0e20, "He": 1.0e20},
         },
-        mixture_key_species=("Ar",),
         cache_max_entries=2,
         energy_max_eV=100.0,
         energy_points=32,
@@ -179,15 +197,62 @@ def test_distinct_initial_neutral_mixtures_get_distinct_immutable_tables(
     assert same_a is same_b
     assert same_a is not different
     assert prepared.provenance["unique_table_count"] == 2
+    assert prepared.provenance["mixture_identity"] == ("exact_full_target_fractions")
     assert not same_a.axis.flags.writeable
     assert not same_a.rate_tables["xs_momentum"].flags.writeable
-    assert different.mobility_m2_V_s == pytest.approx(2.0 * same_a.mobility_m2_V_s)
+    assert same_a.axis[0] == 0.0
+    cold = same_a.evaluate(reduced_field_Td=0.0, neutral_density_m3=4.0e20)
+    first = same_a.evaluate(reduced_field_Td=5.0, neutral_density_m3=4.0e20)
+    transition = same_a.evaluate(
+        reduced_field_Td=2.5,
+        neutral_density_m3=4.0e20,
+    )
+    assert cold.mean_energy_eV == 0.0
+    assert all(value == 0.0 for value in cold.rate_coefficients.values())
+    assert transition.mean_energy_eV == pytest.approx(0.5 * first.mean_energy_eV)
+    assert transition.mobility_m2_V_s == pytest.approx(first.mobility_m2_V_s)
+    for rate_id, first_rate in first.rate_coefficients.items():
+        assert transition.rate_coefficients[rate_id] == pytest.approx(0.5 * first_rate)
+    reference = same_a.evaluate(reduced_field_Td=5.0, neutral_density_m3=4.0e20)
+    expanded = same_b.evaluate(reduced_field_Td=5.0, neutral_density_m3=2.0e20)
+    assert expanded.mobility_m2_V_s == pytest.approx(2.0 * reference.mobility_m2_V_s)
+    assert expanded.mean_energy_eV == pytest.approx(reference.mean_energy_eV)
+    assert expanded.rate_coefficients == pytest.approx(reference.rate_coefficients)
 
     with pytest.raises(CaseValidationError, match=r"cache\.max_entries"):
         prepare_approximate_two_term_kinetics(
             chemistry,
-            {"a": {"Ar": 2.0e20}, "b": {"Ar": 1.0e20}},
+            {
+                "a": {"Ar": 1.0e20, "He": 1.0e20},
+                "b": {"Ar": 3.0e20, "He": 1.0e20},
+            },
             cache_max_entries=1,
+            energy_max_eV=100.0,
+            energy_points=32,
+            field_min_Td=5.0,
+            field_max_Td=10.0,
+            field_points=2,
+            max_iterations=48,
+        )
+
+
+def test_approximate_two_term_rejects_positive_neutral_without_collisions(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_chemistry(tmp_path / "chemistry")
+    species_path = manifest.parent / "species.csv"
+    species_path.write_text(
+        species_path.read_text(encoding="utf-8") + "He,gas,0,4.0026,He:1,\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        CaseValidationError,
+        match="positive neutral species without electron collision cross sections: He",
+    ):
+        prepare_approximate_two_term_kinetics(
+            load_chemistry(manifest),
+            {"plasma": {"Ar": 1.0e20, "He": 1.0e20}},
             energy_max_eV=100.0,
             energy_points=32,
             field_min_Td=5.0,
@@ -321,9 +386,7 @@ def test_preparation_normalizes_numpy_scalars_and_plain_provenance(
     prepared = prepare_approximate_two_term_kinetics(
         chemistry,
         {"plasma": {"Ar": np.float32(1.0e20)}},
-        mixture_key_species=("Ar",),
         cache_max_entries=np.int64(2),
-        fraction_decimals=np.int64(4),
         energy_min_eV=np.float32(1.0e-3),
         energy_max_eV=np.float32(10.0),
         energy_points=np.int64(32),

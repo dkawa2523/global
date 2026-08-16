@@ -86,7 +86,6 @@ reactor:
   power_ports:
   - port_id: source_rf
     zone_id: source
-    coupling_target: source
     model:
       kind: experimental.rf_envelope
       role: source
@@ -101,7 +100,6 @@ reactor:
       plasma_potential_per_sqrt_W: 0.0
   - port_id: wafer_bias
     zone_id: process
-    coupling_target: wafer
     model:
       kind: experimental.rf_envelope
       role: bias
@@ -183,11 +181,8 @@ recipe:
 models:
   electrons:
     kind: experimental.approximate_two_term
-    mixture_key_species:
-    - Ar
     cache:
       max_entries: 4
-      fraction_decimals: 4
     energy_grid:
       min_eV: 0.001
       max_eV: 160.0

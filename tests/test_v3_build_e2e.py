@@ -9,10 +9,11 @@ import pytest
 
 import plasma_global.build as build_module
 import plasma_global.models.external_table as external_table_module
+from plasma_global import _build_electrons as electron_build_module
 from plasma_global.build import CompiledCase, compile_case, simulate_case
 from plasma_global.errors import CaseValidationError
 from plasma_global.input.load import load_case
-from plasma_global.input.schema import CaseSpec
+from plasma_global.input.schema import CaseSpec, TableElectronModel
 from plasma_global.models.electrons import ELEMENTARY_CHARGE_C
 from plasma_global.models.gas_energy import elastic_electron_heating_J_m3_s
 from plasma_global.models.power import CompiledPowerCommand
@@ -450,9 +451,38 @@ def test_compile_reads_each_shared_external_model_once(
         "from_hdf5",
         counted_kinetics,
     )
-    compile_case(case)
+    compiled = compile_case(case)
 
     assert counts == {"chemistry": 1, "power": 1, "kinetics": 1}
+    kinetics_provenance = compiled.metadata["provenance"]["electron_kinetics"]
+    assert kinetics_provenance["mobility_scaling"] == "inverse_neutral_density"
+    assert kinetics_provenance["mobility_reference_source"] == (
+        "uniform_initial_neutral_density"
+    )
+
+
+def test_shared_table_requires_reference_for_different_zone_densities() -> None:
+    inferred = TableElectronModel(
+        kind="table",
+        file=Path("rates.h5"),
+        lookup="local_field",
+    )
+    with pytest.raises(CaseValidationError, match="requires mobility_reference"):
+        electron_build_module._table_mobility_reference(
+            inferred,
+            {"source": 1.0e20, "process": 2.0e20},
+        )
+
+    explicit = TableElectronModel(
+        kind="table",
+        file=Path("rates.h5"),
+        lookup="local_field",
+        mobility_reference_neutral_density_m3=3.0e20,
+    )
+    assert electron_build_module._table_mobility_reference(
+        explicit,
+        {"source": 1.0e20, "process": 2.0e20},
+    ) == (3.0e20, "input")
 
 
 def test_previous_external_table_knots_bind_each_forcing_interval(

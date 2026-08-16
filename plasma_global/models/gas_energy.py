@@ -14,6 +14,26 @@ E_CHARGE = 1.602176634e-19
 ELECTRON_MASS_KG = 9.1093837139e-31
 
 
+def _validate_heat_capacities(cv: np.ndarray) -> None:
+    if cv.ndim != 1 or cv.size == 0 or np.any(cv <= 0.0) or not np.all(np.isfinite(cv)):
+        raise CaseValidationError("cv_over_kb must be a finite positive species array")
+
+
+def _validate_wall_energy_arrays(
+    wall_temperature: np.ndarray, relaxation: np.ndarray
+) -> None:
+    if wall_temperature.ndim != 1 or relaxation.shape != wall_temperature.shape:
+        raise CaseValidationError(
+            "wall temperature and relaxation must be equal zone arrays"
+        )
+    if (
+        np.any(wall_temperature <= 0.0)
+        or np.any(relaxation < 0.0)
+        or not np.all(np.isfinite([*wall_temperature, *relaxation]))
+    ):
+        raise CaseValidationError("wall-energy parameters are invalid")
+
+
 @dataclass(frozen=True, slots=True)
 class HeavyEnergyClosure:
     """Convert between mixture temperature and internal energy density."""
@@ -26,25 +46,8 @@ class HeavyEnergyClosure:
         cv = np.asarray(self.cv_over_kb, dtype=float)
         wall_temperature = np.asarray(self.wall_temperature_K, dtype=float)
         relaxation = np.asarray(self.wall_relaxation_s_inv, dtype=float)
-        if (
-            cv.ndim != 1
-            or cv.size == 0
-            or np.any(cv <= 0.0)
-            or not np.all(np.isfinite(cv))
-        ):
-            raise CaseValidationError(
-                "cv_over_kb must be a finite positive species array"
-            )
-        if wall_temperature.ndim != 1 or relaxation.shape != wall_temperature.shape:
-            raise CaseValidationError(
-                "wall temperature and relaxation must be equal zone arrays"
-            )
-        if (
-            np.any(wall_temperature <= 0.0)
-            or np.any(relaxation < 0.0)
-            or not np.all(np.isfinite([*wall_temperature, *relaxation]))
-        ):
-            raise CaseValidationError("wall-energy parameters are invalid")
+        _validate_heat_capacities(cv)
+        _validate_wall_energy_arrays(wall_temperature, relaxation)
         for name, array in (
             ("cv_over_kb", cv),
             ("wall_temperature_K", wall_temperature),

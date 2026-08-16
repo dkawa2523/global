@@ -54,13 +54,6 @@
           "title": "Max Shape Iterations",
           "type": "integer"
         },
-        "mixture_key_species": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Mixture Key Species",
-          "type": "array"
-        },
         "reduced_field_grid": {
           "$ref": "#/$defs/ReducedFieldGridConfig"
         }
@@ -137,14 +130,9 @@
     "CacheConfig": {
       "additionalProperties": false,
       "properties": {
-        "fraction_decimals": {
-          "default": 3,
-          "minimum": 0,
-          "title": "Fraction Decimals",
-          "type": "integer"
-        },
         "max_entries": {
           "default": 12,
+          "description": "Maximum exact full-target mole-fraction vectors retained.",
           "exclusiveMinimum": 0,
           "title": "Max Entries",
           "type": "integer"
@@ -2120,6 +2108,19 @@
           ],
           "title": "Lookup",
           "type": "string"
+        },
+        "mobility_reference_neutral_density_m3": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mobility Reference Neutral Density M3"
         }
       },
       "required": [

@@ -5,7 +5,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, SupportsFloat
+from typing import Any
 
 import yaml
 
@@ -29,14 +29,10 @@ class RFEnvelopeCalibrationInput:
     dc_self_bias_V: float | None = None
 
 
-def _python_float(value: SupportsFloat) -> float:
-    return float(value)
-
-
 def _positive(value: float | None) -> float | None:
     if value is None:
         return None
-    value = _python_float(value)
+    value = float(value)
     return value if value > 0.0 else None
 
 
@@ -45,8 +41,8 @@ def _net_commanded_power(inp: RFEnvelopeCalibrationInput) -> float | None:
     if commanded is not None:
         return commanded
     if inp.forward_power_W is not None:
-        reflected = max(_python_float(inp.reflected_power_W or 0.0), 0.0)
-        return max(_python_float(inp.forward_power_W) - reflected, 0.0)
+        reflected = max(float(inp.reflected_power_W or 0.0), 0.0)
+        return max(float(inp.forward_power_W) - reflected, 0.0)
     return None
 
 
@@ -54,7 +50,7 @@ def _power_coefficients(inp: RFEnvelopeCalibrationInput) -> dict[str, float]:
     commanded = _net_commanded_power(inp)
     coefficients: dict[str, float] = {}
     if inp.frequency_Hz is not None:
-        coefficients["frequency_Hz"] = _python_float(inp.frequency_Hz)
+        coefficients["frequency_Hz"] = float(inp.frequency_Hz)
     if commanded is not None:
         coefficients["commanded_power_W"] = commanded
 
@@ -79,7 +75,7 @@ def _voltage_coefficients(inp: RFEnvelopeCalibrationInput) -> dict[str, float]:
         elif delivered is not None:
             coefficients["effective_impedance_ohm"] = voltage * voltage / delivered
         if inp.dc_self_bias_V is not None:
-            dc_self_bias_V = _python_float(inp.dc_self_bias_V)
+            dc_self_bias_V = float(inp.dc_self_bias_V)
             coefficients["self_bias_fraction"] = abs(dc_self_bias_V) / (
                 math.sqrt(2.0) * voltage
             )

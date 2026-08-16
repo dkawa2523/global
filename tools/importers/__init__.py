@@ -1,1 +1,1 @@
-"""Offline converters from third-party and legacy chemistry formats."""
+"""Development CLI facades for runtime-owned migration converters."""

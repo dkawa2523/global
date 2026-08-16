@@ -14,6 +14,7 @@ import numpy as np
 
 from plasma_global.chemistry.compile import CompiledChemistry
 from plasma_global.errors import CaseValidationError
+from plasma_global.input._schema_reactor import _power_coupling_target_error
 from plasma_global.input.schema import (
     CaseSpec,
     DCSeriesModel,
@@ -86,10 +87,12 @@ def _ccp_geometry(
             f"experimental CCP port {port.port_id!r} needs reactor surface areas"
         )
     total_area = sum(item.area_m2 for item in surfaces)
-    target = next(
-        (item for item in surfaces if item.surface_id == port.coupling_target), None
-    )
-    powered_area = target.area_m2 if target is not None else total_area / 2.0
+    powered_area = total_area / 2.0
+    if port.coupling_target:
+        target = next(
+            item for item in surfaces if item.surface_id == port.coupling_target
+        )
+        powered_area = target.area_m2
     positive_masses = chemistry.masses_kg[chemistry.charges > 0.0]
     if positive_masses.size == 0:
         raise CaseValidationError(
@@ -220,6 +223,12 @@ def compile_power_coordinator(
 ) -> PowerCoordinator | None:
     """Compile all configured power ports and preserve reactor declaration order."""
 
+    surface_zone_by_id = {
+        surface.surface_id: surface.zone_id for surface in case.reactor.surfaces
+    }
+    for port in case.reactor.power_ports:
+        if error := _power_coupling_target_error(port, surface_zone_by_id):
+            raise CaseValidationError(error)
     ports = tuple(
         _compile_power_port(case, chemistry, external_tables, port)
         for port in case.reactor.power_ports

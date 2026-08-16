@@ -44,10 +44,6 @@ def _optional_dict_or_none(
     return value
 
 
-def _metadata_name(value: object) -> str:
-    return str(value)
-
-
 def audit_from_metadata(result: SimulationResult) -> AuditReport:
     """Audit using only constraints stored with the result metadata."""
 
@@ -70,7 +66,7 @@ def audit_from_metadata(result: SimulationResult) -> AuditReport:
         "runtime diagnostic conservation_max_abs_residual must be a mapping",
     )
     for name, value in stored_maxima.items():
-        residuals.setdefault(_metadata_name(name), np.asarray(float(value)))
+        residuals.setdefault(str(name), np.asarray(float(value)))
     tolerances = _optional_dict_or_none(
         metadata,
         "conservation_tolerances",

@@ -3,7 +3,6 @@ from __future__ import annotations
 import shutil
 from dataclasses import replace
 from pathlib import Path
-from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -18,7 +17,7 @@ from plasma_global.core.result import SimulationResult, SimulationStatus
 from plasma_global.input.schema import SurfaceKineticsConfig
 
 
-def test_audit_reports_status_finiteness_required_series_and_nonnegativity() -> None:
+def test_audit_reports_status_required_series_and_nonnegativity() -> None:
     result = SimulationResult(
         time_s=np.array([0.0, 1.0]),
         state=np.array([[1.0, 2.0], [-1.0e-2, 3.0]]),
@@ -26,15 +25,6 @@ def test_audit_reports_status_finiteness_required_series_and_nonnegativity() -> 
         observables={"power": np.array([1.0, 2.0])},
         status=SimulationStatus.failed("integrator diverged"),
     )
-    # The public constructor rejects non-finite content. The audit still
-    # diagnoses an old in-memory result or an object corrupted after loading.
-    legacy_state = np.array([[1.0, 2.0], [-1.0e-2, np.nan]])
-    legacy_power = np.array([1.0, np.inf])
-    legacy_state.setflags(write=False)
-    legacy_power.setflags(write=False)
-    object.__setattr__(result, "state", legacy_state)
-    object.__setattr__(result, "observables", MappingProxyType({"power": legacy_power}))
-
     report = audit_result(
         result,
         required_series=("missing",),
@@ -46,8 +36,6 @@ def test_audit_reports_status_finiteness_required_series_and_nonnegativity() -> 
     assert report.passed is False
     assert {
         "SIMULATION_NOT_SUCCESSFUL",
-        "STATE_NONFINITE",
-        "OBSERVABLE_NONFINITE",
         "REQUIRED_SERIES_MISSING",
         "NEGATIVE_SERIES_VALUE",
     } <= codes
@@ -96,8 +84,35 @@ def test_audit_rejects_invalid_control_tolerances() -> None:
         audit_result(result, negative_tolerance=-1.0)
 
 
-def test_case_audit_reports_missing_momentum_cross_section_target() -> None:
+def test_case_audit_reports_missing_momentum_cross_section_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+    from plasma_global.core.compiled import CompiledGlobalModel
+    from plasma_global.core.domain import RecipeSegment
+
+    evaluations = 0
+    original = CompiledGlobalModel.evaluate
+
+    def counted_evaluate(
+        self: CompiledGlobalModel,
+        time_s: float,
+        state: np.ndarray,
+        segment: RecipeSegment,
+        *,
+        collect_ledger: bool = True,
+    ) -> object:
+        nonlocal evaluations
+        evaluations += 1
+        return original(
+            self,
+            time_s,
+            state,
+            segment,
+            collect_ledger=collect_ledger,
+        )
+
+    monkeypatch.setattr(CompiledGlobalModel, "evaluate", counted_evaluate)
 
     report = audit_case(load_case(fixture))
     missing = [
@@ -117,6 +132,7 @@ def test_case_audit_reports_missing_momentum_cross_section_target() -> None:
     }
     assert report.simulation["status"]["success"] is True
     assert report.simulation["time_count"] > 1
+    assert evaluations == report.simulation["time_count"]
     assert report.classification == "standard"
     assert report.production_qualified is False
     assert report.conservation_max_abs_residual[

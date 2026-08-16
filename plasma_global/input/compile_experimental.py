@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import SupportsFloat
 
 from plasma_global.chemistry.data import ChemistryData, ReactionData
 from plasma_global.errors import CaseValidationError
@@ -21,12 +20,6 @@ from plasma_global.input.schema import (
     ExperimentalWallInventoryConfig,
     SurfaceConfig,
 )
-
-
-def _python_float(value: SupportsFloat) -> float:
-    """Normalize supported numeric scalars at the runtime boundary."""
-
-    return float(value)
 
 
 def _compile_generic_extension(
@@ -71,8 +64,8 @@ def _compile_film_changes(
     }
     changes = {
         reaction.id: sum(
-            _python_float(reaction.products.get(species_id, 0.0))
-            - _python_float(reaction.reactants.get(species_id, 0.0))
+            float(reaction.products.get(species_id, 0.0))
+            - float(reaction.reactants.get(species_id, 0.0))
             for species_id in film_species
         )
         for reaction in chemistry_data.surface_reactions
@@ -207,7 +200,7 @@ def _build_runtime_accumulator(
             monolayer_thickness_m=(
                 3.0e-10
                 if film_config is None
-                else _python_float(film_config.monolayer_thickness_m)
+                else float(film_config.monolayer_thickness_m)
             ),
         )
     except (TypeError, ValueError) as exc:

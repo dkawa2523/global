@@ -52,8 +52,10 @@ def test_v2_migration_baseline_has_stable_schema_and_finite_records() -> None:
 
     suite = document["legacy_suite"]
     assert set(suite) == {"passed", "deselected", "coverage_percent"}
-    assert isinstance(suite["passed"], int) and suite["passed"] > 0
-    assert isinstance(suite["deselected"], int) and suite["deselected"] >= 0
+    assert isinstance(suite["passed"], int)
+    assert suite["passed"] > 0
+    assert isinstance(suite["deselected"], int)
+    assert suite["deselected"] >= 0
     assert 0 <= suite["coverage_percent"] <= 100
 
     assert set(document["cases"]) == {
@@ -63,9 +65,12 @@ def test_v2_migration_baseline_has_stable_schema_and_finite_records() -> None:
     }
     for record in document["cases"].values():
         assert set(record) == {"elapsed_s", "nfev", "saved_points", "final"}
-        assert math.isfinite(record["elapsed_s"]) and record["elapsed_s"] >= 0.0
-        assert isinstance(record["nfev"], int) and record["nfev"] > 0
-        assert isinstance(record["saved_points"], int) and record["saved_points"] > 0
+        assert math.isfinite(record["elapsed_s"])
+        assert record["elapsed_s"] >= 0.0
+        assert isinstance(record["nfev"], int)
+        assert record["nfev"] > 0
+        assert isinstance(record["saved_points"], int)
+        assert record["saved_points"] > 0
         assert record["final"]
         assert all(
             isinstance(value, (int, float)) and math.isfinite(value)

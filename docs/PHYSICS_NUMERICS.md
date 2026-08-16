@@ -89,11 +89,19 @@ mean energy、rate coefficient、mobility を代数評価します。電気―�
 mobility、absorbed power の全 residual を相対許容誤差 `1e-6`、最大 12 iteration で判定し、
 非収束時は時刻・step・port を含む明示エラーにします。
 収束判定後は返却する最終E/Nでもう一度kineticsとportを評価するため、artifactのE/N、rate、mobility、
-powerは同じiterateに対応します。正のfieldだけを持つprepared tableをoffにした場合だけcold-electron
-boundaryを使い、明示0-field nodeがあるtableの物理値は上書きしません。
+powerは同じiterateに対応します。prepared tableは0-field cold-electron nodeを追加し、最初の正field
+grid点までmean energy/rateを連続補間します。mobilityは最初の値を維持します。一般tableに明示された
+0-field nodeの物理値は上書きしません。
 external-tableのdefaultとstep overrideでE/N列の有無が変わる場合は、現在のcommandの能力を優先します。
 off commandは停止対象がE/N sourceだったかを明示し、power-only portの停止で別のprescribed E/Nを
 0へ上書きしません。
+
+electron table の `mobility_m2_V_s` は基準中性密度での値です。runtime は swarm similarity
+\(\mu N=f(E/N)\) に従い、現在の全中性gas密度 \(N\) で `mobility` だけを反比例補正します。
+mean energy と rate coefficient は同じ E/N・混合比では変更しません。一般tableの基準密度は
+`mobility_reference_neutral_density_m3` で指定でき、省略時は全zoneで等しい初期中性密度だけを
+基準として受理します。異なる初期密度へ1つのtableを共有する場合は基準値の明示が必要です。
+compile-time two-term table は各固定混合物の総中性密度を基準として記録します。
 
 RF/CCPのpower commandはsourceへの皮相電力ではなくplasma吸収実電力です。RFのsource-side実電力は
 吸収電力をcoupling efficiencyで割って求めます。lossless-sheath CCPでは実電力は (I_{rms}^2R)、
@@ -159,15 +167,23 @@ Maxwellian/electron-energy closure、固定気体温度の floating Bohm wall �
 ない場合は
 
 \[
-\epsilon_{sheath}=\frac{T_e}{2}\ln\!\left(\frac{m_i}{2\pi m_e}\right)
+\epsilon_{sheath}=T_e\ln\!\left(\frac{\Gamma_{e,th}}
+{\sum_i z_i\Gamma_i}\right),\qquad
+\Gamma_{e,th}=n_e\sqrt{\frac{eT_e}{2\pi m_e}}
 \]
 
-を内部計算します。多イオン、負イオン、local-field、動的気体温度、経験 wall transport は実行機能を
+を実際のBohm fluxから内部計算します。単一一価イオンでは `h_factor` を含む
+\(T_e\ln[\sqrt{m_i/(2\pi m_e)}/h_i]\) に一致します。活動する多価イオンや非負の
+floating potentialを持たない電流収支は、暗黙の0 eVへfallbackせず明示sheath energyを要求します。
+多イオン、負イオン、local-field、動的気体温度、経験 wall transport は実行機能を
 維持しますが、audit では `experimental` かつ `production_qualified: false` と分類します。
 
 surface coverage は吸着種だけを state とし、free-site fraction は
-`1 - sum(occupied coverage)` から machine precision で計算します。独立 free-site ODE、coverage
-renormalization、区間後 projection はありません。
+`1 - sum(occupied coverage)` から計算します。独立 free-site ODEはありません。公開の直接評価は
+過充填を拒否しますが、BDFのNewton試行点だけはsite occupancyで重み付けしたsimplexへ比率を保って
+radial continuationし、物理解へ戻るstepを例外で妨げません。保存するaccepted outputは、solver
+tolerance内の超過だけをclosed simplexへ丸めます。materialな過充填は成功結果へ射影せず、時刻と
+segmentを付けた積分失敗にします。
 
 ## Transport
 
@@ -180,14 +196,18 @@ inter-zone だけなら \(\sum_z V_z n_{z,s}\) と、対応する electron/heavy
 
 ## Domain contract
 
-component-wise RHS clip や solver 後 projection は行いません。BDF は初期状態から固定した
-component scale で無次元 state を積分し、公開 scalar `solver.atol` はこの無次元 state に適用します。
+BDF は初期状態から固定したcomponent scaleで無次元stateを積分し、公開scalar `solver.atol` は
+この無次元stateに適用します。SciPyはNewton試行点とaccepted callbackを区別して渡さないため、
+RHSへ渡す一時的な物理viewだけをcomponent boundsとsurface simplexへ連続化します。solver内部stateは
+変更しません。結果の公開境界では許容幅内のbound超過とsurface simplexの丸めを正規化します。
 物理 domain tolerance と charge の丸め誤差判定は同じ scale から導出します。
 
-- `state < lower_bound - 10 * domain_atol` は積分失敗。
-- その範囲内の微小負密度は rate の反応物としてだけ 0 を使う。
-- charge closure、wall、transport、RHS は生の trial state を受け取る。
-- accepted result を作る時だけ、丸め誤差範囲の負値を 0 にする。
+- raw initial stateはcomponent boundsとsurface simplexを満たさなければ積分前に失敗。
+- RHS evaluation viewは有限のlower/upper boundとsurface simplexへ継続し、Newtonの棄却試行を許す。
+- accepted resultは`10*domain_atol`以内のbound超過だけを境界へ揃え、materialな違反はsegment/time付きで失敗。
+- electron densityが0ならtolerance内のelectron energyも0へ揃え、materialな残留energyは失敗にする。
+- evolved heavy energyは各保存点の混合物heat capacityと同時に検証する。
+- 公開の直接model評価は継続を使わず、domain違反を明示する。
 - table bounds は既定で error。`clip` / `hold` は明示 opt-in の lookup policy。
 
 非有限 state、負 electron density、負 internal energy、coupling 非収束を silent fallback で継続
@@ -238,3 +258,7 @@ electron profile、film、wall inventory、generic extension state も、有限�
 approximate two-term preparationはpower-balance residualに加え、最終energy binの確率質量を
 `1e-3`以下に要求します。既定field gridは `1..100 Td` とし、高fieldではenergy-domain convergenceを
 満たすようcross-section supportとenergy上限をcaseごとに検証します。
+同じ初期neutral組成比のzoneは一つのEEDF tableを共有します。mean energyとrate coefficientは
+E/N similarityを使い、mobilityはtable作成時の基準neutral densityから現在密度へ換算します。
+このtableは初期neutral組成比に固定され、反応による組成変化に応じた再生成や補間は行いません。
+組成変化が大きいcaseでは、外部Boltzmann solverとの比較を含む感度評価が必要です。

@@ -124,22 +124,22 @@ def _validate_external_table_command(
         )
 
 
-_CommandValidator = Callable[
-    [
-        float | None,
-        float | None,
-        ExternalTableBinding | ExternalTableSample | None,
+_COMMAND_VALIDATORS: dict[
+    str,
+    Callable[
+        [
+            float | None,
+            float | None,
+            ExternalTableBinding | ExternalTableSample | None,
+        ],
+        None,
     ],
-    None,
-]
-_COMMAND_VALIDATORS: Mapping[str, _CommandValidator] = MappingProxyType(
-    {
-        "off": _validate_off_command,
-        "power": _validate_power_command,
-        "voltage": _validate_voltage_command,
-        "external_table": _validate_external_table_command,
-    }
-)
+] = {
+    "off": _validate_off_command,
+    "power": _validate_power_command,
+    "voltage": _validate_voltage_command,
+    "external_table": _validate_external_table_command,
+}
 
 
 def validate_power_port_result(

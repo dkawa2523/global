@@ -50,7 +50,6 @@ reactor:
   power_ports:
   - port_id: dc_series_drive
     zone_id: plasma
-    coupling_target: plasma
     model:
       kind: dc_series
       ballast_resistance_ohm: 100000.0
@@ -90,6 +89,7 @@ models:
     file: ../chemistry/zdplaskin_example2/tables/zdplaskin_example2_eovern_rates.h5
     lookup: local_field
     bounds_policy: error
+    mobility_reference_neutral_density_m3: 3.218833278166041e+24
   electron_closure:
     kind: local_field
   electron_density:

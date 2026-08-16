@@ -189,8 +189,6 @@ def _read_h5_observables(h5: h5py.File) -> dict[str, np.ndarray]:
 def _read_h5_metadata(h5: h5py.File) -> dict[str, Any]:
     group = _required_group(h5, "metadata")
     _require_exact_children(group, set(_METADATA_DATASETS), "/metadata")
-    for name in _METADATA_DATASETS:
-        _required_dataset(group, name, f"/metadata/{name}")
     model_ids = _read_yaml(group, "model_ids", "/metadata/model_ids") or {}
     provenance = _read_yaml(group, "provenance", "/metadata/provenance") or {}
     if not isinstance(model_ids, dict) or not isinstance(provenance, dict):
@@ -209,8 +207,6 @@ def _read_h5_solver(
 ) -> tuple[SimulationStatus, Mapping[str, Any]]:
     group = _required_group(h5, "solver")
     _require_exact_children(group, set(_SOLVER_DATASETS), "/solver")
-    for name in _SOLVER_DATASETS:
-        _required_dataset(group, name, f"/solver/{name}")
     success = bool(_required_dataset(group, "success", "/solver/success")[()])
     status = SimulationStatus(
         success=success,

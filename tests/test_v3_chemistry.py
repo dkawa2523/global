@@ -210,6 +210,162 @@ def test_species_validation_rejects_nonheavy_cross_section_target(target: str) -
         compile_chemistry(chemistry)
 
 
+def _programmatic_cross_section(**changes: object) -> CrossSectionData:
+    baseline = CrossSectionData(
+        id="programmatic",
+        kind="momentum_transfer",
+        target="Ar",
+        threshold_eV=0.0,
+        energy_loss_eV=0.0,
+        energy_eV=np.array([0.0, 1.0, 10.0]),
+        sigma_m2=np.array([0.0, 1.0e-20, 2.0e-20]),
+    )
+    return replace(baseline, **changes)
+
+
+def _chemistry_with_cross_section(cross_section: CrossSectionData) -> ChemistryData:
+    baseline = _species_validation_chemistry(
+        electron=SpeciesData("e", "gas", -1, 0.00054858, {}),
+        cross_section_target="Ar",
+    )
+    return replace(baseline, cross_sections={"candidate": cross_section})
+
+
+@pytest.mark.parametrize(
+    ("energy_eV", "sigma_m2", "message"),
+    [
+        (
+            np.array([0.0, 1.0, 10.0]),
+            np.array([0.0, -1.0e-20, 1.0e-20]),
+            "negative cross sections",
+        ),
+        (
+            np.array([0.0, 10.0, 1.0]),
+            np.array([0.0, 1.0e-20, 2.0e-20]),
+            "strictly increasing",
+        ),
+        (
+            np.array([0.0, 1.0, 1.0]),
+            np.array([0.0, 1.0e-20, 2.0e-20]),
+            "strictly increasing",
+        ),
+        (
+            np.array([0.0, 1.0, 10.0]),
+            np.array([0.0, np.nan, 1.0e-20]),
+            "non-finite",
+        ),
+        (
+            np.array([0.0, 1.0, 10.0]),
+            np.array([0.0, 1.0e-20]),
+            "equal one-dimensional arrays",
+        ),
+        (
+            np.array([0, 10**10000], dtype=object),
+            np.array([0.0, 1.0e-20]),
+            "numeric arrays",
+        ),
+        (
+            np.array(["0", "1"]),
+            np.array(["0", "1"]),
+            "numeric arrays",
+        ),
+        (
+            np.array([False, True]),
+            np.array([False, True]),
+            "numeric arrays",
+        ),
+    ],
+    ids=(
+        "negative-sigma",
+        "unordered-energy",
+        "duplicate-energy",
+        "nonfinite-sigma",
+        "shape-mismatch",
+        "overflowing-energy",
+        "numeric-strings",
+        "booleans",
+    ),
+)
+def test_programmatic_cross_section_curve_is_rejected_at_every_public_entry(
+    energy_eV: np.ndarray, sigma_m2: np.ndarray, message: str
+) -> None:
+    cross_section = _programmatic_cross_section(
+        energy_eV=energy_eV,
+        sigma_m2=sigma_m2,
+    )
+
+    with pytest.raises(ChemistryError, match=message):
+        compile_module.maxwell_rate_table(cross_section)
+    with pytest.raises(ChemistryError, match=message):
+        compile_chemistry(_chemistry_with_cross_section(cross_section))
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"kind": "unsupported"}, "unsupported kind"),
+        ({"kind": []}, "unsupported kind"),
+        ({"threshold_eV": -1.0}, "invalid threshold"),
+        ({"threshold_eV": np.nan}, "invalid threshold"),
+        ({"threshold_eV": "1.0"}, "invalid threshold"),
+        ({"threshold_eV": 10**10000}, "invalid threshold"),
+        ({"id": ""}, "id must be a non-empty string"),
+        ({"target": ""}, "target must be a non-empty string"),
+    ],
+    ids=(
+        "kind",
+        "unhashable-kind",
+        "negative-threshold",
+        "nan-threshold",
+        "string-threshold",
+        "overflowing-threshold",
+        "id",
+        "target",
+    ),
+)
+def test_programmatic_cross_section_metadata_is_rejected_at_every_public_entry(
+    changes: dict[str, object], message: str
+) -> None:
+    cross_section = _programmatic_cross_section(**changes)
+
+    with pytest.raises(ChemistryError, match=message):
+        compile_module.maxwell_rate_table(cross_section)
+    with pytest.raises(ChemistryError, match=message):
+        compile_chemistry(_chemistry_with_cross_section(cross_section))
+
+
+@pytest.mark.parametrize(
+    ("field", "yaml_value", "message"),
+    [
+        ("id", "[ionization]", "id must be a non-empty string"),
+        ("kind", "[ionization]", "kind must be a non-empty string"),
+        ("target", "{species: Ar}", "target must be a non-empty string"),
+        ("threshold_eV", "[5]", "invalid threshold"),
+        ("file", "[xs.csv]", "file must be a non-empty path"),
+    ],
+)
+def test_manifest_cross_section_metadata_rejects_non_scalar_values(
+    tmp_path: Path,
+    field: str,
+    yaml_value: str,
+    message: str,
+) -> None:
+    manifest = _mechanism(tmp_path)
+    path = tmp_path / "cross_sections.yaml"
+    text = path.read_text(encoding="utf-8")
+    indentation = "  - " if field == "id" else "    "
+    current_line = next(
+        line for line in text.splitlines() if line.startswith(f"{indentation}{field}:")
+    )
+    path.write_text(
+        text.replace(current_line, f"{indentation}{field}: {yaml_value}"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChemistryError, match=message):
+        load_chemistry(manifest)
+
+
 def test_maxwellian_cross_section_rate_is_positive(tmp_path: Path) -> None:
     chemistry = compile_chemistry(load_chemistry(_mechanism(tmp_path)))
     context = SimpleNamespace(
@@ -261,7 +417,73 @@ def test_maxwellian_constant_cross_section_matches_analytic_rate() -> None:
         / (np.pi * compile_module.ELECTRON_MASS_KG)
     )
 
-    assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(expected, rel=3.0e-4)
+    assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(
+        expected, rel=3.0e-4, abs=0.0
+    )
+
+
+def test_maxwellian_quadrature_is_not_set_by_cross_section_node_density() -> None:
+    sigma_m2 = 2.0e-20
+
+    def constant_cross_section(energy_eV: np.ndarray) -> CrossSectionData:
+        return CrossSectionData(
+            id=f"constant-{energy_eV.size}",
+            kind="momentum_transfer",
+            target="Ar",
+            threshold_eV=0.0,
+            energy_loss_eV=0.0,
+            energy_eV=energy_eV,
+            sigma_m2=np.full(energy_eV.size, sigma_m2),
+        )
+
+    coarse_axis, coarse_rate = compile_module.maxwell_rate_table(
+        constant_cross_section(np.array([0.0, 100.0]))
+    )
+    refined_axis, refined_rate = compile_module.maxwell_rate_table(
+        constant_cross_section(np.linspace(0.0, 100.0, 1001))
+    )
+    mean_energy_eV = 1.0
+    electron_temperature_eV = 2.0 / 3.0
+    expected = sigma_m2 * np.sqrt(
+        8.0
+        * compile_module.E_CHARGE
+        * electron_temperature_eV
+        / (np.pi * compile_module.ELECTRON_MASS_KG)
+    )
+    coarse = np.interp(mean_energy_eV, coarse_axis, coarse_rate)
+    refined = np.interp(mean_energy_eV, refined_axis, refined_rate)
+
+    assert coarse == pytest.approx(expected, rel=3.0e-4, abs=0.0)
+    assert coarse == pytest.approx(refined, rel=1.0e-12, abs=0.0)
+
+
+def test_maxwellian_rate_has_a_continuous_cold_boundary() -> None:
+    sigma_m2 = 1.0e-20
+    cross_section = CrossSectionData(
+        id="cold-momentum",
+        kind="momentum_transfer",
+        target="Ar",
+        threshold_eV=0.0,
+        energy_loss_eV=0.0,
+        energy_eV=np.array([0.0, 100.0]),
+        sigma_m2=np.array([sigma_m2, sigma_m2]),
+    )
+
+    axis, rate = compile_module.maxwell_rate_table(cross_section)
+    cold_mean_energy_eV = 5.0e-4
+    expected = sigma_m2 * np.sqrt(
+        8.0
+        * compile_module.E_CHARGE
+        * (2.0 / 3.0)
+        * cold_mean_energy_eV
+        / (np.pi * compile_module.ELECTRON_MASS_KG)
+    )
+
+    assert axis[0] == 0.0
+    assert rate[0] == 0.0
+    assert np.interp(cold_mean_energy_eV, axis, rate) == pytest.approx(
+        expected, rel=3.0e-4, abs=0.0
+    )
 
 
 def test_maxwellian_rejects_missing_low_energy_momentum_support() -> None:
@@ -332,7 +554,9 @@ def test_maxwellian_quadrature_keeps_positive_threshold_lower_tail_zero() -> Non
         full_constant_rate * (1.0 + reduced_threshold) * np.exp(-reduced_threshold)
     )
 
-    assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(expected, rel=3.0e-4)
+    assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(
+        expected, rel=3.0e-4, abs=0.0
+    )
 
 
 def test_onset_curve_normalizer_is_readonly_and_zero_below_threshold() -> None:
@@ -536,6 +760,172 @@ def _generic_rate_dimension_chemistry(
         surface_reactions=(),
         rate_models={rate_model.id: rate_model},
         cross_sections={},
+    )
+
+
+def test_rejects_element_balanced_reaction_with_inconsistent_heavy_mass() -> None:
+    rate_model = RateModelData("convert", "first_order", {"rate_s_inv": 1.0})
+    chemistry = _generic_rate_dimension_chemistry(
+        (ReactionData("convert", {"A": 1.0}, {"B": 1.0}, "convert", None),),
+        rate_model,
+    )
+    chemistry = replace(
+        chemistry,
+        species=tuple(
+            replace(species, mass_amu=100.0) if species.id == "B" else species
+            for species in chemistry.species
+        ),
+    )
+
+    with pytest.raises(ChemistryError, match="does not conserve heavy-species mass"):
+        compile_chemistry(chemistry)
+
+
+def test_heavy_mass_balance_allows_normal_atomic_weight_rounding() -> None:
+    rate_model = RateModelData("split", "first_order", {"rate_s_inv": 1.0})
+    chemistry = ChemistryData(
+        source=Path("rounded-masses.yaml"),
+        species=(
+            SpeciesData("e", "gas", -1, 0.00054858, {}),
+            SpeciesData("CF4", "gas", 0, 88.0043, {"C": 1.0, "F": 4.0}),
+            SpeciesData("CF3", "gas", 0, 69.0037, {"C": 1.0, "F": 3.0}),
+            SpeciesData("F", "gas", 0, 18.9984, {"F": 1.0}),
+        ),
+        gas_reactions=(
+            ReactionData(
+                "split",
+                {"CF4": 1.0},
+                {"CF3": 1.0, "F": 1.0},
+                rate_model.id,
+                None,
+            ),
+        ),
+        boundary_reactions=(),
+        surface_reactions=(),
+        rate_models={rate_model.id: rate_model},
+        cross_sections={},
+    )
+
+    compiled = compile_chemistry(chemistry)
+
+    assert compiled.reaction_ids == ("split",)
+
+
+def test_mass_balance_accepts_equal_neutral_ion_mass_convention() -> None:
+    rate_model = RateModelData("ionize", "first_order", {"rate_s_inv": 1.0})
+    chemistry = _generic_rate_dimension_chemistry(
+        (
+            ReactionData(
+                "ionize",
+                {"A": 1.0},
+                {"A_plus": 1.0, "e": 1.0},
+                rate_model.id,
+                None,
+            ),
+        ),
+        rate_model,
+    )
+    chemistry = replace(
+        chemistry,
+        species=tuple(
+            replace(species, mass_amu=1.0) if species.id in {"A", "A_plus"} else species
+            for species in chemistry.species
+        ),
+    )
+
+    compiled = compile_chemistry(chemistry)
+
+    assert compiled.reaction_ids == ("ionize",)
+
+
+def test_mass_balance_accepts_charge_corrected_gas_ionization_mass() -> None:
+    rate_model = RateModelData(
+        "ionize_h", "constant", {"value": 1.0, "overall_order": 2.0}
+    )
+    chemistry = ChemistryData(
+        source=Path("hydrogen-ionization.yaml"),
+        species=(
+            SpeciesData("e", "gas", -1, 0.000548579909, {}),
+            SpeciesData("H", "gas", 0, 1.00782503223, {"H": 1.0}),
+            SpeciesData("H_plus", "gas", 1, 1.007276466621, {"H": 1.0}),
+        ),
+        gas_reactions=(
+            ReactionData(
+                "ionize_h",
+                {"e": 1.0, "H": 1.0},
+                {"H_plus": 1.0, "e": 2.0},
+                rate_model.id,
+                None,
+            ),
+        ),
+        boundary_reactions=(),
+        surface_reactions=(),
+        rate_models={rate_model.id: rate_model},
+        cross_sections={},
+    )
+
+    compiled = compile_chemistry(chemistry)
+
+    assert compiled.reaction_ids == ("ionize_h",)
+
+
+def test_mass_balance_accepts_charge_corrected_boundary_mass() -> None:
+    chemistry = ChemistryData(
+        source=Path("hydrogen-neutralization.yaml"),
+        species=(
+            SpeciesData("e", "gas", -1, 0.000548579909, {}),
+            SpeciesData("H", "gas", 0, 1.00782503223, {"H": 1.0}),
+            SpeciesData("H_plus", "gas", 1, 1.007276466621, {"H": 1.0}),
+        ),
+        gas_reactions=(),
+        boundary_reactions=(
+            ReactionData(
+                "neutralize_h",
+                {"H_plus": 1.0},
+                {"H": 1.0},
+                None,
+                None,
+            ),
+        ),
+        surface_reactions=(),
+        rate_models={},
+        cross_sections={},
+    )
+
+    compiled = compile_chemistry(chemistry)
+
+    assert compiled.boundary_reactions[0].id == "neutralize_h"
+
+
+@pytest.mark.parametrize("reaction_count", [128, 256])
+def test_jacobian_pattern_does_not_overflow_with_many_shared_dependencies(
+    reaction_count: int,
+) -> None:
+    rate_model = RateModelData("shared", "constant", {"value": 1.0})
+    chemistry = _generic_rate_dimension_chemistry(
+        tuple(
+            ReactionData(
+                f"convert_{index}",
+                {"A": 1.0},
+                {"B": 1.0},
+                rate_model.id,
+                None,
+            )
+            for index in range(reaction_count)
+        ),
+        rate_model,
+    )
+
+    pattern = compile_chemistry(chemistry).jacobian_species_pattern
+
+    np.testing.assert_array_equal(
+        pattern,
+        [
+            [True, False, False, False],
+            [True, False, False, False],
+            [False, False, False, False],
+            [False, False, False, False],
+        ],
     )
 
 
@@ -767,14 +1157,14 @@ def test_shared_tabulated_rate_model_is_compiled_once(
         encoding="utf-8",
     )
     calls = 0
-    original = compile_module._table
+    original = compile_module.load_rate_table
 
     def counted(path: Path) -> tuple[np.ndarray, np.ndarray]:
         nonlocal calls
         calls += 1
         return original(path)
 
-    monkeypatch.setattr(compile_module, "_table", counted)
+    monkeypatch.setattr(compile_module, "load_rate_table", counted)
     chemistry = compile_chemistry(load_chemistry(manifest))
 
     assert calls == 1

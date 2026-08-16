@@ -10,6 +10,9 @@ Python 3.11 以上を対象とします。
 python -m pip install -e ".[dev]"
 ```
 
+リポジトリの開発用品質ゲートは配布wheelに含めず、
+`python -m tools.quality fast`（または `pr`、`baseline`、`nightly`）で実行します。
+
 公開 Python API は、読み込み・計算・保存の3操作だけです。
 
 ```python

@@ -8,17 +8,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal, SupportsFloat
+from typing import Any, Literal
 
 import numpy as np
-
-
-def _python_float(value: SupportsFloat) -> float:
-    return float(value)
-
-
-def _string_id(value: object) -> str:
-    return str(value)
 
 
 def _validated_profile_time(value: np.ndarray) -> np.ndarray:
@@ -38,7 +30,7 @@ def _validated_profile_densities(
         raise ValueError("at least one zone density series is required")
     densities: dict[str, np.ndarray] = {}
     for zone_id, raw_density in values.items():
-        key = _string_id(zone_id)
+        key = str(zone_id)
         density = np.array(raw_density, dtype=float, copy=True)
         if not key:
             raise ValueError("profile zone IDs must not be empty")
@@ -85,10 +77,7 @@ def _selected_profile_columns(
             else {column: column for column in value_columns}
         )
     else:
-        selected = {
-            _string_id(zone): _string_id(column)
-            for zone, column in zone_columns.items()
-        }
+        selected = {str(zone): str(column) for zone, column in zone_columns.items()}
     missing = sorted(set(selected.values()) - set(columns))
     if missing:
         raise ValueError(
@@ -198,8 +187,8 @@ class PrescribedElectronProfile:
         )
 
     def density(self, time_s: float, zone_id: str) -> float:
-        query = _python_float(time_s)
-        key = _string_id(zone_id)
+        query = float(time_s)
+        key = str(zone_id)
         if not math.isfinite(query):
             raise ValueError("profile query time must be finite")
         values = self.density_m3_by_zone.get(key)
@@ -223,8 +212,7 @@ class PrescribedElectronProfile:
         self, time_s: float, zone_ids: Iterable[str]
     ) -> dict[str, float]:
         return {
-            _string_id(zone_id): self.density(time_s, _string_id(zone_id))
-            for zone_id in zone_ids
+            str(zone_id): self.density(time_s, str(zone_id)) for zone_id in zone_ids
         }
 
 

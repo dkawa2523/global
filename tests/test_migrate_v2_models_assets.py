@@ -8,11 +8,11 @@ import yaml
 from plasma_global.errors import MigrationError
 from plasma_global.input._legacy_v2 import load_legacy_v2_case
 from plasma_global.input._migrate_v2_bundle import stage_case_assets
+from plasma_global.input._migrate_v2_electrons import electron_models
 from plasma_global.input.load import load_case
 from plasma_global.input.migrate_v2 import (
     MigrationReport,
     MigrationResult,
-    _electron_models,
     migrate_v2,
     write_v3_case,
 )
@@ -28,7 +28,7 @@ def test_table_electron_migration_preserves_mapping_and_diagnostic_order() -> No
     unused: set[str] = set()
     warnings: list[str] = []
 
-    models = _electron_models(loaded, unused, warnings)
+    models = electron_models(loaded, unused, warnings)
 
     assert models["electrons"] == {
         "kind": "table",
@@ -62,7 +62,7 @@ def test_electron_migration_preserves_selection_errors() -> None:
     missing_table = load_legacy_v2_case(V2_CONFIGS / "case_zdplaskin_example2.yaml")
     missing_table.run_config.swarm.table.file = None
     with pytest.raises(MigrationError, match="swarm table model has no table file"):
-        _electron_models(missing_table, set(), [])
+        electron_models(missing_table, set(), [])
 
     unsupported = load_legacy_v2_case(V2_CONFIGS / "case_smoke.yaml")
     unsupported.run_config.physics.eedf_backend = "swarm"
@@ -71,7 +71,7 @@ def test_electron_migration_preserves_selection_errors() -> None:
         MigrationError,
         match=r"unsupported v2 EEDF selection 'swarm'/'future_solver'",
     ):
-        _electron_models(unsupported, set(), [])
+        electron_models(unsupported, set(), [])
 
     unsupported.run_config.physics.eedf_backend = "maxwell"
     unsupported.run_config.physics.electron_density_closure = "future_density"
@@ -79,7 +79,21 @@ def test_electron_migration_preserves_selection_errors() -> None:
         MigrationError,
         match="unsupported v2 electron density closure 'future_density'",
     ):
-        _electron_models(unsupported, set(), [])
+        electron_models(unsupported, set(), [])
+
+
+def test_approximate_migration_drops_obsolete_cache_identity_knobs() -> None:
+    loaded = load_legacy_v2_case(V2_CONFIGS / "case_argon_lxcat.yaml")
+    warnings: list[str] = []
+
+    models = electron_models(loaded, set(), warnings)
+    electrons = models["electrons"]
+
+    assert "mixture_key_species" not in electrons
+    assert electrons["cache"] == {"max_entries": 4}
+    assert "fraction_decimals" not in electrons["cache"]
+    assert any("mixture_key_species was removed" in warning for warning in warnings)
+    assert any("fraction_decimals was removed" in warning for warning in warnings)
 
 
 def test_prescribed_density_external_key_preserves_mapping_and_warning(
@@ -97,7 +111,7 @@ def test_prescribed_density_external_key_preserves_mapping_and_warning(
     loaded.resolved_paths.external_inputs["density_profile"] = str(profile_path)
     warnings: list[str] = []
 
-    models = _electron_models(loaded, set(), warnings)
+    models = electron_models(loaded, set(), warnings)
 
     assert models["electron_density"] == {
         "kind": "experimental.prescribed_profile",
@@ -116,7 +130,7 @@ def test_prescribed_density_external_key_preserves_mapping_and_warning(
         MigrationError,
         match="v2 prescribed electron profile has no input file",
     ):
-        _electron_models(loaded, set(), [])
+        electron_models(loaded, set(), [])
 
 
 def test_external_assets_are_deduplicated_copied_and_written_relative(

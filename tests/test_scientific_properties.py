@@ -21,9 +21,9 @@ from plasma_global.chemistry.data import (
 )
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, Zone
-from plasma_global.core.exceptions import ModelConfigurationError
 from plasma_global.core.result import SimulationResult
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
+from plasma_global.errors import ModelConfigurationError
 from plasma_global.input.migrate_v2 import migrate_v2, write_v3_case
 from plasma_global.models.electrons import ElectronEnergyClosure
 from plasma_global.models.rates import ConstantRate
