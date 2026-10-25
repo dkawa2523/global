@@ -1,4 +1,4 @@
-"""Shared primitives for the schema-v3 input models."""
+"""Shared primitives for the schema-v4 input models."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-
-_PUBLIC_MODULE = "plasma_global.input.schema"
 
 
 def _path_value(value: Any) -> Path:
@@ -30,7 +28,7 @@ PositiveInt = Annotated[int, Field(gt=0)]
 
 
 class StrictModel(BaseModel):
-    """Common contract for all public v3 input objects."""
+    """Strict values shared by public input and resolved configuration."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -52,20 +50,3 @@ def _require_unique(items: list[Any], attribute: str, label: str) -> None:
     if duplicates:
         values = ", ".join(sorted(duplicates))
         raise ValueError(f"duplicate {label}: {values}")
-
-
-def _publish_schema_types(namespace: dict[str, Any]) -> None:
-    """Keep the historical public identity of models defined privately."""
-
-    private_module = str(namespace["__name__"])
-    for candidate in namespace.values():
-        if (
-            isinstance(candidate, type)
-            and issubclass(candidate, StrictModel)
-            and candidate.__module__ == private_module
-        ):
-            candidate.__module__ = _PUBLIC_MODULE
-
-
-for _public_object in (_path_value, StrictModel, _require_unique):
-    _public_object.__module__ = _PUBLIC_MODULE

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
 import h5py
 import numpy as np
-import yaml
 
 from plasma_global._result_common import (
     RESULT_FORMAT,
@@ -17,13 +17,14 @@ from plasma_global._result_common import (
     series_unit,
     yaml_text,
 )
+from plasma_global._yaml import YamlLoadError, load_unique_yaml
 from plasma_global.core.result import (
     SimulationResult,
     SimulationStatus,
     to_plain_mapping,
 )
 
-_METADATA_DATASETS = ("effective_case_yaml", "model_ids", "provenance")
+_METADATA_DATASETS = {"values_yaml"}
 _SOLVER_DATASETS = (
     "success",
     "status_code",
@@ -77,19 +78,10 @@ def _read_text(group: h5py.Group, name: str, full_name: str) -> str:
 
 
 def _read_yaml(group: h5py.Group, name: str, full_name: str) -> Any:
-    return yaml.safe_load(_read_text(group, name, full_name))
-
-
-def _metadata_values(result: SimulationResult) -> tuple[str, Any, Any]:
-    metadata = to_plain_mapping(result.metadata)
-    effective_case_yaml = metadata.get("effective_case_yaml", "")
-    if not isinstance(effective_case_yaml, str):
-        raise TypeError("result metadata effective_case_yaml must be a string")
-    model_ids = metadata.get("model_ids", {})
-    provenance = metadata.get("provenance", {})
-    if not isinstance(model_ids, dict) or not isinstance(provenance, dict):
-        raise TypeError("result metadata model_ids and provenance must be mappings")
-    return effective_case_yaml, model_ids, provenance
+    try:
+        return load_unique_yaml(StringIO(_read_text(group, name, full_name)))
+    except YamlLoadError as exc:
+        raise ValueError(f"Invalid result YAML at {full_name}: {exc}") from exc
 
 
 def write_result_h5(path: str | Path, result: SimulationResult) -> Path:
@@ -100,8 +92,8 @@ def write_result_h5(path: str | Path, result: SimulationResult) -> Path:
     target = Path(path)
     ensure_parent(target)
     string_dtype = h5py.string_dtype(encoding="utf-8")
-    effective_case_yaml, model_ids, provenance = _metadata_values(result)
-    with h5py.File(target, "w") as h5:
+    units = result.metadata.get("series_units", {})
+    with h5py.File(target, "x") as h5:
         h5.attrs["format"] = RESULT_FORMAT
         h5.attrs["format_version"] = RESULT_FORMAT_VERSION
         h5.attrs["state_layout"] = "time-major"
@@ -116,7 +108,8 @@ def write_result_h5(path: str | Path, result: SimulationResult) -> Path:
         state_values.attrs.create(
             "column_units",
             np.asarray(
-                [series_unit(label) for label in result.state_labels], dtype=object
+                [series_unit(label, units) for label in result.state_labels],
+                dtype=object,
             ),
             dtype=string_dtype,
         )
@@ -130,13 +123,16 @@ def write_result_h5(path: str | Path, result: SimulationResult) -> Path:
             dataset = observables_group.create_dataset(
                 name, data=values, **_dataset_options(values)
             )
-            dataset.attrs["unit"] = series_unit(name)
+            dataset.attrs["unit"] = series_unit(name, units)
         metadata_group = h5.create_group("metadata")
-        _text_dataset(metadata_group, "effective_case_yaml", effective_case_yaml)
-        _text_dataset(metadata_group, "model_ids", yaml_text(model_ids))
-        _text_dataset(metadata_group, "provenance", yaml_text(provenance))
+        _text_dataset(
+            metadata_group, "values_yaml", yaml_text(to_plain_mapping(result.metadata))
+        )
         solver_group = h5.create_group("solver")
-        solver_group.create_dataset("success", data=result.status.success)
+        if result.status.success is None:
+            solver_group.create_dataset("success", dtype=np.bool_)
+        else:
+            solver_group.create_dataset("success", data=result.status.success)
         _text_dataset(solver_group, "status_code", result.status.code)
         _text_dataset(solver_group, "status_message", result.status.message)
         _text_dataset(
@@ -153,8 +149,12 @@ def _validate_h5_header(h5: h5py.File, source: Path) -> None:
         file_format = file_format.decode("utf-8")
     if str(file_format) != RESULT_FORMAT:
         raise ValueError(f"{source} is not a {RESULT_FORMAT} HDF5 file")
-    version = int(h5.attrs.get("format_version", -1))
-    if version != RESULT_FORMAT_VERSION:
+    version = h5.attrs.get("format_version", -1)
+    if isinstance(version, (bool, np.bool_)) or not isinstance(
+        version, (int, np.integer)
+    ):
+        raise ValueError("Result HDF5 format_version must be an integer")
+    if version not in {2, RESULT_FORMAT_VERSION}:
         raise ValueError(f"Unsupported result HDF5 format version {version}")
     if str(h5.attrs.get("state_layout", "")) != "time-major":
         raise ValueError("Result HDF5 state layout must be time-major")
@@ -188,18 +188,11 @@ def _read_h5_observables(h5: h5py.File) -> dict[str, np.ndarray]:
 
 def _read_h5_metadata(h5: h5py.File) -> dict[str, Any]:
     group = _required_group(h5, "metadata")
-    _require_exact_children(group, set(_METADATA_DATASETS), "/metadata")
-    model_ids = _read_yaml(group, "model_ids", "/metadata/model_ids") or {}
-    provenance = _read_yaml(group, "provenance", "/metadata/provenance") or {}
-    if not isinstance(model_ids, dict) or not isinstance(provenance, dict):
-        raise TypeError("result metadata model_ids and provenance must be mappings")
-    return {
-        "effective_case_yaml": _read_text(
-            group, "effective_case_yaml", "/metadata/effective_case_yaml"
-        ),
-        "model_ids": model_ids,
-        "provenance": provenance,
-    }
+    _require_exact_children(group, _METADATA_DATASETS, "/metadata")
+    metadata = _read_yaml(group, "values_yaml", "/metadata/values_yaml")
+    if not isinstance(metadata, dict):
+        raise TypeError("result metadata must be a mapping")
+    return metadata
 
 
 def _read_h5_solver(
@@ -207,13 +200,18 @@ def _read_h5_solver(
 ) -> tuple[SimulationStatus, Mapping[str, Any]]:
     group = _required_group(h5, "solver")
     _require_exact_children(group, set(_SOLVER_DATASETS), "/solver")
-    success = bool(_required_dataset(group, "success", "/solver/success")[()])
+    success_dataset = _required_dataset(group, "success", "/solver/success")
+    if success_dataset.dtype.kind != "b" or success_dataset.shape not in {None, ()}:
+        raise TypeError("/solver/success must be a scalar or null boolean dataset")
+    if success_dataset.shape is None and h5.attrs["format_version"] < 3:
+        raise ValueError("unknown execution status requires result format version 3")
+    success = None if success_dataset.shape is None else bool(success_dataset[()])
     status = SimulationStatus(
         success=success,
         code=_read_text(group, "status_code", "/solver/status_code"),
         message=_read_text(group, "status_message", "/solver/status_message"),
     )
-    stats = _read_yaml(group, "statistics_yaml", "/solver/statistics_yaml") or {}
+    stats = _read_yaml(group, "statistics_yaml", "/solver/statistics_yaml")
     if not isinstance(stats, dict):
         raise TypeError("/solver/statistics_yaml must contain a mapping")
     return status, stats
@@ -228,16 +226,59 @@ def read_result_h5(path: str | Path) -> SimulationResult:
         time_s, state, state_labels = _read_h5_state(h5)
         observables = _read_h5_observables(h5)
         metadata = _read_h5_metadata(h5)
+        _preserve_unspecified_units(h5, state_labels, observables, metadata)
         status, solver_stats = _read_h5_solver(h5)
-    return SimulationResult(
-        time_s=time_s,
-        state=state,
-        state_labels=state_labels,
-        observables=observables,
-        status=status,
-        solver_stats=solver_stats,
-        metadata=metadata,
+        result = SimulationResult(
+            time_s=time_s,
+            state=state,
+            state_labels=state_labels,
+            observables=observables,
+            status=status,
+            solver_stats=solver_stats,
+            metadata=metadata,
+        )
+        if h5.attrs["format_version"] == RESULT_FORMAT_VERSION:
+            _validate_h5_units(h5, result)
+    return result
+
+
+def _preserve_unspecified_units(
+    h5: h5py.File,
+    labels: tuple[str, ...],
+    observables: Mapping[str, np.ndarray],
+    metadata: dict[str, Any],
+) -> None:
+    """Keep explicit legacy unknown units when the current catalog grew."""
+    state_units = h5["state/values"].attrs.get("column_units", ())
+    stored = dict(zip(labels, state_units, strict=False))
+    stored.update(
+        {name: h5[f"observables/{name}"].attrs.get("unit") for name in observables}
     )
+    declared = metadata.get("series_units", {})
+    if not isinstance(declared, Mapping):
+        return  # The result constructor reports invalid metadata.
+    inherited = {
+        name: "unspecified"
+        for name, unit in stored.items()
+        if unit == "unspecified"
+        and name not in declared
+        and series_unit(name) != "unspecified"
+    }
+    if inherited:
+        metadata["series_units"] = {**inherited, **declared}
+
+
+def _validate_h5_units(h5: h5py.File, result: SimulationResult) -> None:
+    units = result.metadata.get("series_units", {})
+    expected = tuple(series_unit(label, units) for label in result.state_labels)
+    stored = h5["state/values"].attrs.get("column_units", ())
+    if tuple(stored) != expected:
+        raise ValueError("state column_units disagree with result series_units/catalog")
+    for name in result.observables:
+        if h5[f"observables/{name}"].attrs.get("unit") != series_unit(name, units):
+            raise ValueError(
+                f"observable {name!r} unit disagrees with result series_units/catalog"
+            )
 
 
 __all__ = ["read_result_h5", "write_result_h5"]

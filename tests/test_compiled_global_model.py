@@ -67,23 +67,6 @@ def inert_argon() -> ChemistryFixture:
     )
 
 
-def test_compiled_module_keeps_its_public_facade() -> None:
-    assert compiled_module.__all__ == [
-        "BoundSegmentRHS",
-        "CompiledChemistryLike",
-        "CompiledGlobalModel",
-        "ElasticHeatingEvaluator",
-        "ElectronDensityProvider",
-        "ExtensionStateAccumulator",
-        "ModelEvaluation",
-        "StateLayout",
-        "ZoneTermLedger",
-    ]
-    assert CompiledGlobalModel.__module__ == "plasma_global.core.compiled"
-    assert compiled_module.ModelEvaluation.__module__ == "plasma_global.core.compiled"
-    assert compiled_module.ZoneTermLedger.__module__ == "plasma_global.core.compiled"
-
-
 def test_compiled_facade_preserves_immutability_and_evaluation_paths() -> None:
     model = CompiledGlobalModel(
         chemistry=inert_argon(),
@@ -461,7 +444,6 @@ def test_recipe_segments_bind_endpoint_forcing_and_integrate_power_balance() -> 
     assert result.final_value("electron_energy[plasma]") == pytest.approx(
         expected_final, rel=1.0e-10
     )
-    assert result.metadata["electron_closure"] == "electron_energy"
 
 
 def test_bound_rhs_skips_full_diagnostic_result_construction(

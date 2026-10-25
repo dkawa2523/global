@@ -2,38 +2,41 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
 
-from plasma_global.chemistry.compile import CompiledChemistry, maxwell_rate_table
-from plasma_global.errors import CaseValidationError, ModelDomainError
+from plasma_global.chemistry._maxwell import MaxwellRate, compile_maxwell_rate
+from plasma_global.chemistry.compile import CompiledChemistry
+from plasma_global.errors import CaseValidationError
 from plasma_global.models.electrons import ElectronState
 from plasma_global.models.gas_energy import elastic_electron_heating_J_m3_s
 from plasma_global.models.kinetics import ElectronKineticsResult
 
 
 @dataclass(frozen=True, slots=True)
-class _MomentumTable:
+class _MomentumRate:
     cross_section_id: str
     neutral_index: int
-    mean_energy_eV: np.ndarray
-    rate_coefficient_m3_s: np.ndarray
+    maxwell_rate: MaxwellRate | None
 
     def coefficient(
         self,
         mean_energy_eV: float,
         kinetics: ElectronKineticsResult | None,
     ) -> float:
-        if kinetics is not None and self.cross_section_id in kinetics.rate_coefficients:
+        if kinetics is not None:
+            if self.cross_section_id not in kinetics.rate_coefficients:
+                raise CaseValidationError(
+                    f"electron kinetics requires momentum rate "
+                    f"{self.cross_section_id!r}; "
+                    "Maxwellian substitution is not defined"
+                )
             return float(kinetics.rate_coefficients[self.cross_section_id])
-        value = float(mean_energy_eV)
-        if value < self.mean_energy_eV[0] or value > self.mean_energy_eV[-1]:
-            raise ModelDomainError(
-                f"mean_energy_eV={value:g} is outside momentum-rate table "
-                f"[{self.mean_energy_eV[0]:g}, {self.mean_energy_eV[-1]:g}]"
-            )
-        return float(np.interp(value, self.mean_energy_eV, self.rate_coefficient_m3_s))
+        if self.maxwell_rate is None:
+            raise CaseValidationError("table momentum rate requires electron kinetics")
+        return self.maxwell_rate(mean_energy_eV)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +45,7 @@ class CompiledElasticHeating:
 
     neutral_indices: np.ndarray
     neutral_masses_kg: np.ndarray
-    tables: tuple[_MomentumTable, ...]
+    rates: tuple[_MomentumRate, ...]
 
     def __post_init__(self) -> None:
         indices = np.asarray(self.neutral_indices, dtype=int)
@@ -71,8 +74,8 @@ class CompiledElasticHeating:
         if electrons.density_m3 == 0.0:
             return 0.0
         coefficients = np.zeros(self.neutral_indices.size)
-        for table in self.tables:
-            coefficients[table.neutral_index] += table.coefficient(
+        for rate in self.rates:
+            coefficients[rate.neutral_index] += rate.coefficient(
                 electrons.mean_energy_eV, kinetics
             )
         return elastic_electron_heating_J_m3_s(
@@ -89,6 +92,7 @@ class CompiledElasticHeating:
 
 def compile_elastic_heating(
     chemistry: CompiledChemistry,
+    table_momentum: Mapping[str, str] | None = None,
 ) -> tuple[CompiledElasticHeating | None, tuple[str, ...]]:
     """Compile canonical momentum cross sections and report uncovered neutrals."""
 
@@ -98,34 +102,41 @@ def compile_elastic_heating(
         chemistry.species_ids[index]: local_index
         for local_index, index in enumerate(neutral_indices)
     }
-    tables: list[_MomentumTable] = []
+    rates: list[_MomentumRate] = []
     covered: set[str] = set()
-    for cross_section in chemistry.cross_sections.values():
-        if cross_section.kind != "momentum_transfer":
-            continue
-        if cross_section.target not in neutral_local_index:
-            raise CaseValidationError(
-                f"momentum cross section {cross_section.id!r} targets unknown or "
-                f"non-neutral species {cross_section.target!r}"
+    if table_momentum is not None:
+        for target, rate_id in table_momentum.items():
+            if target not in neutral_local_index:
+                raise CaseValidationError(
+                    f"momentum rate targets unknown/non-neutral species {target!r}"
+                )
+            rates.append(_MomentumRate(rate_id, neutral_local_index[target], None))
+            covered.add(target)
+    else:
+        for cross_section in chemistry.cross_sections.values():
+            if cross_section.kind != "momentum_transfer":
+                continue
+            if cross_section.target not in neutral_local_index:
+                raise CaseValidationError(
+                    f"momentum cross section {cross_section.id!r} targets unknown or "
+                    f"non-neutral species {cross_section.target!r}"
+                )
+            rates.append(
+                _MomentumRate(
+                    cross_section_id=cross_section.id,
+                    neutral_index=neutral_local_index[cross_section.target],
+                    maxwell_rate=compile_maxwell_rate(cross_section),
+                )
             )
-        axis, rate = maxwell_rate_table(cross_section)
-        tables.append(
-            _MomentumTable(
-                cross_section_id=cross_section.id,
-                neutral_index=neutral_local_index[cross_section.target],
-                mean_energy_eV=axis,
-                rate_coefficient_m3_s=rate,
-            )
-        )
-        covered.add(cross_section.target)
+            covered.add(cross_section.target)
     missing = tuple(sorted(set(neutral_ids) - covered))
-    if not tables:
+    if not rates:
         return None, missing
     return (
         CompiledElasticHeating(
             neutral_indices=neutral_indices,
             neutral_masses_kg=chemistry.masses_kg[neutral_indices],
-            tables=tuple(tables),
+            rates=tuple(rates),
         ),
         missing,
     )

@@ -12,7 +12,6 @@ from plasma_global.input._schema_base import (
     NonNegativeFloat,
     PositiveFloat,
     StrictModel,
-    _publish_schema_types,
     _require_unique,
 )
 from plasma_global.input._schema_power import (
@@ -233,6 +232,3 @@ class ReactorConfig(StrictModel):
         self._validate_zone_references(zone_ids)
         self._validate_coupling_targets()
         return self
-
-
-_publish_schema_types(globals())

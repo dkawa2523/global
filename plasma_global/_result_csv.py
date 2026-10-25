@@ -41,7 +41,7 @@ def write_result_csv(path: str | Path, result: SimulationResult) -> Path:
     target = Path(path)
     ensure_parent(target)
     columns = _result_csv_columns(result)
-    with target.open("w", encoding="utf-8", newline="") as stream:
+    with target.open("x", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow([_CSV_TIME, *(name for name, _values, _scalar in columns)])
         for row_index, time_s in enumerate(result.time_s):
@@ -54,7 +54,7 @@ def write_result_csv(path: str | Path, result: SimulationResult) -> Path:
 
 def _read_csv_rows(source: Path) -> tuple[list[str], list[list[str]]]:
     with source.open("r", encoding="utf-8-sig", newline="") as stream:
-        reader = csv.reader(stream)
+        reader = csv.reader(stream, strict=True)
         try:
             header = next(reader)
         except StopIteration as exc:
@@ -97,12 +97,17 @@ def _decode_csv_columns(
             continue
         if column.startswith(_CSV_SCALAR_OBSERVABLE):
             name = column.removeprefix(_CSV_SCALAR_OBSERVABLE)
-            if data.size == 0 or not np.allclose(data, data[0], equal_nan=True):
+            if name in observables:
+                raise ValueError(f"Duplicate observable name {name!r}")
+            if data.size == 0 or not np.all(data == data[0]):
                 raise ValueError(f"Invalid scalar observable column {name!r}")
             observables[name] = np.asarray(data[0], dtype=float)
             continue
         if column.startswith(_CSV_OBSERVABLE):
-            observables[column.removeprefix(_CSV_OBSERVABLE)] = data
+            name = column.removeprefix(_CSV_OBSERVABLE)
+            if name in observables:
+                raise ValueError(f"Duplicate observable name {name!r}")
+            observables[name] = data
             continue
         raise ValueError(f"Unsupported result CSV column {column!r}")
     state = (
@@ -123,7 +128,10 @@ def read_result_csv(
     """Read a CSV produced by :func:`write_result_csv`."""
 
     source = Path(path)
-    header, rows = _read_csv_rows(source)
+    try:
+        header, rows = _read_csv_rows(source)
+    except csv.Error as exc:
+        raise ValueError(f"Malformed result CSV {source}: {exc}") from exc
     values = _numeric_csv_values(source, header, rows)
     state, state_labels, observables = _decode_csv_columns(header, values)
     return SimulationResult(
@@ -133,12 +141,12 @@ def read_result_csv(
         observables=observables,
         status=status
         or SimulationStatus(
-            success=True,
+            success=None,
             code="imported_csv",
-            message=f"Loaded from {source.name}",
+            message=f"Loaded {source.name}; execution status is unknown",
         ),
-        solver_stats=solver_stats or {},
-        metadata=metadata or {},
+        solver_stats={} if solver_stats is None else solver_stats,
+        metadata={} if metadata is None else metadata,
     )
 
 

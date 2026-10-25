@@ -10,8 +10,16 @@ permissions:
 
 jobs:
   quality-pr:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.12"
     env:
       HYPOTHESIS_PROFILE: ci
       QUALITY_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -22,22 +30,88 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install uv and Python 3.11
+      - name: Install uv and Python
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
 
       - name: Sync the locked quality environment
-        run: uv sync --frozen --extra dev
+        run: uv sync --frozen --all-extras
 
       - name: Run the clean-checkout PR gate
-        run: uv run --frozen python -m tools.quality pr
+        run: uv run --frozen --all-extras python -m tools.quality pr
+
+      - name: Install Graphviz for the rendering smoke test
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+
+      - name: Render the packaged analysis example
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          uv run --frozen --all-extras python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from plasma_global import load_case, simulate, write_result
+          from plasma_global.examples import initialize_example
+          with TemporaryDirectory() as raw:
+              root = Path(raw)
+              case = initialize_example("argon_analysis", root / "input")
+              result = simulate(load_case(case))
+              paths = write_result(result, root / "run")
+              assert result.status.success is True
+              assert any(path.suffix == ".svg" for path in paths.analysis_files)
+              assert any(path.suffix == ".png" for path in paths.analysis_files)
+          PY
 
       - name: Upload quality reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: quality-pr-reports
+          name: quality-pr-reports-${{ matrix.os }}-${{ matrix.python-version }}
           path: .quality-reports/
           if-no-files-found: ignore
+
+  minimum-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HYPOTHESIS_PROFILE: ci
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install uv and Python 3.11
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the oldest supported numerical minor versions
+        run: |
+          uv venv .venv
+          uv pip install --python .venv/bin/python "numpy==1.26.4" "scipy==1.14.1" "h5py==3.10.0" "pydantic==2.8.2" "PyYAML==6.0.3" "typing_extensions==4.12.2" "matplotlib==3.7.5" "graphviz==0.21" pytest hypothesis
+          uv pip install --python .venv/bin/python --no-deps .
+
+      - name: Check representative physics against minimum numerical versions
+        run: >-
+          .venv/bin/python -m pytest
+          tests/test_experimental_eedf.py tests/test_v3_approximate_two_term.py
+          tests/test_v3_build_e2e.py tests/test_v3_kinetics.py
+          tests/test_result_output.py tests/test_maxwell_rates.py
+          tests/test_input.py tests/test_coefficient_csv.py tests/test_external_bindings.py
+          tests/test_output_analysis.py
+
+      - name: Smoke-test the installed wheel without checkout imports
+        run: |
+          .venv/bin/python -I - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from plasma_global import load_case, simulate
+          from plasma_global.examples import initialize_example
+          with TemporaryDirectory() as raw:
+              for name in ("argon_maxwellian", "argon_lxcat"):
+                  case = initialize_example(name, Path(raw) / name)
+                  assert simulate(load_case(case)).status.success is True
+          PY

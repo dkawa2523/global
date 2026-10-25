@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
-from typing import Any
 
-import h5py
 import numpy as np
 
 from plasma_global.errors import CaseValidationError
@@ -17,70 +15,9 @@ from plasma_global.errors import CaseValidationError
 @dataclass(frozen=True, slots=True)
 class ElectronTableArrays:
     mean_energy_eV: np.ndarray
-    mobility_m2_V_s: np.ndarray
-    effective_field_Td: np.ndarray
+    mobility_m2_V_s: np.ndarray | None
+    effective_field_Td: np.ndarray | None
     rate_tables: dict[str, np.ndarray]
-
-
-def _read_rate_tables(
-    group: Any,
-    *,
-    source: Path,
-    required_rate_ids: tuple[str, ...],
-    optional_rate_ids: tuple[str, ...],
-) -> dict[str, np.ndarray]:
-    missing = sorted(set(required_rate_ids) - set(group))
-    if missing:
-        raise CaseValidationError(
-            f"electron table {source} is missing rate coefficients: "
-            f"{', '.join(missing)}"
-        )
-    selected = tuple(
-        dict.fromkeys(
-            (
-                *required_rate_ids,
-                *(name for name in optional_rate_ids if name in group),
-            )
-        )
-    ) or tuple(str(name) for name in group)
-    return {name: np.asarray(group[name][:]) for name in selected}
-
-
-def read_electron_table(
-    source: Path,
-    *,
-    required_rate_ids: tuple[str, ...],
-    optional_rate_ids: tuple[str, ...],
-) -> ElectronTableArrays:
-    """Read datasets from one HDF5 table without applying model semantics."""
-
-    with h5py.File(source, "r") as handle:
-        required = {"mean_energy_eV", "mobility_m2_V_s", "effective_field_Td"}
-        unknown = sorted(set(handle) - {*required, "rate_coefficients"})
-        if unknown:
-            raise CaseValidationError(
-                f"electron table {source} has unknown datasets: {', '.join(unknown)}"
-            )
-        missing = sorted(name for name in required if name not in handle)
-        if missing:
-            raise CaseValidationError(
-                f"electron table {source} is missing: {', '.join(missing)}"
-            )
-        if "rate_coefficients" not in handle:
-            raise CaseValidationError(
-                f"electron table {source} is missing rate_coefficients"
-            )
-        return ElectronTableArrays(
-            mean_energy_eV=np.asarray(handle["mean_energy_eV"][:]),
-            mobility_m2_V_s=np.asarray(handle["mobility_m2_V_s"][:]),
-            effective_field_Td=np.asarray(handle["effective_field_Td"][:]),
-            rate_tables=_read_rate_tables(
-                handle["rate_coefficients"],
-                source=source,
-                required_rate_ids=required_rate_ids,
-                optional_rate_ids=optional_rate_ids,
-            ),
-        )
 
 
 def validate_table_modes(lookup: object, bounds: object) -> None:
@@ -117,8 +54,16 @@ def _table_arrays(data: ElectronTableArrays, axis: np.ndarray) -> dict[str, np.n
     return {
         "axis": axis,
         "mean_energy_eV": data.mean_energy_eV,
-        "mobility_m2_V_s": data.mobility_m2_V_s,
-        "effective_field_Td": data.effective_field_Td,
+        **(
+            {"mobility_m2_V_s": data.mobility_m2_V_s}
+            if data.mobility_m2_V_s is not None
+            else {}
+        ),
+        **(
+            {"effective_field_Td": data.effective_field_Td}
+            if data.effective_field_Td is not None
+            else {}
+        ),
         **{f"rate:{name}": values for name, values in data.rate_tables.items()},
     }
 
@@ -146,14 +91,32 @@ def _validate_shapes(
 def _validate_values(source: Path, data: ElectronTableArrays) -> None:
     if (
         np.any(data.mean_energy_eV < 0.0)
-        or np.any(data.mobility_m2_V_s <= 0.0)
-        or np.any(data.effective_field_Td < 0.0)
+        or (data.mobility_m2_V_s is not None and np.any(data.mobility_m2_V_s <= 0.0))
+        or (
+            data.effective_field_Td is not None
+            and np.any(data.effective_field_Td < 0.0)
+        )
     ):
         raise CaseValidationError(
             f"electron table {source} contains invalid transport values"
         )
     if any(np.any(values < 0.0) for values in data.rate_tables.values()):
         raise CaseValidationError(f"electron table {source} contains negative rates")
+
+
+def _rate_arrays(source: Path, rate_tables: object) -> dict[str, np.ndarray]:
+    if not isinstance(rate_tables, Mapping):
+        raise CaseValidationError(
+            f"electron table {source} rate coefficients must be a mapping"
+        )
+    if any(not isinstance(name, str) or not name for name in rate_tables):
+        raise CaseValidationError(
+            f"electron table {source} rate coefficient IDs must be non-empty strings"
+        )
+    return {
+        name: _copied_array(source, f"rate:{name}", values)
+        for name, values in rate_tables.items()
+    }
 
 
 def validated_table_arrays(
@@ -167,24 +130,20 @@ def validated_table_arrays(
 ) -> tuple[np.ndarray, ElectronTableArrays]:
     """Copy, validate, and freeze arrays supplied by either public input path."""
 
-    if not isinstance(rate_tables, Mapping):
-        raise CaseValidationError(
-            f"electron table {source} rate coefficients must be a mapping"
-        )
-    if any(not isinstance(name, str) or not name for name in rate_tables):
-        raise CaseValidationError(
-            f"electron table {source} rate coefficient IDs must be non-empty strings"
-        )
+    rates = _rate_arrays(source, rate_tables)
     data = ElectronTableArrays(
         mean_energy_eV=_copied_array(source, "mean_energy_eV", mean_energy_eV),
-        mobility_m2_V_s=_copied_array(source, "mobility_m2_V_s", mobility_m2_V_s),
-        effective_field_Td=_copied_array(
-            source, "effective_field_Td", effective_field_Td
+        mobility_m2_V_s=(
+            None
+            if mobility_m2_V_s is None
+            else _copied_array(source, "mobility_m2_V_s", mobility_m2_V_s)
         ),
-        rate_tables={
-            name: _copied_array(source, f"rate:{name}", values)
-            for name, values in rate_tables.items()
-        },
+        effective_field_Td=(
+            None
+            if effective_field_Td is None
+            else _copied_array(source, "effective_field_Td", effective_field_Td)
+        ),
+        rate_tables=rates,
     )
     axis = _copied_array(source, "axis", axis_values)
     arrays = _table_arrays(data, axis)
@@ -192,7 +151,7 @@ def validated_table_arrays(
     expected_axis = (
         data.mean_energy_eV if lookup == "mean_energy" else data.effective_field_Td
     )
-    if not np.array_equal(axis, expected_axis):
+    if expected_axis is None or not np.array_equal(axis, expected_axis):
         raise CaseValidationError(
             f"electron table {source} axis must equal its {lookup} coordinate"
         )

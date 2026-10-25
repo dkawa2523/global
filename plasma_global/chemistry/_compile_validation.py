@@ -22,6 +22,7 @@ from plasma_global.errors import ChemistryError
 _DIMENSIONAL_GAS_RATE_KINDS = frozenset(
     {
         "arrhenius",
+        "electron_table",
         "constant",
         "experimental.electron_temperature_power_law",
         "tabulated_1d",
@@ -264,6 +265,20 @@ def _validate_gas_rate_shape(
 ) -> None:
     if rate_model.kind == "electron_impact":
         _validate_electron_impact_reaction(reaction, rate_model, data.cross_sections)
+    if rate_model.kind == "electron_table":
+        if (
+            reaction.reactants.get("e") != 1.0
+            or sum(reaction.reactants.values()) != 2.0
+        ):
+            raise ChemistryError(
+                f"reaction {reaction.id} electron_table requires "
+                "one electron and one target"
+            )
+        if reaction.resolved_electron_energy_transfer_eV is None:
+            raise ChemistryError(
+                f"reaction {reaction.id} requires explicit "
+                "electron_energy_transfer_eV, including zero"
+            )
     elif rate_model.kind == "first_order" and (
         len(reaction.reactants) != 1 or next(iter(reaction.reactants.values())) != 1.0
     ):
@@ -277,6 +292,8 @@ def _validated_gas_rate_model(
     reaction: ReactionData,
     species_by_id: Mapping[str, SpeciesData],
 ) -> RateModelData:
+    if reaction.surfaces:
+        raise ChemistryError(f"gas reaction {reaction.id!r} does not support surfaces")
     _validate_reaction_balance(reaction, species_by_id, boundary=False)
     if any(
         species_by_id[item].phase != "gas"

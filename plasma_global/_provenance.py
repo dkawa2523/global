@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import platform
-import re
 from collections.abc import Mapping
 from hashlib import sha256
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
-
-import h5py
-import numpy as np
-import scipy
 
 _PACKAGE_NAME = "plasma-global-model"
 
@@ -70,10 +64,10 @@ def _input_roles(case: Any, chemistry_data: Any) -> dict[Path, set[str]]:
 def collect_file_provenance(case: Any, chemistry_data: Any) -> Mapping[str, Any]:
     """Hash every file whose bytes have been consumed by case compilation."""
 
-    from plasma_global.input.schema import CaseSpec
+    from plasma_global.input._resolved_case import ResolvedCase
 
-    if not isinstance(case, CaseSpec):
-        raise TypeError("case must be a schema-v3 CaseSpec")
+    if not isinstance(case, ResolvedCase):
+        raise TypeError("case must be a schema-v4 ResolvedCase")
     files: dict[str, Any] = {}
     roles = _input_roles(case, chemistry_data)
 
@@ -90,89 +84,72 @@ def collect_file_provenance(case: Any, chemistry_data: Any) -> Mapping[str, Any]
     return MappingProxyType({"algorithm": "sha256", "files": MappingProxyType(files)})
 
 
-def _commit_id(value: str | None) -> str | None:
-    candidate = "" if value is None else value.strip()
-    return candidate.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", candidate) else None
+def _source_fingerprint(package_directory: Path) -> dict[str, Any] | None:
+    """Identify the package's source bytes, independently of Git or install path."""
 
-
-def _git_directory(root: Path) -> Path | None:
-    marker = root / ".git"
-    if marker.is_dir():
-        return marker
-    if not marker.is_file():
+    paths = sorted(
+        path
+        for path in package_directory.rglob("*.py")
+        if "__pycache__" not in path.relative_to(package_directory).parts
+    )
+    if not paths:
         return None
+    digest = sha256()
+    for path in paths:
+        content_hash, _ = _file_sha256(path)
+        relative = path.relative_to(package_directory).as_posix()
+        digest.update(relative.encode("utf-8") + b"\0" + bytes.fromhex(content_hash))
+    return {
+        "algorithm": "sha256-python-source-v1",
+        "sha256": digest.hexdigest(),
+        "file_count": len(paths),
+    }
+
+
+def _installed_version(distribution: str) -> str | None:
     try:
-        prefix, path = marker.read_text(encoding="utf-8").strip().split(":", 1)
-    except (OSError, ValueError):
+        return version(distribution)
+    except PackageNotFoundError:
         return None
-    if prefix != "gitdir":
-        return None
-    return (root / path.strip()).resolve()
-
-
-def _packed_revision(git_directory: Path, reference: str) -> str | None:
-    try:
-        lines = (git_directory / "packed-refs").read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-    for line in lines:
-        if not line.startswith(("#", "^")):
-            commit, _, name = line.partition(" ")
-            if name == reference:
-                return _commit_id(commit)
-    return None
-
-
-def _repository_revision(root: Path) -> str | None:
-    for name in ("GITHUB_SHA", "CI_COMMIT_SHA"):
-        if revision := _commit_id(os.environ.get(name)):
-            return revision
-    git_directory = _git_directory(root)
-    if git_directory is None:
-        return None
-    try:
-        head = (git_directory / "HEAD").read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    if revision := _commit_id(head):
-        return revision
-    prefix, separator, reference = head.partition(":")
-    if prefix != "ref" or not separator:
-        return None
-    try:
-        revision = _commit_id(
-            (git_directory / reference.strip()).read_text(encoding="utf-8")
-        )
-    except OSError:
-        revision = None
-    return revision or _packed_revision(git_directory, reference.strip())
 
 
 def software_provenance() -> Mapping[str, Any]:
-    """Describe the package, source revision, and numerical runtime."""
+    """Record source identity, the adjacent project lock, and runtime versions."""
 
-    try:
-        package_version = version(_PACKAGE_NAME)
-    except PackageNotFoundError:
-        package_version = "unknown"
-    repository = Path(__file__).resolve().parents[1]
-    revision = _repository_revision(repository)
-    clean_ci_checkout = (
-        os.environ.get("GITHUB_ACTIONS") == "true" and revision is not None
+    package_directory = Path(__file__).resolve().parent
+    lockfile = package_directory.parent / "uv.lock"
+    project_lock = None
+    if lockfile.is_file():
+        lock_hash, lock_size = _file_sha256(lockfile)
+        project_lock = {
+            "name": lockfile.name,
+            "sha256": lock_hash,
+            "size_bytes": lock_size,
+        }
+    runtime: dict[str, str | None] = {"python": platform.python_version()}
+    runtime.update(
+        {
+            name: _installed_version(distribution)
+            for name, distribution in (
+                ("numpy", "numpy"),
+                ("scipy", "scipy"),
+                ("h5py", "h5py"),
+                ("pydantic", "pydantic"),
+                ("pyyaml", "PyYAML"),
+                ("typing_extensions", "typing_extensions"),
+            )
+        }
     )
     return MappingProxyType(
         {
-            "package": {"name": _PACKAGE_NAME, "version": package_version},
-            "git": {
-                "revision": revision,
-                "dirty": False if clean_ci_checkout else None,
+            "package": {
+                "name": _PACKAGE_NAME,
+                "version": _installed_version(_PACKAGE_NAME),
             },
-            "runtime": {
-                "python": platform.python_version(),
-                "numpy": np.__version__,
-                "scipy": scipy.__version__,
-                "h5py": h5py.__version__,
-            },
+            "source_tree": _source_fingerprint(package_directory),
+            "project_lock": project_lock,
+            "platform": {"system": platform.system(), "machine": platform.machine()},
+            "runtime": runtime,
         }
     )
 

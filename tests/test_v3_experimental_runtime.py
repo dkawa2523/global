@@ -9,13 +9,20 @@ import yaml
 from plasma_global import load_case
 from plasma_global.build import compile_case, simulate_case
 from plasma_global.errors import ModelDomainError
-from plasma_global.input.schema import CaseSpec
+from plasma_global.input._resolved_case import ResolvedCase
 
-MINIMAL = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
-SMOKE = Path(__file__).parents[1] / "examples" / "v3" / "cases" / "smoke.yaml"
+MINIMAL = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
+SMOKE = (
+    Path(__file__).parents[1]
+    / "plasma_global"
+    / "assets"
+    / "examples"
+    / "cases"
+    / "smoke.yaml"
+)
 
 
-def _case_with_generic_extensions(tmp_path: Path) -> CaseSpec:
+def _case_with_generic_extensions(tmp_path: Path) -> ResolvedCase:
     base_case = load_case(MINIMAL)
     source_manifest = base_case.chemistry.manifest
     manifest = yaml.safe_load(source_manifest.read_text(encoding="utf-8"))
@@ -27,7 +34,7 @@ def _case_with_generic_extensions(tmp_path: Path) -> CaseSpec:
         "rate_models",
         "cross_sections",
     ):
-        if manifest.get(key):
+        if isinstance(manifest.get(key), str):
             manifest[key] = str((source_manifest.parent / manifest[key]).resolve())
     manifest["experimental"] = {
         "state_variables": {
@@ -75,7 +82,7 @@ def _case_with_generic_extensions(tmp_path: Path) -> CaseSpec:
     data = base_case.model_dump(mode="python")
     data["chemistry"]["manifest"] = target_manifest
     data["experimental"] = {"extensions": {}}
-    return CaseSpec.model_validate(data)
+    return ResolvedCase.model_validate(data)
 
 
 def test_generic_extension_state_processes_reach_rhs_and_result(
@@ -151,7 +158,7 @@ def test_unmapped_surface_reaction_does_not_guess_inventory_yield() -> None:
     source = load_case(SMOKE)
     data = source.model_dump(mode="python")
     data["experimental"]["wall_inventory"]["events"] = []
-    compiled = compile_case(CaseSpec.model_validate(data))
+    compiled = compile_case(ResolvedCase.model_validate(data))
     labels = compiled.model.layout.labels
     state = compiled.model.initial_state(compiled.initial_state)
     state[labels.index("n[process,F]")] = 1.0e19

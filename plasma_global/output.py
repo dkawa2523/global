@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,29 +13,36 @@ from plasma_global._result_common import (
     RESULT_FORMAT_VERSION,
     RESULT_H5_NAME,
     SUMMARY_YAML_NAME,
+    new_output_directory,
 )
 from plasma_global._result_csv import read_result_csv as _read_result_csv
 from plasma_global._result_csv import write_result_csv as _write_result_csv
 from plasma_global._result_hdf5 import read_result_h5 as _read_result_h5
 from plasma_global._result_hdf5 import write_result_h5 as _write_result_h5
+from plasma_global._result_network import graphviz_module, write_networks
+from plasma_global._result_plot import _load_pyplot, write_configured_plots
 from plasma_global._result_plot import plot_result_h5 as _plot_result_h5
-from plasma_global._result_summary import (
-    audit_from_metadata as _audit_from_metadata,
-)
 from plasma_global._result_summary import build_summary as _build_summary
+from plasma_global._result_summary import write_series_yaml
 from plasma_global._result_summary import write_summary_yaml as _write_summary_yaml
 from plasma_global.audit import AuditReport, audit_result
-from plasma_global.core.result import SimulationResult, SimulationStatus
+from plasma_global.core.result import (
+    SimulationResult,
+    SimulationStatus,
+    to_plain_mapping,
+)
+from plasma_global.input._schema_output import NetworkConfig, OutputConfig
 
 
 @dataclass(frozen=True, slots=True)
 class ResultPaths:
-    """The canonical artifacts and their result-level audit outcome."""
+    """Numerical result and requested analysis artifacts in one immutable run."""
 
     directory: Path
     result_h5: Path
     summary_yaml: Path
-    audit_passed: bool = True
+    result_csv: Path | None = None
+    analysis_files: tuple[Path, ...] = ()
 
 
 def write_result_h5(path: str | Path, result: SimulationResult) -> Path:
@@ -76,62 +80,91 @@ def read_result_csv(
     )
 
 
-def build_summary(
-    result: SimulationResult, *, audit: AuditReport | None = None
-) -> dict[str, Any]:
+def build_summary(result: SimulationResult) -> dict[str, Any]:
     """Build the fixed summary from result-declared quantities only."""
 
-    return _build_summary(result, audit=audit)
+    return _build_summary(result)
 
 
 def write_summary_yaml(
     path: str | Path,
     result: SimulationResult,
-    *,
-    audit: AuditReport | None = None,
 ) -> Path:
     """Write the stable human-readable result summary."""
 
-    return _write_summary_yaml(path, result, audit=audit)
+    return _write_summary_yaml(path, result)
 
 
 def write_result(result: SimulationResult, output_dir: str | Path) -> ResultPaths:
-    """Atomically publish the canonical HDF5 and summary pair."""
+    """Publish a complete new run with one directory rename; never overwrite a run."""
 
-    directory = Path(output_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    report = _audit_from_metadata(result)
-    result_h5 = directory / RESULT_H5_NAME
-    summary_yaml = directory / SUMMARY_YAML_NAME
-    with tempfile.TemporaryDirectory(prefix=".plasma-global-", dir=directory) as raw:
-        stage = Path(raw)
-        staged_h5 = write_result_h5(stage / RESULT_H5_NAME, result)
-        staged_summary = write_summary_yaml(
-            stage / SUMMARY_YAML_NAME, result, audit=report
+    directory = Path(output_dir).resolve()
+    requests = OutputConfig.model_validate(
+        to_plain_mapping(result.metadata.get("output_requests", {}))
+    )
+    preflight_output(requests)
+    files: list[Path] = []
+    with new_output_directory(directory) as stage:
+        write_result_h5(stage / RESULT_H5_NAME, result)
+        write_summary_yaml(stage / SUMMARY_YAML_NAME, result)
+        if requests.csv:
+            write_result_csv(stage / RESULT_CSV_NAME, result)
+            files.append(write_series_yaml(stage / "series.yaml", result))
+        if requests.plots:
+            files.extend(
+                write_configured_plots(result, stage / "plots", requests.plots)
+            )
+        if requests.networks:
+            files.extend(write_networks(result, stage / "networks", requests.networks))
+        relative = tuple(path.relative_to(stage) for path in files)
+    return ResultPaths(
+        directory,
+        directory / RESULT_H5_NAME,
+        directory / SUMMARY_YAML_NAME,
+        directory / RESULT_CSV_NAME if requests.csv else None,
+        tuple(directory / path for path in relative),
+    )
+
+
+def preflight_output(requests: OutputConfig) -> None:
+    """Fail before integration when a requested renderer is unavailable."""
+    if requests.plots:
+        _load_pyplot()
+    if requests.networks:
+        graphviz_module(
+            render=any(config.format != "dot" for config in requests.networks.values())
         )
-        targets = ((staged_h5, result_h5), (staged_summary, summary_yaml))
-        backups: dict[Path, Path | None] = {}
-        for _, target in targets:
-            if target.exists():
-                backup = stage / f"{target.name}.previous"
-                shutil.copy2(target, backup)
-                backups[target] = backup
-            else:
-                backups[target] = None
-        replaced: list[Path] = []
-        try:
-            for staged, target in targets:
-                os.replace(staged, target)
-                replaced.append(target)
-        except OSError:
-            for target in reversed(replaced):
-                backup = backups[target]
-                if backup is None:
-                    target.unlink(missing_ok=True)
-                else:
-                    os.replace(backup, target)
-            raise
-    return ResultPaths(directory, result_h5, summary_yaml, audit_passed=report.passed)
+
+
+def network_result_h5(
+    result_h5: str | Path,
+    output_dir: str | Path,
+    *,
+    config: NetworkConfig | None = None,
+    image_format: str | None = None,
+) -> tuple[Path, ...]:
+    result = read_result_h5(result_h5)
+    configured = OutputConfig.model_validate(
+        to_plain_mapping(result.metadata.get("output_requests", {}))
+    ).networks
+    requests = (
+        dict(configured)
+        if config is None and configured
+        else {"network": config or NetworkConfig()}
+    )
+    if image_format is not None:
+        requests = {
+            name: NetworkConfig.model_validate(
+                {**item.model_dump(), "format": image_format}
+            )
+            for name, item in requests.items()
+        }
+    graphviz_module(render=any(item.format != "dot" for item in requests.values()))
+    directory = Path(output_dir).resolve()
+    with new_output_directory(directory) as stage:
+        files = write_networks(result, stage / "diagrams", requests)
+        relative = tuple(path.relative_to(stage) for path in files)
+    return tuple(directory / path for path in relative)
 
 
 def export_result_csv(result_h5: str | Path, output_csv: str | Path) -> Path:
@@ -168,8 +201,8 @@ def plot_result_h5(
     output_dir: str | Path,
     *,
     series: Sequence[str] = (),
-    image_format: str = "png",
-    dpi: int = 150,
+    image_format: str | None = None,
+    dpi: int | None = None,
 ) -> tuple[Path, ...]:
     """Plot selected result series through the optional plotting adapter."""
 
@@ -193,6 +226,7 @@ __all__ = [
     "audit_result_h5",
     "build_summary",
     "export_result_csv",
+    "network_result_h5",
     "plot_result_h5",
     "read_result_csv",
     "read_result_h5",

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import csv
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
+
+from plasma_global._numeric_csv import read_numeric_csv
 
 
 def _validated_profile_time(value: np.ndarray) -> np.ndarray:
@@ -45,23 +46,13 @@ def _validated_profile_densities(
     return MappingProxyType(densities)
 
 
-def _read_profile_csv(
-    source: Path,
-) -> tuple[tuple[str, ...], list[dict[str | None, Any]]]:
-    try:
-        with source.open("r", encoding="utf-8-sig", newline="") as stream:
-            reader = csv.DictReader(stream, strict=True)
-            columns = tuple(reader.fieldnames or ())
-            rows = list(reader)
-    except csv.Error as exc:
-        raise ValueError(f"electron profile {source} is malformed CSV: {exc}") from exc
-    if len(set(columns)) != len(columns):
-        raise ValueError(f"electron profile {source} has duplicate columns")
-    if "time_s" not in columns:
-        raise ValueError(f"electron profile {source} requires a time_s column")
-    if not rows:
-        raise ValueError(f"electron profile {source} contains no data rows")
-    return columns, rows
+def _inferred_profile_columns(columns: tuple[str, ...]) -> dict[str, str]:
+    value_columns = tuple(column for column in columns if column != "time_s")
+    return (
+        {"*": "electron_density_m3"}
+        if value_columns == ("electron_density_m3",)
+        else {column: column for column in value_columns}
+    )
 
 
 def _selected_profile_columns(
@@ -70,14 +61,11 @@ def _selected_profile_columns(
     zone_columns: Mapping[str, str] | None,
 ) -> dict[str, str]:
     if zone_columns is None:
-        value_columns = tuple(column for column in columns if column != "time_s")
-        selected = (
-            {"*": "electron_density_m3"}
-            if value_columns == ("electron_density_m3",)
-            else {column: column for column in value_columns}
-        )
+        selected = _inferred_profile_columns(columns)
     else:
         selected = {str(zone): str(column) for zone, column in zone_columns.items()}
+    if "time_s" in selected.values():
+        raise ValueError("time_s cannot be used as an electron-density column")
     missing = sorted(set(selected.values()) - set(columns))
     if missing:
         raise ValueError(
@@ -90,46 +78,6 @@ def _selected_profile_columns(
                 f"electron profile {source} has extra columns: {', '.join(extra)}"
             )
     return selected
-
-
-def _validate_profile_rows(
-    source: Path,
-    columns: tuple[str, ...],
-    rows: list[dict[str | None, Any]],
-) -> None:
-    for line, row in enumerate(rows, start=2):
-        if None in row:
-            raise ValueError(
-                f"electron profile {source}:{line} contains extra CSV fields"
-            )
-        missing_values = [
-            column
-            for column in columns
-            if row.get(column) is None or not str(row[column]).strip()
-        ]
-        if missing_values:
-            raise ValueError(
-                f"electron profile {source}:{line} has missing values for: "
-                f"{', '.join(missing_values)}"
-            )
-
-
-def _numeric_profile_data(
-    source: Path,
-    rows: list[dict[str | None, Any]],
-    selected: Mapping[str, str],
-) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    try:
-        time = np.asarray([float(row["time_s"]) for row in rows], dtype=float)
-        density = {
-            zone: np.asarray([float(row[column]) for row in rows], dtype=float)
-            for zone, column in selected.items()
-        }
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(
-            f"electron profile {source} must contain numeric data"
-        ) from exc
-    return time, density
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,16 +115,19 @@ class PrescribedElectronProfile:
         path: str | Path,
         *,
         zone_columns: Mapping[str, str] | None = None,
+        columns: Mapping[str, str] | None = None,
         interpolation: Literal["linear", "previous"] = "linear",
         bounds: Literal["hold", "error"] = "hold",
     ) -> PrescribedElectronProfile:
         """Read ``time_s`` plus numeric zone columns from a CSV file."""
 
         source = Path(path)
-        columns, rows = _read_profile_csv(source)
-        selected = _selected_profile_columns(source, columns, zone_columns)
-        _validate_profile_rows(source, columns, rows)
-        time, density = _numeric_profile_data(source, rows, selected)
+        values = read_numeric_csv(source, columns=columns)
+        if "time_s" not in values:
+            raise ValueError(f"electron profile {source} requires a time_s column")
+        selected = _selected_profile_columns(source, tuple(values), zone_columns)
+        time = values["time_s"]
+        density = {zone: values[column] for zone, column in selected.items()}
 
         return cls(
             time_s=time,

@@ -8,24 +8,27 @@ from typing import Any
 
 import yaml
 
+from plasma_global._audit_types import CaseAssessment
 from plasma_global._provenance import build_artifact_provenance
+from plasma_global.chemistry._maxwell import maxwell_integration_policy
 from plasma_global.chemistry.compile import CompiledChemistry
 from plasma_global.chemistry.data import ChemistryData
 from plasma_global.core.domain import SolverSettings
-from plasma_global.input.schema import CaseSpec
+from plasma_global.input._resolved_case import ResolvedCase
+from plasma_global.input._serialize import case_document
 from plasma_global.models.elastic import momentum_cross_section_ids
 from plasma_global.models.walls import BOHM_H_FACTOR_CLOSURE_VERSION
 
 
-def _effective_case_yaml(case: CaseSpec) -> str:
+def _effective_case_yaml(case: ResolvedCase) -> str:
     return yaml.safe_dump(
-        case.model_dump(mode="json", exclude_none=True),
+        case_document(case),
         sort_keys=False,
         allow_unicode=True,
     )
 
 
-def _wall_transport_closure_provenance(case: CaseSpec) -> dict[str, Any] | None:
+def _wall_transport_closure_provenance(case: ResolvedCase) -> dict[str, Any] | None:
     surface_modes = {
         surface.surface_id: (
             "auto" if surface.wall_transport.h_factor == "auto" else "numeric"
@@ -44,9 +47,10 @@ def _wall_transport_closure_provenance(case: CaseSpec) -> dict[str, Any] | None:
 
 
 def _model_ids(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry: CompiledChemistry,
     experimental_features: tuple[str, ...],
+    electron_kinetics_provenance: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
         "electrons": case.models.electrons.kind,
@@ -64,32 +68,34 @@ def _model_ids(
             for surface in case.reactor.surfaces
         },
         "elastic_heating": (
-            "momentum_cross_sections" if momentum_cross_section_ids(chemistry) else None
-        ),
-        "experimental_accumulator": experimental_features or None,
-        "experimental_stop_policy": (
-            "experimental.stop_when_quasi_steady"
-            if case.experimental is not None
-            and case.experimental.stop_when_quasi_steady is not None
+            (
+                "maxwellian_momentum_cross_sections"
+                if case.models.electrons.kind == "maxwellian"
+                else "tabulated_momentum_rates"
+            )
+            if momentum_cross_section_ids(chemistry)
+            or electron_kinetics_provenance.get("momentum_rate_ids")
             else None
         ),
+        "experimental_accumulator": experimental_features or None,
     }
 
 
 def build_metadata(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
     missing_momentum_targets: tuple[str, ...],
     electron_kinetics_provenance: Mapping[str, Any],
     experimental_features: tuple[str, ...],
+    assessment: CaseAssessment,
 ) -> Mapping[str, Any]:
     """Build immutable, self-describing artifact metadata."""
 
     domain_provenance: dict[str, Any] = {
         "case_source": None if case.source_path is None else str(case.source_path),
         "included_files": [str(path) for path in case.included_files],
-        "chemistry_manifest": str(case.chemistry.manifest),
+        "chemistry_source": str(chemistry_data.source),
         "chemistry": dict(chemistry.provenance),
         "missing_momentum_cross_section_targets": missing_momentum_targets,
     }
@@ -102,17 +108,22 @@ def build_metadata(
     return MappingProxyType(
         {
             "effective_case_yaml": _effective_case_yaml(case),
-            "model_ids": _model_ids(case, chemistry, experimental_features),
+            "model_ids": _model_ids(
+                case, chemistry, experimental_features, electron_kinetics_provenance
+            ),
             "provenance": provenance,
             "summary_series": tuple(case.output.summary_series),
+            "assessment": assessment.to_dict(),
+            **(
+                {"maxwellian_integration": maxwell_integration_policy()}
+                if case.models.electrons.kind == "maxwellian"
+                else {}
+            ),
         }
     )
 
 
-def solver_settings(case: CaseSpec) -> SolverSettings:
-    stop = (
-        None if case.experimental is None else case.experimental.stop_when_quasi_steady
-    )
+def solver_settings(case: ResolvedCase) -> SolverSettings:
     return SolverSettings(
         rtol=case.solver.rtol,
         atol=case.solver.atol,
@@ -122,8 +133,4 @@ def solver_settings(case: CaseSpec) -> SolverSettings:
         save_at_s=(
             None if case.solver.save_at_s is None else tuple(case.solver.save_at_s)
         ),
-        experimental_quasi_steady_threshold_s_inv=(
-            None if stop is None else stop.relative_rhs_norm_s_inv
-        ),
-        experimental_quasi_steady_min_time_s=(0.0 if stop is None else stop.min_time_s),
     )

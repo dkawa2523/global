@@ -1,0 +1,48 @@
+schema_version: 4
+species:
+- id: e
+  phase: gas
+  charge: -1
+  mass_amu: 0.00054858
+  elements: {}
+  state_tags:
+  - electron
+  surfaces: []
+  cv_over_kb: null
+  metadata: {}
+- id: Ar
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  state_tags: []
+  surfaces: []
+  cv_over_kb: null
+  metadata: {}
+- id: Ar_plus
+  phase: gas
+  charge: 1
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  state_tags:
+  - ion
+  surfaces: []
+  cv_over_kb: null
+  metadata: {}
+gas_reactions: []
+boundary_reactions:
+- id: neutralize
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces:
+  - wall
+  metadata: {}
+  equation: Ar_plus -> Ar
+surface_reactions: []
+rate_models: {}
+cross_sections: []
+experimental: {}
+provenance:
+  fixture: canonical-minimal

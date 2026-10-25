@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import h5py
 import numpy as np
 import pytest
 
@@ -15,9 +14,10 @@ from plasma_global.chemistry.data import (
     ReactionData,
     SpeciesData,
 )
+from plasma_global.core._solver_domain import _accepted_state_for_result
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
-from plasma_global.core.solver import _accepted_state_for_result, solve_compiled_model
+from plasma_global.core.solver import solve_compiled_model
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
 from plasma_global.errors import (
     CaseValidationError,
@@ -397,13 +397,13 @@ def test_icp_downstream_solution_matches_bdf_without_sparsity(
         save_at_s=(0.0, 0.25, 0.5, 1.0),
     )
     sparse_result = solve_compiled_model(model, initial, settings)
-    real_solve_ivp = solver_module.solve_ivp
+    real_bdf = solver_module.BDF
 
-    def solve_without_sparsity(**options: object) -> object:
+    def solve_without_sparsity(*args: object, **options: object) -> object:
         options.pop("jac_sparsity", None)
-        return real_solve_ivp(**options)
+        return real_bdf(*args, **options)
 
-    monkeypatch.setattr(solver_module, "solve_ivp", solve_without_sparsity)
+    monkeypatch.setattr(solver_module, "BDF", solve_without_sparsity)
     dense_result = solve_compiled_model(model, initial, settings)
 
     np.testing.assert_array_equal(sparse_result.time_s, dense_result.time_s)
@@ -575,7 +575,7 @@ def test_runtime_scales_table_mobility_with_current_neutral_density(
     tmp_path: Path,
 ) -> None:
     table = TabulatedElectronKinetics(
-        source=tmp_path / "prepared.h5",
+        source=tmp_path / "prepared.csv",
         lookup="mean_energy",
         bounds="error",
         axis=np.array([2.0, 4.0]),
@@ -641,7 +641,7 @@ def test_mean_energy_kinetics_field_rate_jacobian_contains_fd_support(
         segments=(segment,),
         electron_closure=ElectronEnergyClosure(),
         electron_kinetics_by_zone={
-            "z": _mean_energy_table(tmp_path / "kinetics.h5", lookup="mean_energy")
+            "z": _mean_energy_table(tmp_path / "kinetics.csv", lookup="mean_energy")
         },
     )
     state = model.initial_state(
@@ -671,7 +671,7 @@ def test_table_rates_and_mobility_feed_reactions_and_power_ports(
         assert context.electron_mobility_m2_V_s == pytest.approx(0.45)
         return float(context.rate_coefficients["convert"])
 
-    table = _mean_energy_table(tmp_path / "prepared.h5", lookup="mean_energy")
+    table = _mean_energy_table(tmp_path / "prepared.csv", lookup="mean_energy")
     coordinator = PowerCoordinator(
         ports=(
             PrescribedPowerPort(
@@ -775,7 +775,7 @@ def test_local_field_requires_a_source_in_every_zone_before_runtime() -> None:
 def test_local_field_port_coupling_converges_and_drives_table_rates(
     tmp_path: Path,
 ) -> None:
-    table = _mean_energy_table(tmp_path / "local.h5", lookup="local_field")
+    table = _mean_energy_table(tmp_path / "local.csv", lookup="local_field")
     coordinator = PowerCoordinator(
         ports=(FixedFieldPort("field", "z", 1.5),),
         zone_ids=("z",),
@@ -826,7 +826,7 @@ class OscillatingFieldPort:
 
 def test_power_kinetics_coupling_fails_after_twelve_iterations(tmp_path: Path) -> None:
     table = TabulatedElectronKinetics(
-        source=tmp_path / "oscillating.h5",
+        source=tmp_path / "oscillating.csv",
         lookup="local_field",
         bounds="error",
         axis=np.array([1.0, 2.0]),
@@ -848,7 +848,7 @@ def test_power_kinetics_coupling_fails_after_twelve_iterations(tmp_path: Path) -
         )
 
 
-def test_external_power_and_hdf5_kinetics_tables_are_loaded_once(
+def test_external_power_and_csv_kinetics_tables_are_loaded_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -874,26 +874,17 @@ def test_external_power_and_hdf5_kinetics_tables_are_loaded_once(
     )
     coordinator = PowerCoordinator((port,), ("z",))
 
-    h5_path = tmp_path / "rates.h5"
-    with h5py.File(h5_path, "w") as handle:
-        handle["effective_field_Td"] = np.array([1.0, 2.0])
-        handle["mean_energy_eV"] = np.array([2.0, 4.0])
-        handle["mobility_m2_V_s"] = np.array([0.5, 0.4])
-        rates = handle.create_group("rate_coefficients")
-        rates["convert"] = np.array([1.0, 3.0])
-    table = TabulatedElectronKinetics.from_hdf5(h5_path, lookup="local_field")
+    h5_path = tmp_path / "rates.csv"
+    h5_path.write_text(
+        "reduced_field_Td,mean_energy_eV,reduced_mobility_1_V_m_s,k:convert\n1.0,2.0,0.5,1.0\n2.0,4.0,0.4,3.0\n",
+        encoding="utf-8",
+    )
+    table = TabulatedElectronKinetics.from_csv(h5_path, lookup="local_field")
 
     monkeypatch.setattr(
         Path,
         "open",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("CSV reopened")),
-    )
-    monkeypatch.setattr(
-        h5py,
-        "File",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("HDF5 reopened")
-        ),
     )
     first = coordinator.evaluate(
         time_s=0.25,

@@ -15,11 +15,11 @@ from plasma_global.experimental.eedf import ApproximateTwoTermEEDF
 from plasma_global.experimental.prepared_kinetics import (
     prepare_approximate_two_term_kinetics,
 )
+from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input.load import load_case
-from plasma_global.input.schema import CaseSpec
 
 ROOT = Path(__file__).parents[1]
-MINIMAL_CASE = ROOT / "tests" / "fixtures" / "v3_minimal" / "case.yaml"
+MINIMAL_CASE = ROOT / "tests" / "fixtures" / "minimal" / "case.yaml"
 
 
 def _write_chemistry(directory: Path) -> Path:
@@ -74,7 +74,7 @@ def _write_chemistry(directory: Path) -> Path:
     )
     manifest = directory / "chemistry.yaml"
     manifest.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "species: species.csv\n"
         "gas_reactions: gas.csv\n"
         "boundary_reactions: boundary.csv\n"
@@ -103,7 +103,7 @@ def _add_helium_momentum(manifest: Path) -> None:
     )
 
 
-def _approximate_case(manifest: Path) -> CaseSpec:
+def _approximate_case(manifest: Path) -> ResolvedCase:
     data = load_case(MINIMAL_CASE).model_dump(mode="python")
     data["chemistry"]["manifest"] = manifest
     zone = data["reactor"]["zones"][0]
@@ -126,7 +126,7 @@ def _approximate_case(manifest: Path) -> CaseSpec:
         "max_shape_iterations": 48,
     }
     data["models"]["electron_closure"] = {"kind": "local_field"}
-    return CaseSpec.model_validate(data)
+    return ResolvedCase.model_validate(data)
 
 
 def test_compilation_prepares_eedf_once_and_rhs_only_interpolates(
@@ -416,14 +416,14 @@ def test_approximate_two_term_schema_rejects_electron_energy_closure(
     data["reactor"]["zones"][0]["initial_mean_energy_eV"] = 3.0
 
     with pytest.raises(ValueError, match=r"require.*local_field"):
-        CaseSpec.model_validate(data)
+        ResolvedCase.model_validate(data)
 
 
 @pytest.mark.parametrize(
     "relative_path",
     [
-        "examples/v3/cases/argon_lxcat.yaml",
-        "examples/v3/cases/rf_envelope_calibration.yaml",
+        "plasma_global/assets/examples/cases/argon_lxcat.yaml",
+        "plasma_global/assets/examples/cases/rf_envelope_calibration.yaml",
     ],
 )
 def test_experimental_argon_examples_compile_and_reach_the_rhs(

@@ -70,7 +70,7 @@ class _ZonePowerIteration:
         if not self.field_is_coupled and self.next_field_Td is not None:
             effective_field_Td = self.next_field_Td
         if effective_field_Td is None and self.kinetics is not None:
-            effective_field_Td = float(self.kinetics.effective_field_Td)
+            effective_field_Td = self.kinetics.effective_field_Td
         return _ZonePowerResult(
             electron_power_W=self.electron_power_W,
             gas_power_W=sum(item.gas_power_W for item in self.port_results),

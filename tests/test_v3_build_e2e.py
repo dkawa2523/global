@@ -3,28 +3,28 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-import h5py
 import numpy as np
 import pytest
+import yaml
 
 import plasma_global.build as build_module
 import plasma_global.models.external_table as external_table_module
-from plasma_global import _build_electrons as electron_build_module
+from plasma_global import simulate
 from plasma_global.build import CompiledCase, compile_case, simulate_case
 from plasma_global.errors import CaseValidationError
+from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input.load import load_case
-from plasma_global.input.schema import CaseSpec, TableElectronModel
 from plasma_global.models.electrons import ELEMENTARY_CHARGE_C
 from plasma_global.models.gas_energy import elastic_electron_heating_J_m3_s
 from plasma_global.models.power import CompiledPowerCommand
 
-FIXTURE = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+FIXTURE = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
 
 
-def _updated_case(case: CaseSpec, update: object) -> CaseSpec:
+def _updated_case(case: ResolvedCase, update: object) -> ResolvedCase:
     data = case.model_dump(mode="python")
     update(data)
-    return CaseSpec.model_validate(data)
+    return ResolvedCase.model_validate(data)
 
 
 def _write_momentum_chemistry(directory: Path) -> Path:
@@ -58,7 +58,7 @@ def _write_momentum_chemistry(directory: Path) -> Path:
     )
     manifest = directory / "chemistry.yaml"
     manifest.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "species: species.csv\n"
         "gas_reactions: gas.csv\n"
         "boundary_reactions: boundary.csv\n"
@@ -99,7 +99,7 @@ def _write_surface_chemistry(directory: Path) -> Path:
     )
     manifest = directory / "chemistry.yaml"
     manifest.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "species: species.csv\n"
         "gas_reactions: gas.csv\n"
         "surface_reactions: surface.csv\n"
@@ -122,11 +122,58 @@ def test_canonical_v3_case_loads_compiles_and_simulates() -> None:
     assert result.time_s[-1] == pytest.approx(case.recipe.end_time_s)
     assert result.state.shape == (result.time_s.size, 3)
     assert np.isfinite(result.state).all()
-    assert "schema_version: 3" in result.metadata["effective_case_yaml"]
+    assert "schema_version: 4" in result.metadata["effective_case_yaml"]
     assert result.metadata["model_ids"]["electron_closure"] == "electron_energy"
     assert result.metadata["provenance"]["chemistry"]["fixture"] == (
-        "canonical-minimal-v3"
+        "canonical-minimal"
     )
+
+
+@pytest.mark.parametrize("selector", ["zones", "surfaces"])
+def test_boundary_selectors_are_checked_even_when_wall_transport_is_off(
+    tmp_path: Path, selector: str
+) -> None:
+    import shutil
+
+    directory = tmp_path / "case"
+    shutil.copytree(FIXTURE.parent, directory)
+    manifest = directory / "chemistry/chemistry.yaml"
+    chemistry = yaml.safe_load(manifest.read_text())
+    chemistry["boundary_reactions"][0][selector] = ["misspelled"]
+    manifest.write_text(yaml.safe_dump(chemistry), encoding="utf-8")
+    data = load_case(directory / "case.yaml").model_dump(mode="python")
+    data["reactor"]["surfaces"][0]["wall_transport"] = {"kind": "off"}
+    with pytest.raises(CaseValidationError, match=f"{selector} selects unknown"):
+        compile_case(ResolvedCase.model_validate(data))
+
+
+def test_surface_initial_state_is_never_silently_dropped() -> None:
+    data = load_case(FIXTURE).model_dump(mode="python")
+    data["reactor"]["surfaces"][0]["initial_coverages"] = {"adsorbed": 0.2}
+    with pytest.raises(ValueError, match="initial_coverages requires"):
+        ResolvedCase.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    ("zone_columns", "message"),
+    [
+        ({"plasma": "time_s"}, "cannot be used as an electron-density"),
+        ({"*": "ne", "ghost": "ne"}, "unknown zones"),
+    ],
+)
+def test_prescribed_profile_rejects_inapplicable_column_and_zone_bindings(
+    tmp_path: Path, zone_columns: dict, message: str
+) -> None:
+    path = tmp_path / "density.csv"
+    path.write_text("time_s,ne\n0,1e12\n1e-7,2e12\n", encoding="utf-8")
+    data = load_case(FIXTURE).model_dump(mode="python")
+    data["models"]["electron_density"] = {
+        "kind": "experimental.prescribed_profile",
+        "file": path,
+        "zone_columns": zone_columns,
+    }
+    with pytest.raises(ValueError, match=message):
+        compile_case(ResolvedCase.model_validate(data))
 
 
 def test_compile_case_revalidates_and_detaches_the_case_snapshot() -> None:
@@ -402,12 +449,11 @@ def test_compile_reads_each_shared_external_model_once(
         "time_s,electron_power_W,reduced_field_Td\n0.0,1.0e-6,10.0\n1.0,2.0e-6,20.0\n",
         encoding="utf-8",
     )
-    kinetics_path = tmp_path / "kinetics.h5"
-    with h5py.File(kinetics_path, "w") as handle:
-        handle["mean_energy_eV"] = np.array([1.0, 10.0])
-        handle["mobility_m2_V_s"] = np.array([0.5, 0.1])
-        handle["effective_field_Td"] = np.array([10.0, 100.0])
-        handle.create_group("rate_coefficients")
+    kinetics_path = tmp_path / "kinetics.csv"
+    kinetics_path.write_text(
+        "mean_energy_eV,reduced_mobility_1_V_m_s,reduced_field_Td\n1.0,1e+20,10.0\n10.0,2e+19,100.0\n",
+        encoding="utf-8",
+    )
 
     def update(data: dict[str, object]) -> None:
         data["reactor"]["power_ports"][0]["model"] = {
@@ -430,7 +476,7 @@ def test_compile_reads_each_shared_external_model_once(
     counts = {"chemistry": 0, "power": 0, "kinetics": 0}
     original_chemistry = build_module.load_chemistry
     original_power = external_table_module.load_external_table
-    original_kinetics = build_module.TabulatedElectronKinetics.from_hdf5
+    original_kinetics = build_module.TabulatedElectronKinetics.from_csv
 
     def counted_chemistry(path: Path) -> object:
         counts["chemistry"] += 1
@@ -448,7 +494,7 @@ def test_compile_reads_each_shared_external_model_once(
     monkeypatch.setattr(external_table_module, "load_external_table", counted_power)
     monkeypatch.setattr(
         build_module.TabulatedElectronKinetics,
-        "from_hdf5",
+        "from_csv",
         counted_kinetics,
     )
     compiled = compile_case(case)
@@ -456,33 +502,7 @@ def test_compile_reads_each_shared_external_model_once(
     assert counts == {"chemistry": 1, "power": 1, "kinetics": 1}
     kinetics_provenance = compiled.metadata["provenance"]["electron_kinetics"]
     assert kinetics_provenance["mobility_scaling"] == "inverse_neutral_density"
-    assert kinetics_provenance["mobility_reference_source"] == (
-        "uniform_initial_neutral_density"
-    )
-
-
-def test_shared_table_requires_reference_for_different_zone_densities() -> None:
-    inferred = TableElectronModel(
-        kind="table",
-        file=Path("rates.h5"),
-        lookup="local_field",
-    )
-    with pytest.raises(CaseValidationError, match="requires mobility_reference"):
-        electron_build_module._table_mobility_reference(
-            inferred,
-            {"source": 1.0e20, "process": 2.0e20},
-        )
-
-    explicit = TableElectronModel(
-        kind="table",
-        file=Path("rates.h5"),
-        lookup="local_field",
-        mobility_reference_neutral_density_m3=3.0e20,
-    )
-    assert electron_build_module._table_mobility_reference(
-        explicit,
-        {"source": 1.0e20, "process": 2.0e20},
-    ) == (3.0e20, "input")
+    assert kinetics_provenance["mobility_reference_source"] == ("table_input")
 
 
 def test_previous_external_table_knots_bind_each_forcing_interval(
@@ -579,12 +599,11 @@ def test_linear_external_table_does_not_create_knot_segments(tmp_path: Path) -> 
 def test_local_field_table_and_dc_series_are_bound_to_the_core(
     tmp_path: Path,
 ) -> None:
-    kinetics_path = tmp_path / "local-field.h5"
-    with h5py.File(kinetics_path, "w") as handle:
-        handle["mean_energy_eV"] = np.array([1.0, 5.0])
-        handle["mobility_m2_V_s"] = np.array([0.1, 0.1])
-        handle["effective_field_Td"] = np.array([10.0, 1000.0])
-        handle.create_group("rate_coefficients")
+    kinetics_path = tmp_path / "local-field.csv"
+    kinetics_path.write_text(
+        "mean_energy_eV,reduced_mobility_1_V_m_s,reduced_field_Td\n1.0,2e+19,10.0\n5.0,2e+19,1000.0\n",
+        encoding="utf-8",
+    )
 
     def update(data: dict[str, object]) -> None:
         zone = data["reactor"]["zones"][0]
@@ -786,22 +805,20 @@ def test_momentum_cross_section_compiles_elastic_heating_into_both_ledgers(
         - ledger.elastic_heating_J_m3_s
     )
     assert compiled.metadata["model_ids"]["elastic_heating"] == (
-        "momentum_cross_sections"
+        "maxwellian_momentum_cross_sections"
     )
     assert (
         compiled.metadata["provenance"]["missing_momentum_cross_section_targets"] == ()
     )
 
 
-def test_table_eedf_momentum_rate_overrides_maxwellian_fallback(tmp_path: Path) -> None:
+def test_table_eedf_uses_and_requires_its_momentum_rate(tmp_path: Path) -> None:
     manifest = _write_momentum_chemistry(tmp_path / "chemistry")
-    kinetics_path = tmp_path / "kinetics.h5"
-    with h5py.File(kinetics_path, "w") as handle:
-        handle["mean_energy_eV"] = np.array([1.0, 10.0])
-        handle["mobility_m2_V_s"] = np.array([0.5, 0.1])
-        handle["effective_field_Td"] = np.array([10.0, 100.0])
-        rates = handle.create_group("rate_coefficients")
-        rates["Ar_momentum"] = np.array([1.0e-13, 1.0e-13])
+    kinetics_path = tmp_path / "kinetics.csv"
+    kinetics_path.write_text(
+        "mean_energy_eV,reduced_mobility_1_V_m_s,reduced_field_Td,k:Ar_momentum\n1.0,1e+20,10.0,1e-13\n10.0,2e+19,100.0,1e-13\n",
+        encoding="utf-8",
+    )
 
     def update(data: dict[str, object]) -> None:
         data["chemistry"]["manifest"] = manifest
@@ -826,6 +843,15 @@ def test_table_eedf_momentum_rate_overrides_maxwellian_fallback(tmp_path: Path) 
     assert evaluated.ledger_by_zone["plasma"].elastic_heating_J_m3_s == pytest.approx(
         expected
     )
+    assert (
+        compiled.metadata["model_ids"]["elastic_heating"] == "tabulated_momentum_rates"
+    )
+    kinetics_path.write_text(
+        "mean_energy_eV,reduced_field_Td,reduced_mobility_1_V_m_s\n1,10,1e20\n10,100,2e19\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseValidationError, match="Ar_momentum"):
+        compile_case(_updated_case(load_case(FIXTURE), update))
 
 
 def test_surface_state_reaction_temperature_override_and_free_site_observable(
@@ -860,3 +886,19 @@ def test_surface_state_reaction_temperature_override_and_free_site_observable(
     result = simulate_case(case)
     assert result.observables["coverage[wall,wall:*]"][0] == pytest.approx(1.0)
     assert result.observables["coverage[wall,wall:*]"][-1] < 1.0
+
+
+def test_standard_argon_case_conserves_particles_through_afterglow() -> None:
+    case_path = (
+        Path(__file__).parents[1]
+        / "plasma_global/assets/examples/cases/argon_maxwellian.yaml"
+    )
+    result = simulate(load_case(case_path))
+    assert result.metadata["assessment"]["classification"] == "standard"
+    assert not result.metadata["assessment"]["issues"]
+    total = result.series("n[plasma,Ar]") + result.series("n[plasma,Ar_plus]")
+    np.testing.assert_allclose(total, total[0], rtol=1.0e-8)
+    assert result.time_s[-1] == 2.0e-3
+    assert np.all(
+        result.series("absorbed_power_W[plasma]")[result.time_s > 1.0e-3] == 0.0
+    )

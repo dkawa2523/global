@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, lil_matrix
 
 if TYPE_CHECKING:
     from plasma_global.core.compiled import CompiledGlobalModel
@@ -21,7 +21,7 @@ class JacobianBuilder:
 
     def build(self) -> csr_matrix:
         model = self.model
-        pattern = np.zeros((model.layout.size, model.layout.size), dtype=bool)
+        pattern = lil_matrix((model.layout.size, model.layout.size), dtype=bool)
         self._add_zone_blocks(pattern)
         self._add_transport_blocks(pattern)
         self._add_surface_blocks(pattern)
@@ -42,7 +42,7 @@ class JacobianBuilder:
             stop = layout.heavy_energy_indices[zone_id] + 1
         return density_slice.start, stop
 
-    def _add_zone_blocks(self, pattern: np.ndarray) -> None:
+    def _add_zone_blocks(self, pattern: lil_matrix) -> None:
         model = self.model
         layout = model.layout
         reactive_species = np.any(model.stoichiometry != 0.0, axis=0)
@@ -54,23 +54,24 @@ class JacobianBuilder:
             )
             if layout.evolves_electron_energy:
                 energy_index = layout.electron_energy_indices[zone_id]
-                pattern[density_slice, energy_index] = reactive_species
+                pattern[density_slice, energy_index] = reactive_species.reshape(-1, 1)
                 pattern[energy_index, start:stop] = True
             if layout.evolves_heavy_energy:
                 heavy_index = layout.heavy_energy_indices[zone_id]
-                pattern[density_slice, heavy_index] = reactive_species
+                pattern[density_slice, heavy_index] = reactive_species.reshape(-1, 1)
                 pattern[heavy_index, start:stop] = True
             if model._walls_by_zone.get(zone_id):
                 pattern[start:stop, start:stop] = True
 
-    def _add_transport_blocks(self, pattern: np.ndarray) -> None:
+    def _add_transport_blocks(self, pattern: lil_matrix) -> None:
         model = self.model
         transport = model.transport
         if transport is None:
             return
         for zone_id in model.layout.zone_ids:
             start, stop = self._zone_state_bounds(zone_id)
-            pattern[start:stop, start:stop] |= np.eye(stop - start, dtype=bool)
+            indices = np.arange(start, stop)
+            pattern[indices, indices] = True
         for source_index, target_index in zip(
             transport.edge_from, transport.edge_to, strict=True
         ):
@@ -80,7 +81,7 @@ class JacobianBuilder:
             target_start, target_stop = self._zone_state_bounds(target_zone)
             pattern[target_start:target_stop, source_start:source_stop] = True
 
-    def _add_surface_blocks(self, pattern: np.ndarray) -> None:
+    def _add_surface_blocks(self, pattern: lil_matrix) -> None:
         model = self.model
         surface_model = model.surface_model
         if surface_model is None:
@@ -98,7 +99,7 @@ class JacobianBuilder:
                 pattern[coverage_indices, zone_start:zone_stop] = True
                 pattern[np.ix_(coverage_indices, coverage_indices)] = True
 
-    def _add_power_blocks(self, pattern: np.ndarray) -> None:
+    def _add_power_blocks(self, pattern: lil_matrix) -> None:
         coordinator = self.model.power_coordinator
         if coordinator is None:
             return
@@ -106,7 +107,7 @@ class JacobianBuilder:
         self._add_distributed_power_blocks(pattern, coordinator)
 
     def _add_field_power_blocks(
-        self, pattern: np.ndarray, coordinator: PowerCoordinator
+        self, pattern: lil_matrix, coordinator: PowerCoordinator
     ) -> None:
         for zone_id in self.model.layout.zone_ids:
             if not any(
@@ -118,7 +119,7 @@ class JacobianBuilder:
             pattern[start:stop, start:stop] = True
 
     def _add_distributed_power_blocks(
-        self, pattern: np.ndarray, coordinator: PowerCoordinator
+        self, pattern: lil_matrix, coordinator: PowerCoordinator
     ) -> None:
         if not self.model.layout.evolves_electron_energy:
             return

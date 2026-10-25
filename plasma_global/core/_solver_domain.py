@@ -276,6 +276,8 @@ def canonicalize_result_state(
     state: np.ndarray,
     domain_atol: np.ndarray,
     time_s: np.ndarray,
+    *,
+    segment: RecipeSegment | None = None,
 ) -> tuple[np.ndarray, int, int]:
     """Return a strict-domain copy without re-evaluating the physical RHS."""
 
@@ -286,7 +288,11 @@ def canonicalize_result_state(
         raise ValueError("result state shape does not match times and model layout")
     if tolerance.shape != (model.layout.size,):
         raise ValueError("result domain_atol does not match the model layout")
-    segments = _saved_segments(times, model.segments)
+    segments = (
+        _saved_segments(times, model.segments)
+        if segment is None
+        else (segment,) * times.size
+    )
     if not np.all(np.isfinite(values)):
         row, column = np.argwhere(~np.isfinite(values))[0]
         raise _failure(
@@ -300,7 +306,7 @@ def canonicalize_result_state(
         lower_bounds=model.state_lower_bounds,
         upper_bounds=model.state_upper_bounds,
         time_s=times,
-        segments=model.segments,
+        segments=model.segments if segment is None else (segment,),
     )
     # Normalize component bounds, then the simplex, then coupled zone domains.
     _map_surface_state(model, accepted, tolerance, times, segments)

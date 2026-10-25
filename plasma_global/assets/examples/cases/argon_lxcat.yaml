@@ -1,0 +1,154 @@
+schema_version: 4
+case:
+  name: experimental_argon_lxcat_trend
+  description: 'Experimental pure-Ar ICP trend case using public BOLSIG/LXCat-style
+    cross sections from the Zenodo CC-BY dataset 10.5281/zenodo.8192503. It exercises
+    the approximate two-term and ICP/CCP models for finite, conservative qualitative
+    trends; it is not a production-accuracy baseline.
+
+    '
+chemistry:
+  file: ../chemistry/argon_lxcat/chemistry.yaml
+reactor:
+  chamber_id: argon_icp_two_zone_reactor
+  description: 'Pure-argon two-zone ICP baseline chamber. Argon enters the source
+    zone, flows to the process zone, and is pumped from the process zone.
+
+    '
+  zones:
+    source:
+      volume_m3: 0.01
+      description: upstream ICP source zone
+      initial:
+        pressure_Pa: 8.0
+        gas_temperature_K: 350.0
+        densities_m3:
+          Ar: 1.6555361179519817e+21
+          Ar_plus: 1000000000000.0
+    process:
+      volume_m3: 0.03
+      description: downstream process zone
+      initial:
+        pressure_Pa: 8.0
+        gas_temperature_K: 340.0
+        densities_m3:
+          Ar: 1.7042283567152754e+21
+          Ar_plus: 1000000000000.0
+  surfaces:
+    wafer:
+      zone_id: process
+      area_m2: 0.0314
+      temperature_K: 320.0
+      wall_transport:
+        kind: bohm
+      site_density_m2: 5.0e+18
+    grounded_wall:
+      zone_id: process
+      area_m2: 0.45
+      temperature_K: 330.0
+      wall_transport:
+        kind: bohm
+      site_density_m2: 3.0e+18
+    source_wall:
+      zone_id: source
+      area_m2: 0.18
+      temperature_K: 360.0
+      wall_transport:
+        kind: bohm
+      site_density_m2: 3.0e+18
+  edges:
+    source_to_process:
+      from_zone: source
+      to_zone: process
+      conductance_m3_s: 0.03
+  gas_inlets:
+    showerhead:
+      zone_id: source
+      temperature_K: 300.0
+      flow_sccm:
+        Ar: 100.0
+  pumps:
+    main_pump:
+      zone_id: process
+      speed_m3_s: 0.03
+  power_ports:
+    source_rf:
+      zone_id: source
+      model:
+        kind: experimental.icp
+    wafer_bias:
+      zone_id: process
+      coupling_target: wafer
+      model:
+        kind: experimental.ccp
+        control: voltage
+run:
+  steps:
+  - label: ignition
+    duration_s: 0.0002
+    commands:
+      gas_inlets:
+        showerhead:
+          flow_sccm:
+            Ar: 100.0
+      power_ports:
+        source_rf:
+          delivered_power_W: 500.0
+        wafer_bias:
+          voltage_rms_V: 0.0
+  - label: trend_hold
+    duration_s: 0.002
+    commands:
+      gas_inlets:
+        showerhead:
+          flow_sccm:
+            Ar: 100.0
+      power_ports:
+        source_rf:
+          delivered_power_W: 1500.0
+        wafer_bias:
+          voltage_rms_V: 0.0
+  - label: afterglow
+    duration_s: 0.00039999999999999975
+    commands:
+      gas_inlets:
+        showerhead:
+          flow_sccm:
+            Ar: 100.0
+      power_ports:
+        source_rf:
+          delivered_power_W: 0.0
+        wafer_bias:
+          voltage_rms_V: 0.0
+models:
+  electrons:
+    kind: local_field
+    coefficients:
+      kind: experimental.approximate_two_term
+      cache:
+        max_entries: 4
+  surface_kinetics:
+    kind: mass_action
+solver:
+  first_step_s: 1.0e-10
+  max_step_s: 2.0e-06
+  sample_interval_s: 1.3065326633165828e-05
+output:
+  observables:
+  - electron_density_m3[source]
+  - mean_energy_eV[source]
+  - reduced_field_Td[source]
+  - absorbed_power_W[source]
+  - electron_density_m3[process]
+  - mean_energy_eV[process]
+  - reduced_field_Td[process]
+  - absorbed_power_W[process]
+  - charge_residual_m3[process]
+  summary_series:
+  - n[source,Ar_plus]
+  - n[process,Ar_plus]
+  - electron_density_m3[source]
+  - mean_energy_eV[source]
+  - electron_density_m3[process]
+  - mean_energy_eV[process]
+  - absorbed_power_W[process]

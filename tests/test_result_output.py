@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import inspect
-import pickle
 import sys
-from dataclasses import replace
 from pathlib import Path
-from typing import get_type_hints
 
 import h5py
 import numpy as np
@@ -20,7 +16,6 @@ from plasma_global.core.result import (
     to_plain_mapping,
 )
 from plasma_global.output import (
-    ResultPaths,
     audit_result_h5,
     build_summary,
     export_result_csv,
@@ -30,40 +25,7 @@ from plasma_global.output import (
     write_result,
     write_result_csv,
     write_result_h5,
-    write_summary_yaml,
 )
-
-
-@pytest.mark.parametrize(
-    "public_object",
-    [
-        ResultPaths,
-        build_summary,
-        read_result_csv,
-        read_result_h5,
-        write_result_csv,
-        write_result_h5,
-        write_summary_yaml,
-    ],
-)
-def test_public_output_objects_keep_their_module_identity(
-    public_object: object,
-) -> None:
-    assert public_object.__module__ == "plasma_global.output"
-    assert get_type_hints(public_object) is not None
-    assert public_object.__name__ in inspect.getsource(public_object)
-
-
-def test_result_paths_keeps_its_public_pickle_identity(tmp_path: Path) -> None:
-    paths = ResultPaths(
-        directory=tmp_path,
-        result_h5=tmp_path / "result.h5",
-        summary_yaml=tmp_path / "summary.yaml",
-    )
-
-    payload = pickle.dumps(paths)
-
-    assert b"plasma_global.output" in payload
 
 
 def test_plotting_reports_the_missing_optional_dependency(
@@ -160,11 +122,7 @@ def test_result_h5_has_only_the_fixed_public_layout_and_round_trips(
 
     with h5py.File(path, "r") as h5:
         assert set(h5) == {"metadata", "observables", "solver", "state", "time_s"}
-        assert set(h5["metadata"]) == {
-            "effective_case_yaml",
-            "model_ids",
-            "provenance",
-        }
+        assert set(h5["metadata"]) == {"values_yaml"}
         assert set(h5["solver"]) == {
             "success",
             "statistics_yaml",
@@ -179,11 +137,6 @@ def test_result_h5_has_only_the_fixed_public_layout_and_round_trips(
         ]
         assert h5["observables/absorbed_power_W"].attrs["unit"] == "W"
         assert set(h5["observables"]) == set(result.observables)
-        assert (
-            h5["metadata/effective_case_yaml"]
-            .asstr()[()]
-            .startswith("schema_version: 3")
-        )
 
     loaded = read_result_h5(path)
     np.testing.assert_array_equal(loaded.time_s, result.time_s)
@@ -195,11 +148,8 @@ def test_result_h5_has_only_the_fixed_public_layout_and_round_trips(
     assert to_plain_mapping(loaded.solver_stats) == to_plain_mapping(
         result.solver_stats
     )
-    assert to_plain_mapping(loaded.metadata) == {
-        "effective_case_yaml": result.metadata["effective_case_yaml"],
-        "model_ids": to_plain_mapping(result.metadata["model_ids"]),
-        "provenance": to_plain_mapping(result.metadata["provenance"]),
-    }
+    assert to_plain_mapping(loaded.metadata) == to_plain_mapping(result.metadata)
+    assert build_summary(loaded) == build_summary(result)
 
 
 def test_result_h5_reader_rejects_nonfinite_numeric_artifact(tmp_path: Path) -> None:
@@ -211,31 +161,8 @@ def test_result_h5_reader_rejects_nonfinite_numeric_artifact(tmp_path: Path) -> 
         read_result_h5(path)
 
 
-def test_result_h5_round_trips_bohm_closure_provenance(tmp_path: Path) -> None:
-    result = _result()
-    metadata = to_plain_mapping(result.metadata)
-    metadata["provenance"]["wall_transport_closure"] = {
-        "bohm_h_factor": {
-            "version": "direct-multiplier-v2",
-            "surface_modes": {"wall": "numeric", "electrode": "auto"},
-        }
-    }
-
-    loaded = read_result_h5(
-        write_result_h5(
-            tmp_path / "result.h5",
-            replace(result, metadata=metadata),
-        )
-    )
-
-    assert (
-        to_plain_mapping(loaded.metadata)["provenance"]["wall_transport_closure"]
-        == metadata["provenance"]["wall_transport_closure"]
-    )
-
-
 def test_result_h5_round_trips_input_and_software_provenance(tmp_path: Path) -> None:
-    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+    fixture = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
     result = simulate(load_case(fixture))
 
     loaded = read_result_h5(write_result_h5(tmp_path / "result.h5", result))
@@ -264,35 +191,44 @@ def test_write_result_always_writes_exactly_h5_and_summary(tmp_path: Path) -> No
         "electron_density_m3": 3.0e15,
         "absorbed_power_W": 14.0,
     }
-    assert summary["conservation"]["max_abs_residual"] == pytest.approx(2.0e-9)
-    assert summary["audit"]["passed"] is True
-    assert paths.audit_passed is True
+    assert summary["assessment"] is None
 
 
-def test_write_result_preserves_artifacts_and_reports_failed_audit(
+def test_completed_run_is_immutable_and_can_reproduce_its_summary(
     tmp_path: Path,
 ) -> None:
-    result = _result()
-    metadata = to_plain_mapping(result.metadata)
-    metadata["default_conservation_tolerance"] = 1.0e-12
+    paths = write_result(_result(), tmp_path / "run")
+    original = {path.name: path.read_bytes() for path in paths.directory.iterdir()}
+    with pytest.raises(FileExistsError, match="choose a new output directory"):
+        write_result(_result(), paths.directory)
+    assert original == {
+        path.name: path.read_bytes() for path in paths.directory.iterdir()
+    }
+    loaded = read_result_h5(paths.result_h5)
+    assert build_summary(loaded) == yaml.safe_load(
+        paths.summary_yaml.read_text(encoding="utf-8")
+    )
 
-    paths = write_result(replace(result, metadata=metadata), tmp_path / "failed-audit")
 
-    assert paths.audit_passed is False
-    assert paths.result_h5.is_file()
-    summary = yaml.safe_load(paths.summary_yaml.read_text(encoding="utf-8"))
-    assert summary["audit"]["passed"] is False
+def test_normal_run_and_case_audit_publish_the_same_assessment(tmp_path: Path) -> None:
+    from plasma_global.audit import audit_case
+
+    fixture = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
+    case = load_case(fixture)
+    result = simulate(case)
+    paths = write_result(result, tmp_path / "run")
+    loaded = read_result_h5(paths.result_h5)
+    assessment = to_plain_mapping(result.metadata)["assessment"]
+    assert assessment == audit_case(case).assessment.to_dict()
+    assert assessment == build_summary(loaded)["assessment"]
+    assert assessment["issues"][0]["code"] == "MISSING_MOMENTUM_CROSS_SECTION"
+    assert to_plain_mapping(result.metadata) == to_plain_mapping(loaded.metadata)
 
 
 def test_write_result_does_not_publish_half_bundle_on_serialization_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     directory = tmp_path / "run"
-    directory.mkdir()
-    old_h5 = directory / "result.h5"
-    old_summary = directory / "summary.yaml"
-    old_h5.write_bytes(b"old h5")
-    old_summary.write_text("old summary\n", encoding="utf-8")
 
     def fail_summary(*_args: object, **_kwargs: object) -> Path:
         raise RuntimeError("summary serialization failed")
@@ -301,74 +237,8 @@ def test_write_result_does_not_publish_half_bundle_on_serialization_failure(
     with pytest.raises(RuntimeError, match="summary serialization failed"):
         write_result(_result(), directory)
 
-    assert old_h5.read_bytes() == b"old h5"
-    assert old_summary.read_text(encoding="utf-8") == "old summary\n"
-    assert {path.name for path in directory.iterdir()} == {
-        "result.h5",
-        "summary.yaml",
-    }
-
-
-def test_write_result_rolls_back_if_second_atomic_replace_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    directory = tmp_path / "run"
-    directory.mkdir()
-    old_h5 = directory / "result.h5"
-    old_summary = directory / "summary.yaml"
-    old_h5.write_bytes(b"old h5")
-    old_summary.write_text("old summary\n", encoding="utf-8")
-    real_replace = output_module.os.replace
-    public_replacements = 0
-
-    def fail_second_public_replace(source: Path, target: Path) -> None:
-        nonlocal public_replacements
-        if Path(target).parent == directory:
-            public_replacements += 1
-            if public_replacements == 2:
-                raise OSError("second atomic replace failed")
-        real_replace(source, target)
-
-    monkeypatch.setattr(output_module.os, "replace", fail_second_public_replace)
-    with pytest.raises(OSError, match="second atomic replace failed"):
-        write_result(_result(), directory)
-
-    assert old_h5.read_bytes() == b"old h5"
-    assert old_summary.read_text(encoding="utf-8") == "old summary\n"
-    assert {path.name for path in directory.iterdir()} == {
-        "result.h5",
-        "summary.yaml",
-    }
-
-
-def test_simulation_persists_nonempty_runtime_conservation_summary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
-    from plasma_global.core.compiled import CompiledGlobalModel
-
-    evaluations = 0
-    original = CompiledGlobalModel.evaluate
-
-    def counted_evaluate(self: object, *args: object, **kwargs: object) -> object:
-        nonlocal evaluations
-        evaluations += 1
-        return original(self, *args, **kwargs)
-
-    monkeypatch.setattr(CompiledGlobalModel, "evaluate", counted_evaluate)
-    result = simulate(load_case(fixture))
-    # This fixture requests no derived observables.  Standard quasineutral
-    # diagnostics are algebraic identities and need no post-solve RHS replay.
-    assert evaluations == 0
-    paths = write_result(result, tmp_path / "run")
-    loaded = read_result_h5(paths.result_h5)
-    summary = yaml.safe_load(paths.summary_yaml.read_text(encoding="utf-8"))
-
-    runtime = loaded.metadata["provenance"]["runtime_diagnostics"]
-    maxima = runtime["conservation_max_abs_residual"]
-    assert set(maxima) == {"charge_closure_normalized"}
-    assert summary["conservation"]["max_abs_residual"] is not None
-    assert summary["conservation"]["max_abs_residual_by_quantity"] == maxima
+    assert not directory.exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_result_reader_rejects_legacy_or_extra_hdf5_layout(tmp_path: Path) -> None:
@@ -384,7 +254,8 @@ def test_result_reader_rejects_legacy_or_extra_hdf5_layout(tmp_path: Path) -> No
     ("attribute", "value", "message"),
     [
         ("format", np.bytes_("legacy_result"), "is not a plasma_global_result"),
-        ("format_version", 2, "Unsupported result HDF5 format version 2"),
+        ("format_version", 1, "Unsupported result HDF5 format version 1"),
+        ("format_version", 2.9, "format_version must be an integer"),
         ("state_layout", "state-major", "state layout must be time-major"),
     ],
 )
@@ -402,9 +273,9 @@ def test_result_reader_validates_every_hdf5_header_contract(
 @pytest.mark.parametrize(
     ("dataset_path", "content", "message"),
     [
-        ("metadata/model_ids", "- invalid\n", "model_ids and provenance"),
-        ("metadata/provenance", "- invalid\n", "model_ids and provenance"),
+        ("metadata/values_yaml", "- invalid\n", "metadata must be a mapping"),
         ("solver/statistics_yaml", "- invalid\n", "must contain a mapping"),
+        ("solver/statistics_yaml", "false\n", "must contain a mapping"),
     ],
 )
 def test_result_reader_rejects_non_mapping_hdf5_documents(
@@ -429,7 +300,7 @@ def test_result_reader_rejects_non_dataset_observable(tmp_path: Path) -> None:
         read_result_h5(path)
 
 
-def test_summary_defaults_to_no_implicit_final_or_conservation_quantities() -> None:
+def test_summary_does_not_invent_a_case_assessment() -> None:
     result = SimulationResult(
         time_s=np.array([0.0]),
         state=np.array([[2.0]]),
@@ -439,8 +310,7 @@ def test_summary_defaults_to_no_implicit_final_or_conservation_quantities() -> N
     summary = build_summary(result)
 
     assert summary["final"] == {}
-    assert summary["conservation"]["max_abs_residual"] is None
-    assert summary["conservation"]["max_abs_residual_by_quantity"] == {}
+    assert summary["assessment"] is None
 
 
 def test_csv_is_created_only_by_explicit_export(tmp_path: Path) -> None:
@@ -515,3 +385,260 @@ def test_result_csv_reader_preserves_empty_state_and_default_status(
     assert result.state.shape == (0, 1)
     assert result.state_labels == ("density",)
     assert result.status.code == "imported_csv"
+    assert result.status.success is None
+
+
+@pytest.mark.parametrize("success", [True, False, None])
+def test_execution_status_round_trips_without_boolean_coercion(
+    tmp_path: Path, success: bool | None
+) -> None:
+    from dataclasses import replace
+
+    result = replace(_result(), status=SimulationStatus(success, "imported_csv"))
+    loaded = read_result_h5(write_result_h5(tmp_path / "status.h5", result))
+    assert loaded.status.success is success
+    assert build_summary(loaded)["status"]["success"] is success
+
+
+@pytest.mark.parametrize("success", ["false", 0, 1])
+def test_execution_status_rejects_non_boolean_values(success: object) -> None:
+    with pytest.raises(TypeError, match="bool or None"):
+        SimulationStatus(success=success)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "time_s,observable_scalar:rate\n0,1e-20\n1,2e-20\n",
+        "time_s,observable:rate,observable_scalar:rate\n0,1\u002c2\n1,1,2\n",
+        "time_s,observable_scalar:rate,observable:rate\n0,1,2\n1,1,2\n",
+        "time_s,observable:rate,observable: rate\n0,1,2\n1,1,2\n",
+    ],
+)
+def test_csv_never_discards_variation_or_colliding_names(
+    tmp_path: Path, content: str
+) -> None:
+    path = tmp_path / "ambiguous.csv"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(
+        ValueError, match=r"scalar observable|Duplicate observable|whitespace"
+    ):
+        read_result_csv(path)
+
+
+def test_numeric_csv_import_cannot_claim_a_failed_run_succeeded(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from plasma_global.audit import audit_result
+
+    failed = replace(_result(), status=SimulationStatus.failed("solver failed"))
+    loaded = read_result_csv(write_result_csv(tmp_path / "failed.csv", failed))
+    assert loaded.status.success is None
+    assert not audit_result(loaded).passed
+    assert (
+        read_result_csv(tmp_path / "failed.csv", status=failed.status).status
+        == failed.status
+    )
+
+
+def test_hdf5_rejects_text_that_would_coerce_to_success(tmp_path: Path) -> None:
+    path = write_result_h5(tmp_path / "status.h5", _result())
+    with h5py.File(path, "a") as h5:
+        del h5["solver/success"]
+        h5.create_dataset("solver/success", data="false")
+    with pytest.raises(TypeError, match="boolean dataset"):
+        read_result_h5(path)
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"metadata": {1: "numeric key", "1": "string key"}},
+        {"metadata": []},
+        {"state_labels": "x"},
+        {"observables": []},
+    ],
+)
+def test_result_rejects_coercions_that_lose_names_or_content(update: dict) -> None:
+    values = {
+        "time_s": np.array([0.0]),
+        "state": np.array([[1.0]]),
+        "state_labels": ("x",),
+    }
+    with pytest.raises(TypeError, match=r"string|mapping|sequence"):
+        SimulationResult(**{**values, **update})
+
+
+@pytest.mark.parametrize(
+    ("values", "error", "message"),
+    [
+        ({"message": 1}, TypeError, "message must be a string"),
+        (
+            {"success": False, "code": "completed"},
+            ValueError,
+            "completed status requires",
+        ),
+        ({"success": True, "code": "failed"}, ValueError, "failed status requires"),
+    ],
+)
+def test_status_rejects_contradictory_outcomes(
+    values: dict, error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        SimulationStatus(**values)
+
+
+def test_hdf5_metadata_never_silently_overwrites_duplicate_keys(tmp_path: Path) -> None:
+    path = write_result_h5(tmp_path / "duplicate.h5", _result())
+    with h5py.File(path, "a") as h5:
+        h5["metadata/values_yaml"][()] = "setting: 1\nsetting: 2\n"
+    with pytest.raises(ValueError, match="duplicate key"):
+        read_result_h5(path)
+
+
+def test_hdf5_v2_remains_readable_without_allowing_unknown_status(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    path = write_result_h5(tmp_path / "v2.h5", _result())
+    with h5py.File(path, "a") as h5:
+        h5.attrs["format_version"] = 2
+    assert read_result_h5(path).status.success is True
+    unknown = replace(_result(), status=SimulationStatus(None, "imported_csv"))
+    path = write_result_h5(tmp_path / "unknown.h5", unknown)
+    with h5py.File(path, "a") as h5:
+        h5.attrs["format_version"] = 2
+    with pytest.raises(ValueError, match="requires result format version 3"):
+        read_result_h5(path)
+
+
+def test_custom_units_are_explicit_and_never_inferred_from_ambiguous_suffixes(
+    tmp_path: Path,
+) -> None:
+    result = SimulationResult(
+        time_s=np.array([0.0]),
+        state=np.array([[0.001, 2.0]]),
+        state_labels=("volume_m3", "custom_m3"),
+        observables={"flux_m2_s": np.array([3.0])},
+        metadata={"series_units": {"volume_m3": "m^3", "flux_m2_s": "m^-2 s^-1"}},
+    )
+    path = write_result_h5(tmp_path / "units.h5", result)
+    with h5py.File(path, "r") as h5:
+        assert h5["state/values"].attrs["column_units"].tolist() == [
+            "m^3",
+            "unspecified",
+        ]
+        assert h5["observables/flux_m2_s"].attrs["unit"] == "m^-2 s^-1"
+    loaded = read_result_h5(path)
+    assert to_plain_mapping(loaded.metadata) == to_plain_mapping(result.metadata)
+
+
+@pytest.mark.parametrize(
+    ("dataset", "attribute", "value"),
+    [
+        ("state/values", "column_units", ["eV", "m^-3"]),
+        ("observables/absorbed_power_W", "unit", "eV"),
+    ],
+)
+def test_hdf5_rejects_a_unit_that_changes_the_quantity_meaning(
+    tmp_path: Path, dataset: str, attribute: str, value: object
+) -> None:
+    path = write_result_h5(tmp_path / "units.h5", _result())
+    with h5py.File(path, "a") as h5:
+        h5[dataset].attrs[attribute] = value
+    with pytest.raises(ValueError, match="disagree"):
+        read_result_h5(path)
+
+
+@pytest.mark.parametrize(
+    ("declared", "message"),
+    [
+        ({"electron_density_m3": "cm^-3"}, "requires canonical unit"),
+        ({"typo": "m^-3"}, "unknown series"),
+        ([], "must be a mapping"),
+    ],
+)
+def test_unit_declarations_cannot_rename_or_rescale_quantities(
+    declared: object, message: str
+) -> None:
+    from dataclasses import replace
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        replace(_result(), metadata={"series_units": declared})
+
+
+def test_plot_series_keep_distinct_names_and_explicit_units(tmp_path: Path) -> None:
+    import matplotlib
+
+    result = SimulationResult(
+        time_s=np.array([0.0, 1.0]),
+        state=np.array([[1.0, 2.0], [3.0, 4.0]]),
+        state_labels=("n[plasma,Ar]", "n[plasma,Ar+]"),
+        observables={"flux": np.array([5.0, 6.0])},
+        metadata={"series_units": {"flux": "m^-2 s^-1"}},
+    )
+    source = write_result_h5(tmp_path / "result.h5", result)
+    with matplotlib.rc_context({"svg.fonttype": "none"}):
+        paths = plot_result_h5(
+            source,
+            tmp_path / "plots",
+            series=(*result.state_labels, "flux"),
+            image_format="svg",
+        )
+    assert len(paths) == len(set(paths)) == 3
+    assert len(list((tmp_path / "plots").iterdir())) == 3
+    text = paths[-1].read_text(encoding="utf-8")
+    assert "flux [m^-2 s^-1]" in text
+    assert read_result_h5(source).state_labels == result.state_labels
+
+
+@pytest.mark.parametrize(
+    "series", [("mean_energy_eV", "missing"), ("mean_energy_eV", "mean_energy_eV")]
+)
+def test_invalid_plot_selection_never_publishes_partial_output(
+    tmp_path: Path, series: tuple[str, ...]
+) -> None:
+    source = write_result_h5(tmp_path / "result.h5", _result())
+    directory = tmp_path / "plots"
+    with pytest.raises(
+        (KeyError, ValueError), match=r"Unknown result series|duplicates"
+    ):
+        plot_result_h5(source, directory, series=series)
+    assert not directory.exists()
+
+
+def test_existing_plot_directory_and_source_hdf5_are_never_overwritten(
+    tmp_path: Path,
+) -> None:
+    source = write_result_h5(tmp_path / "result.h5", _result())
+    original = source.read_bytes()
+    with pytest.raises(FileExistsError):
+        export_result_csv(source, source)
+    assert source.read_bytes() == original
+    directory = tmp_path / "plots"
+    directory.mkdir()
+    marker = directory / "original.txt"
+    marker.write_text("original", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="choose a new output directory"):
+        plot_result_h5(source, directory)
+    assert list(directory.iterdir()) == [marker]
+    assert marker.read_text(encoding="utf-8") == "original"
+
+
+@pytest.mark.parametrize(
+    ("selection", "error", "message"),
+    [
+        ([1, 1], TypeError, "must be a string"),
+        (["mean_energy_eV", "mean_energy_eV"], ValueError, "duplicates"),
+        ("mean_energy_eV", TypeError, "sequence of names"),
+        (["missing"], ValueError, "unknown series"),
+    ],
+)
+def test_summary_selection_preserves_names_without_coercion_or_deduplication(
+    selection: object, error: type[Exception], message: str
+) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(error, match=message):
+        replace(_result(), metadata={"summary_series": selection})

@@ -8,6 +8,7 @@ import numpy as np
 
 from plasma_global.errors import CaseValidationError
 
+# 1 sccm at 101325 Pa and 273.15 K, retaining the established rounded value.
 SCCM_TO_PARTICLES_PER_S = 4.477962e17
 
 

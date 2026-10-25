@@ -9,9 +9,7 @@ from plasma_global.build import compile_case
 from plasma_global.core.transport import SCCM_TO_PARTICLES_PER_S
 from plasma_global.errors import CaseValidationError
 from plasma_global.input._compile_recipe_power import _resolved_port_command
-from plasma_global.input.load import load_case
-from plasma_global.input.schema import (
-    CaseSpec,
+from plasma_global.input._resolved_case import (
     DCSeriesCommand,
     DCSeriesModel,
     ExperimentalCCPCommand,
@@ -27,10 +25,12 @@ from plasma_global.input.schema import (
     PowerPortConfig,
     PrescribedPowerCommand,
     PrescribedPowerModel,
+    ResolvedCase,
 )
+from plasma_global.input.load import load_case
 from plasma_global.models.external_table import ExternalTableStore
 
-FIXTURE = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+FIXTURE = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
 
 
 @pytest.mark.parametrize(
@@ -209,6 +209,7 @@ def test_resolved_external_table_command_keeps_bound_table(tmp_path: Path) -> No
 
 def test_compiled_steps_preserve_forcing_temperature_and_command_order() -> None:
     data = load_case(FIXTURE).model_dump(mode="python")
+    data["reactor"]["power_ports"][0]["model"]["default_absorbed_power_W"] = 0.0
     data["reactor"]["gas_inlets"] = [
         {
             "inlet_id": "feed",
@@ -227,9 +228,12 @@ def test_compiled_steps_preserve_forcing_temperature_and_command_order() -> None
         }
     )
 
-    compiled = compile_case(CaseSpec.model_validate(data))
+    compiled = compile_case(ResolvedCase.model_validate(data))
 
-    assert [segment.segment_id for segment in compiled.segments] == ["powered", "idle"]
+    assert [segment.segment_id for segment in compiled.segments] == [
+        first_step["step_id"],
+        "idle",
+    ]
     assert [segment.start_s for segment in compiled.segments] == pytest.approx(
         [0.0, 1.0e-7]
     )
@@ -238,7 +242,8 @@ def test_compiled_steps_preserve_forcing_temperature_and_command_order() -> None
     )
     powered, idle = compiled.segments
     assert powered.port_commands["source"].kind == "power"
-    assert idle.port_commands == {}
+    assert idle.port_commands["source"].kind == "power"
+    assert idle.port_commands["source"].power_W == 0.0
     assert powered.surface_temperature_K_by_surface == {}
     assert powered.wall_temperature_K_by_zone == {"plasma": 300.0}
     assert idle.surface_temperature_K_by_surface == {}
@@ -257,3 +262,80 @@ def test_compiled_steps_preserve_forcing_temperature_and_command_order() -> None
     assert idle.transport.particle_source_m3_s[0] == pytest.approx([expected_idle, 0.0])
     assert np.array_equal(powered.transport.inlet_heavy_energy_J_m3_s, [0.0])
     assert np.array_equal(idle.transport.inlet_heavy_energy_J_m3_s, [0.0])
+
+
+def test_compile_rejects_a_step_without_a_required_power_setpoint() -> None:
+    data = load_case(FIXTURE).model_dump(mode="python")
+    data["reactor"]["power_ports"][0]["model"].pop("default_absorbed_power_W", None)
+    data["recipe"]["steps"][0]["commands"]["power_ports"] = {}
+    with pytest.raises(CaseValidationError, match="requires a power command"):
+        compile_case(ResolvedCase.model_validate(data))
+
+
+@pytest.mark.parametrize("interpolation", ["linear", "previous"])
+def test_compile_rejects_external_table_without_full_recipe_coverage(
+    tmp_path: Path, interpolation: str
+) -> None:
+    path = tmp_path / "partial.csv"
+    path.write_text("time_s,electron_power_W\n0,1\n1e-8,2\n", encoding="utf-8")
+    data = load_case(FIXTURE).model_dump(mode="python")
+    data["reactor"]["power_ports"][0]["model"] = {
+        "kind": "external_table",
+        "file": path,
+        "interpolation": interpolation,
+    }
+    data["recipe"]["steps"][0]["commands"]["power_ports"] = {}
+    with pytest.raises(CaseValidationError, match="does not cover recipe interval"):
+        compile_case(ResolvedCase.model_validate(data))
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        (
+            {
+                "kind": "prescribed_power",
+                "electron_fraction": 1.0,
+                "gas_fraction": 0.0,
+                "default_absorbed_power_W": 2.0,
+            },
+            ("power", 2.0, None),
+        ),
+        (
+            {
+                "kind": "dc_series",
+                "ballast_resistance_ohm": 1.0,
+                "gap_m": 0.1,
+                "electrode_area_m2": 0.01,
+                "electron_mobility_m2_V_s": 0.5,
+                "source_voltage_V": 2.0,
+            },
+            ("voltage", None, 2.0),
+        ),
+        (
+            {"kind": "experimental.rf_envelope", "default_absorbed_power_W": 2.0},
+            ("power", 2.0, None),
+        ),
+        (
+            {
+                "kind": "experimental.ccp",
+                "control": "voltage",
+                "default_voltage_rms_V": 2.0,
+            },
+            ("voltage", None, 2.0),
+        ),
+        (
+            {"kind": "experimental.icp", "default_delivered_power_W": 2.0},
+            ("power", 2.0, None),
+        ),
+    ],
+)
+def test_omitted_recipe_commands_resolve_to_the_model_default(
+    model: dict, expected: tuple
+) -> None:
+    data = load_case(FIXTURE).model_dump(mode="python")
+    data["reactor"]["power_ports"][0]["model"] = model
+    data["recipe"]["steps"][0]["commands"]["power_ports"] = {}
+    compiled = compile_case(ResolvedCase.model_validate(data))
+    command = compiled.segments[0].port_commands["source"]
+    assert (command.kind, command.power_W, command.voltage_V) == expected

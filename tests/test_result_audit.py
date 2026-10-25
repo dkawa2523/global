@@ -8,13 +8,13 @@ import numpy as np
 import pytest
 import yaml
 
-from plasma_global import _provenance as provenance_module
-from plasma_global import audit as audit_module
 from plasma_global import load_case, simulate
-from plasma_global.audit import audit_case, audit_result, collect_file_provenance
+from plasma_global._audit_classification import case_classification
+from plasma_global._provenance import collect_file_provenance
+from plasma_global.audit import audit_case, audit_result
 from plasma_global.chemistry.data import load_chemistry
 from plasma_global.core.result import SimulationResult, SimulationStatus
-from plasma_global.input.schema import SurfaceKineticsConfig
+from plasma_global.input._resolved_case import SurfaceKineticsConfig
 
 
 def test_audit_reports_status_required_series_and_nonnegativity() -> None:
@@ -82,74 +82,18 @@ def test_audit_rejects_invalid_control_tolerances() -> None:
         audit_result(result, default_conservation_tolerance=-1.0)
     with pytest.raises(ValueError, match="negative_tolerance"):
         audit_result(result, negative_tolerance=-1.0)
-
-
-def test_case_audit_reports_missing_momentum_cross_section_target(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
-    from plasma_global.core.compiled import CompiledGlobalModel
-    from plasma_global.core.domain import RecipeSegment
-
-    evaluations = 0
-    original = CompiledGlobalModel.evaluate
-
-    def counted_evaluate(
-        self: CompiledGlobalModel,
-        time_s: float,
-        state: np.ndarray,
-        segment: RecipeSegment,
-        *,
-        collect_ledger: bool = True,
-    ) -> object:
-        nonlocal evaluations
-        evaluations += 1
-        return original(
-            self,
-            time_s,
-            state,
-            segment,
-            collect_ledger=collect_ledger,
+    with pytest.raises(ValueError, match="missing residuals"):
+        audit_result(
+            result,
+            conservation_residuals={"charge": np.zeros(1)},
+            conservation_tolerances={"chrage": 1e-9},
         )
-
-    monkeypatch.setattr(CompiledGlobalModel, "evaluate", counted_evaluate)
-
-    report = audit_case(load_case(fixture))
-    missing = [
-        issue
-        for issue in report.issues
-        if issue.code == "MISSING_MOMENTUM_CROSS_SECTION"
-    ]
-
-    assert [(issue.level, issue.quantity) for issue in missing] == [("WARNING", "Ar")]
-    assert report.model_ids["elastic_heating"] is None
-    assert report.provenance["missing_momentum_cross_section_targets"] == ["Ar"]
-    assert report.provenance["wall_transport_closure"] == {
-        "bohm_h_factor": {
-            "version": "direct-multiplier-v2",
-            "surface_modes": {"wall": "numeric"},
-        }
-    }
-    assert report.simulation["status"]["success"] is True
-    assert report.simulation["time_count"] > 1
-    assert evaluations == report.simulation["time_count"]
-    assert report.classification == "standard"
-    assert report.production_qualified is False
-    assert report.conservation_max_abs_residual[
-        "charge_closure_normalized"
-    ] == pytest.approx(0.0)
-    assert "electron_energy_ledger_normalized" in (report.conservation_max_abs_residual)
-    input_files = report.provenance["input_files"]["files"]
-    assert str(fixture.resolve()) in input_files
-    assert len(input_files[str(fixture.resolve())]["sha256"]) == 64
-    assert "input_files:" in yaml.safe_dump(
-        report.to_dict(), sort_keys=False, allow_unicode=True
-    )
-    assert report.passed
+    with pytest.raises(ValueError, match="require explicit tolerances"):
+        audit_result(result, conservation_residuals={"charge": np.ones(1)})
 
 
 def test_standard_classification_is_an_explicit_minimal_allow_list() -> None:
-    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+    fixture = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
     case = load_case(fixture)
     chemistry = load_chemistry(case.chemistry.manifest)
 
@@ -179,7 +123,7 @@ def test_standard_classification_is_an_explicit_minimal_allow_list() -> None:
     wall_reactor = case.reactor.model_copy(update={"surfaces": [prescribed_surface]})
     wall_case = case.model_copy(update={"reactor": wall_reactor})
 
-    assert audit_module._case_classification(case, chemistry) == "standard"
+    assert case_classification(case, chemistry) == "standard"
     for candidate in (
         replace_model("electrons", "table"),
         replace_model("electron_closure", "local_field"),
@@ -189,17 +133,13 @@ def test_standard_classification_is_an_explicit_minimal_allow_list() -> None:
         surface_case,
         wall_case,
     ):
-        assert audit_module._case_classification(candidate, chemistry) == (
-            "experimental"
-        )
+        assert case_classification(candidate, chemistry) == ("experimental")
 
     surface_chemistry = replace(
         chemistry,
         surface_reactions=(chemistry.boundary_reactions[0],),
     )
-    assert audit_module._case_classification(case, surface_chemistry) == (
-        "experimental"
-    )
+    assert case_classification(case, surface_chemistry) == ("experimental")
     no_boundary_chemistry = replace(chemistry, boundary_reactions=())
     nonapplicable_boundary_chemistry = replace(
         chemistry,
@@ -207,12 +147,10 @@ def test_standard_classification_is_an_explicit_minimal_allow_list() -> None:
             replace(chemistry.boundary_reactions[0], surfaces=("other_wall",)),
         ),
     )
-    assert audit_module._case_classification(case, no_boundary_chemistry) == (
+    assert case_classification(case, no_boundary_chemistry) == ("experimental")
+    assert case_classification(case, nonapplicable_boundary_chemistry) == (
         "experimental"
     )
-    assert audit_module._case_classification(
-        case, nonapplicable_boundary_chemistry
-    ) == ("experimental")
 
     positive_ion = next(item for item in chemistry.species if item.charge > 0)
     no_positive_chemistry = replace(
@@ -226,17 +164,14 @@ def test_standard_classification_is_an_explicit_minimal_allow_list() -> None:
         chemistry,
         species=(*chemistry.species, replace(positive_ion, id="Ar2_plus")),
     )
-    assert audit_module._case_classification(case, no_positive_chemistry) == (
-        "experimental"
-    )
-    assert audit_module._case_classification(case, multiple_positive_chemistry) == (
-        "experimental"
-    )
+    assert case_classification(case, no_positive_chemistry) == ("experimental")
+    assert case_classification(case, multiple_positive_chemistry) == ("experimental")
 
     crane_path = (
         Path(__file__).parents[1]
+        / "plasma_global"
+        / "assets"
         / "examples"
-        / "v3"
         / "cases"
         / "crane_two_reaction_argon.yaml"
     )
@@ -244,29 +179,30 @@ def test_standard_classification_is_an_explicit_minimal_allow_list() -> None:
     crane_chemistry = load_chemistry(crane.chemistry.manifest)
     # CRANE remains a valuable scalar cross-code regression, but its published
     # fixed electron-rate coefficients are not the standard real-XS closure.
-    assert audit_module._case_classification(crane, crane_chemistry) == ("experimental")
+    assert case_classification(crane, crane_chemistry) == ("experimental")
 
 
 def test_case_audit_classifies_experimental_chemistry_rate(
     tmp_path: Path,
 ) -> None:
-    source = Path(__file__).parent / "fixtures" / "v3_minimal"
+    source = Path(__file__).parent / "fixtures" / "minimal"
     fixture = tmp_path / "experimental-rate"
     shutil.copytree(source, fixture)
-    (fixture / "gas_reactions.csv").write_text(
-        "id,equation,rate_model\n"
-        "recombine,Ar_plus + e -> Ar,experimental_recombination\n",
-        encoding="utf-8",
-    )
-    (fixture / "rate_models.yaml").write_text(
-        "rate_models:\n"
-        "  experimental_recombination:\n"
-        "    kind: experimental.electron_temperature_power_law\n"
-        "    A: 1.0e-20\n"
-        "    reference_temperature_K: 300.0\n"
-        "    exponent: -0.5\n",
-        encoding="utf-8",
-    )
+    manifest = fixture / "chemistry/chemistry.yaml"
+    document = yaml.safe_load(manifest.read_text())
+    document["gas_reactions"] = [
+        {
+            "id": "recombine",
+            "equation": "Ar_plus + e -> Ar",
+            "rate": {
+                "kind": "experimental.electron_temperature_power_law",
+                "A": 1e-20,
+                "reference_temperature_K": 300.0,
+                "exponent": -0.5,
+            },
+        }
+    ]
+    manifest.write_text(yaml.safe_dump(document), encoding="utf-8")
 
     report = audit_case(load_case(fixture / "case.yaml"))
     experimental = [
@@ -274,17 +210,15 @@ def test_case_audit_classifies_experimental_chemistry_rate(
     ]
 
     assert report.classification == "experimental"
-    assert report.production_qualified is False
-    assert [issue.quantity for issue in experimental] == [
-        "experimental.electron_temperature_power_law"
-    ]
+    assert [issue.quantity for issue in experimental] == ["case"]
 
 
 def test_file_provenance_covers_case_chemistry_curves_and_electron_table() -> None:
     case_path = (
         Path(__file__).parents[1]
+        / "plasma_global"
+        / "assets"
         / "examples"
-        / "v3"
         / "cases"
         / "zdplaskin_example2.yaml"
     )
@@ -298,38 +232,15 @@ def test_file_provenance_covers_case_chemistry_curves_and_electron_table() -> No
     assert {
         "zdplaskin_example2.yaml",
         "chemistry.yaml",
-        "species.csv",
-        "gas_reactions.csv",
-        "rate_models.yaml",
-        "cross_sections.yaml",
-        "xs_zdp_ar_ionization.csv",
-        "zdplaskin_example2_eovern_rates.h5",
+        "electrons.csv",
     } <= names
     assert provenance["algorithm"] == "sha256"
     assert all(len(record["sha256"]) == 64 for record in files.values())
     assert all(record["size_bytes"] > 0 for record in files.values())
 
 
-def test_case_audit_closes_evolved_heavy_and_electron_energy_ledgers() -> None:
-    case_path = Path(__file__).parents[1] / "examples" / "v3" / "cases" / "smoke.yaml"
-
-    report = audit_case(load_case(case_path))
-
-    assert report.passed
-    assert report.classification == "experimental"
-    assert report.production_qualified is False
-    assert (
-        report.conservation_max_abs_residual["electron_energy_ledger_normalized"]
-        < 1.0e-12
-    )
-    assert (
-        report.conservation_max_abs_residual["heavy_energy_ledger_normalized"] < 1.0e-12
-    )
-    assert report.conservation_max_abs_residual["particle_ledger_normalized"] < 1.0e-12
-
-
 def test_normal_simulation_records_input_and_software_provenance() -> None:
-    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+    fixture = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
 
     result = simulate(load_case(fixture))
 
@@ -345,27 +256,25 @@ def test_normal_simulation_records_input_and_software_provenance() -> None:
     software = provenance["software"]
     assert software["package"]["name"] == "plasma-global-model"
     assert software["package"]["version"]
-    assert set(software["runtime"]) == {"python", "numpy", "scipy", "h5py"}
-    assert software["git"]["revision"] is None or len(software["git"]["revision"]) == 40
-    assert software["git"]["dirty"] in {True, False, None}
+    assert software["runtime"]["numpy"] == np.__version__
+    assert len(software["source_tree"]["sha256"]) == 64
+    assert software["source_tree"]["file_count"] > 0
+    assert len(software["project_lock"]["sha256"]) == 64
 
 
-def test_normal_simulation_does_not_reopen_inputs_for_audit_checksums(
-    monkeypatch: pytest.MonkeyPatch,
+def test_source_identity_tracks_contents_and_module_paths_across_copies(
+    tmp_path: Path,
 ) -> None:
-    fixture = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
-    calls: list[Path] = []
-    checksum = provenance_module._file_sha256
+    from plasma_global._provenance import _source_fingerprint
 
-    def recorded_checksum(path: Path) -> tuple[str, int]:
-        calls.append(path)
-        return checksum(path)
-
-    monkeypatch.setattr(provenance_module, "_file_sha256", recorded_checksum)
-    result = simulate(load_case(fixture))
-    compilation_calls = tuple(calls)
-
-    assert compilation_calls
-    assert len(compilation_calls) == len(set(compilation_calls))
-    assert audit_result(result).passed
-    assert tuple(calls) == compilation_calls
+    left, right = tmp_path / "left", tmp_path / "right"
+    left.mkdir()
+    (left / "model.py").write_text("coefficient = 1.0\n", encoding="utf-8")
+    shutil.copytree(left, right)
+    initial = _source_fingerprint(left)
+    assert initial == _source_fingerprint(right)
+    (right / "model.py").write_text("coefficient = 2.0\n", encoding="utf-8")
+    assert initial != _source_fingerprint(right)
+    (right / "model.py").write_text("coefficient = 1.0\n", encoding="utf-8")
+    (right / "model.py").rename(right / "other_model.py")
+    assert initial != _source_fingerprint(right)

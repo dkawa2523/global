@@ -66,51 +66,49 @@ class AuditReport:
 
 
 @dataclass(frozen=True, slots=True)
-class CaseAuditReport:
-    """Detailed, read-only audit of one compiled schema-v3 case."""
+class CaseAssessment:
+    """Supported feature envelope and actionable compile-time warnings."""
 
-    issues: tuple[AuditIssue, ...]
+    classification: str
+    issues: tuple[AuditIssue, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "classification": self.classification,
+            "issues": [asdict(issue) for issue in self.issues],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CaseAuditReport:
+    """Case assessment, provenance, and completed simulation information."""
+
+    assessment: CaseAssessment
     model_ids: Mapping[str, Any]
     provenance: Mapping[str, Any]
     inventory: Mapping[str, int]
-    conservation_max_abs_residual: Mapping[str, float]
-    simulation: Mapping[str, Any] = field(default_factory=dict)
-    classification: str = "standard"
-    production_qualified: bool = False
+    simulation: Mapping[str, Any]
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "issues", tuple(self.issues))
-        for name in (
-            "model_ids",
-            "provenance",
-            "inventory",
-            "conservation_max_abs_residual",
-            "simulation",
-        ):
-            value = dict(getattr(self, name))
-            object.__setattr__(self, name, MappingProxyType(value))
-        if self.classification not in {"standard", "experimental"}:
-            raise ValueError("classification must be standard or experimental")
-        if self.production_qualified and (
-            self.classification != "standard" or not self.passed
-        ):
-            raise ValueError("production_qualified requires a passing standard audit")
+    @property
+    def issues(self) -> tuple[AuditIssue, ...]:
+        return self.assessment.issues
+
+    @property
+    def classification(self) -> str:
+        return self.assessment.classification
 
     @property
     def passed(self) -> bool:
-        return not any(issue.level == "ERROR" for issue in self.issues)
+        return bool(self.simulation["status"]["success"]) and not any(
+            issue.level == "ERROR" for issue in self.issues
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "passed": self.passed,
-            "classification": self.classification,
-            "production_qualified": self.production_qualified,
+            **self.assessment.to_dict(),
             "model_ids": to_plain_mapping(self.model_ids),
             "provenance": to_plain_mapping(self.provenance),
-            "inventory": to_plain_mapping(self.inventory),
-            "conservation_max_abs_residual": to_plain_mapping(
-                self.conservation_max_abs_residual
-            ),
+            "inventory": dict(self.inventory),
             "simulation": to_plain_mapping(self.simulation),
-            "issues": [asdict(issue) for issue in self.issues],
         }

@@ -1,4 +1,4 @@
-"""Generate deterministic documentation artifacts from the v3 input schema."""
+"""Generate deterministic documentation artifacts from the public input schema."""
 
 from __future__ import annotations
 
@@ -14,44 +14,47 @@ DEFAULT_OUTPUT_DIRECTORY = ROOT / "docs" / "generated"
 
 
 def minimal_case_document() -> dict[str, object]:
-    """Return the smallest useful schema-v3 case document.
+    """Return the smallest self-contained schema-v4 case document.
 
-    The referenced chemistry file is intentionally only a path placeholder;
-    schema validation does not perform chemistry I/O.
+    No external files or implicit species seeds are required.
     """
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "case": {"name": "minimal_argon"},
-        "chemistry": {"manifest": "chemistry/chemistry.yaml"},
-        "reactor": {
-            "chamber_id": "reactor",
-            "zones": [
+        "chemistry": {
+            "species": [
                 {
-                    "zone_id": "plasma",
-                    "volume_m3": 0.01,
-                    "pressure_Pa": 9.94067280414195,
-                    "gas_temperature_K": 300.0,
-                    "initial_densities_m3": {
-                        "Ar": 2.4e21,
-                        "Ar_plus": 1.0e12,
-                    },
-                    "initial_mean_energy_eV": 3.0,
-                }
+                    "id": "e",
+                    "charge": -1,
+                    "mass_amu": 0.00054858,
+                    "state_tags": ["electron"],
+                },
+                {"id": "Ar", "mass_amu": 39.948, "elements": {"Ar": 1.0}},
+                {
+                    "id": "Ar_plus",
+                    "charge": 1,
+                    "mass_amu": 39.948,
+                    "elements": {"Ar": 1.0},
+                },
             ],
         },
-        "recipe": {
-            "recipe_id": "one_step",
-            "steps": [{"step_id": "hold", "duration_s": 0.001}],
+        "reactor": {
+            "zones": {
+                "plasma": {
+                    "volume_m3": 0.01,
+                    "initial": {
+                        "pressure_Pa": 1.0,
+                        "gas_temperature_K": 300.0,
+                        "mole_fractions": {"Ar": 1.0},
+                        "seed_densities_m3": {"Ar_plus": 1e12},
+                        "mean_energy_eV": 3.0,
+                    },
+                }
+            }
         },
-        "models": {
-            "electrons": {"kind": "maxwellian"},
-            "electron_closure": {"kind": "electron_energy"},
-            "electron_density": {"kind": "quasineutral"},
-            "gas_energy": {"kind": "fixed"},
-        },
-        "solver": {"method": "BDF"},
-        "output": {},
+        "models": {"electrons": {"kind": "energy_balance"}},
+        "run": {"duration_s": 0.001},
     }
 
 

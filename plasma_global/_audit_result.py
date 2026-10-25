@@ -58,7 +58,7 @@ def _result_health_issues(result: SimulationResult) -> list[AuditIssue]:
     if result.n_times == 0:
         issues.append(
             AuditIssue(
-                "WARNING",
+                "ERROR",
                 "EMPTY_RESULT",
                 "Simulation result contains no time points.",
                 "time_s",
@@ -145,10 +145,9 @@ def _conservation_audit(
 ) -> tuple[dict[str, float], list[AuditIssue]]:
     maxima: dict[str, float] = {}
     issues: list[AuditIssue] = []
-    for raw_name, raw_values in dict(conservation_residuals or {}).items():
-        name = raw_name.strip()
-        if not name:
-            raise ValueError("conservation residual names must not be empty")
+    residuals = dict(conservation_residuals or {})
+    _validate_residual_controls(residuals, tolerances, default_tolerance)
+    for name, raw_values in residuals.items():
         maximum = _residual_maximum(result, name, raw_values)
         if isinstance(maximum, AuditIssue):
             issues.append(maximum)
@@ -168,6 +167,27 @@ def _conservation_audit(
                 )
             )
     return maxima, issues
+
+
+def _validate_residual_controls(
+    residuals: Mapping[str, Any],
+    tolerances: Mapping[str, float],
+    default_tolerance: float | None,
+) -> None:
+    if unknown := set(tolerances) - set(residuals):
+        raise ValueError(
+            f"conservation tolerances reference missing residuals: {sorted(unknown)}"
+        )
+    if default_tolerance is None and (missing := set(residuals) - set(tolerances)):
+        raise ValueError(
+            f"conservation residuals require explicit tolerances: {sorted(missing)}"
+        )
+    for name in residuals:
+        if not isinstance(name, str) or not name or name != name.strip():
+            raise ValueError(
+                "conservation residual names must be nonempty "
+                "without surrounding whitespace"
+            )
 
 
 def audit_result(

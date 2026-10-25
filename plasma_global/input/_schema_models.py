@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -13,7 +13,6 @@ from plasma_global.input._schema_base import (
     PositiveFloat,
     PositiveInt,
     StrictModel,
-    _publish_schema_types,
 )
 
 
@@ -24,6 +23,8 @@ class MaxwellianElectronModel(StrictModel):
 class TableElectronModel(StrictModel):
     kind: Literal["table"]
     file: InputPath
+    columns: dict[str, str] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
     lookup: Literal["mean_energy", "local_field"]
     bounds_policy: Literal["error", "clip"] = "error"
     mobility_reference_neutral_density_m3: PositiveFloat | None = None
@@ -99,9 +100,11 @@ class QuasiNeutralElectronDensity(StrictModel):
 class PrescribedElectronDensity(StrictModel):
     kind: Literal["experimental.prescribed_profile"]
     file: InputPath
+    columns: dict[str, str] = Field(default_factory=dict)
     zone_columns: dict[str, Identifier] = Field(default_factory=dict)
     interpolation: Literal["linear", "previous"] = "linear"
     hold: Literal["edge", "error"] = "error"
+    time_offset_s: float = 0.0
 
 
 ElectronDensityModel = Annotated[
@@ -141,6 +144,3 @@ class ModelsConfig(StrictModel):
         default_factory=lambda: FixedGasEnergy(kind="fixed")
     )
     surface_kinetics: SurfaceKineticsConfig | None = None
-
-
-_publish_schema_types(globals())

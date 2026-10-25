@@ -4,21 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plasma-global-model"
-version = "0.1.0"
+version = "0.5.0"
 description = "YAML-driven low-pressure plasma global model research platform"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "h5py>=3.10",
-  "numpy>=1.26",
-  "pydantic>=2.8",
-  "scipy>=1.11",
-  "typing_extensions>=4.12",
-  "PyYAML>=6.0",
+  "numpy>=1.26.4",
+  "pydantic>=2.8.2",
+  "scipy>=1.14.1",
+  "typing_extensions>=4.12.2",
+  "PyYAML>=6.0.3",
 ]
 
 [project.optional-dependencies]
-plot = ["matplotlib>=3.7"]
+plot = ["matplotlib>=3.7.5"]
+graph = ["graphviz>=0.21"]
 docs = ["mkdocs>=1.6"]
 dev = [
   "bandit[toml]>=1.8",
@@ -49,6 +50,9 @@ exclude = ["*.assets", "*.assets.*", "*.__pycache__", "*.__pycache__.*"]
 
 [tool.setuptools]
 include-package-data = false
+
+[tool.setuptools.package-data]
+plasma_global = ["assets/examples/**/*.yaml", "assets/examples/**/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

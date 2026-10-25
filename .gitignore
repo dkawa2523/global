@@ -29,6 +29,8 @@ mkdocs-ja-serve*.log
 .venv/
 .uv-cache/
 *.egg-info/
+build/
+dist/
 venv/
 env/
 

@@ -12,7 +12,6 @@ from plasma_global.input._schema_base import (
     NonNegativeFloat,
     PositiveFloat,
     StrictModel,
-    _publish_schema_types,
 )
 
 
@@ -42,6 +41,7 @@ class DCSeriesModel(StrictModel):
 class ExternalTableModel(StrictModel):
     kind: Literal["external_table"]
     file: InputPath
+    columns: dict[str, str] = Field(default_factory=dict)
     interpolation: Literal["linear", "previous"] = "linear"
     bounds_policy: Literal["error", "hold"] = "error"
     power_scale: NonNegativeFloat = 1.0
@@ -50,6 +50,15 @@ class ExternalTableModel(StrictModel):
     gap_m: PositiveFloat | None = None
     total_density_m3: PositiveFloat | None = None
     plasma_potential_V: float = 0.0
+
+
+def _validate_rf_control(
+    control: str, power: float | None, voltage: float | None
+) -> None:
+    unused = "voltage_rms_V" if control == "absorbed_power" else "absorbed_power_W"
+    value = voltage if control == "absorbed_power" else power
+    if value is not None:
+        raise ValueError(f"control={control!r} does not use {unused}; remove it")
 
 
 class ExperimentalRFEnvelopeModel(StrictModel):
@@ -67,6 +76,13 @@ class ExperimentalRFEnvelopeModel(StrictModel):
     plasma_potential_offset_V: float = 0.0
     plasma_potential_per_sqrt_W: NonNegativeFloat = 0.0
 
+    @model_validator(mode="after")
+    def compatible_default(self) -> Self:
+        _validate_rf_control(
+            self.control, self.default_absorbed_power_W, self.default_voltage_rms_V
+        )
+        return self
+
 
 class ExperimentalCCPModel(StrictModel):
     kind: Literal["experimental.ccp"]
@@ -74,6 +90,13 @@ class ExperimentalCCPModel(StrictModel):
     control: Literal["absorbed_power", "voltage"] = "absorbed_power"
     default_absorbed_power_W: NonNegativeFloat | None = None
     default_voltage_rms_V: NonNegativeFloat | None = None
+
+    @model_validator(mode="after")
+    def compatible_default(self) -> Self:
+        _validate_rf_control(
+            self.control, self.default_absorbed_power_W, self.default_voltage_rms_V
+        )
+        return self
 
 
 class ExperimentalICPModel(StrictModel):
@@ -109,6 +132,7 @@ class SquarePulseWaveform(StrictModel):
     duty_cycle: Annotated[float, Field(ge=0.0, le=1.0)]
     repetition_Hz: PositiveFloat
     phase_s: NonNegativeFloat = 0.0
+    origin_s: NonNegativeFloat | None = None
 
 
 Waveform = Annotated[
@@ -137,6 +161,7 @@ class DCSeriesCommand(StrictModel):
 class ExternalTableCommand(StrictModel):
     kind: Literal["external_table"]
     file: InputPath | None = None
+    columns: dict[str, str] | None = None
     power_scale: NonNegativeFloat | None = None
     voltage_scale: NonNegativeFloat | None = None
     current_scale: NonNegativeFloat | None = None
@@ -201,4 +226,12 @@ def _power_command_matches_model(model: PowerModel, command: PowerPortCommand) -
     assert_never(model)
 
 
-_publish_schema_types(globals())
+def _validate_power_command_control(
+    model: PowerModel, command: PowerPortCommand
+) -> None:
+    if isinstance(
+        model, (ExperimentalRFEnvelopeModel, ExperimentalCCPModel)
+    ) and isinstance(command, (ExperimentalRFEnvelopeCommand, ExperimentalCCPCommand)):
+        _validate_rf_control(
+            model.control, command.absorbed_power_W, command.voltage_rms_V
+        )

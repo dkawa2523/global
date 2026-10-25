@@ -14,10 +14,10 @@ from plasma_global.experimental.runtime import (
     ExperimentalRuntimeAccumulator,
     compile_generic_state_accumulator,
 )
-from plasma_global.input.schema import (
-    CaseSpec,
+from plasma_global.input._resolved_case import (
     ExperimentalConfig,
     ExperimentalWallInventoryConfig,
+    ResolvedCase,
     SurfaceConfig,
 )
 
@@ -210,7 +210,7 @@ def _build_runtime_accumulator(
 
 
 def compile_experimental_accumulator(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     surface_model: object | None,
 ) -> tuple[ExperimentalRuntimeAccumulator | None, tuple[str, ...]]:

@@ -1,4 +1,4 @@
-"""Compile the static physical components of a schema-v3 reactor."""
+"""Compile the static physical components of a schema-v4 reactor."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from plasma_global.chemistry.data import ChemistryData
 from plasma_global.core.domain import Zone
 from plasma_global.core.transport import CompiledTransport
 from plasma_global.errors import CaseValidationError
-from plasma_global.input.schema import (
+from plasma_global.input._resolved_case import (
     AmbipolarWallTransport,
     BohmWallTransport,
-    CaseSpec,
     EvolvedGasEnergy,
     FixedGasEnergy,
     OffWallTransport,
     PrescribedFrequencyWallTransport,
+    ResolvedCase,
     SurfaceConfig,
 )
 from plasma_global.models.gas_energy import HeavyEnergyClosure
@@ -26,7 +26,7 @@ from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
 from plasma_global.models.walls import AutoBohmHFactor, BoundaryReaction, WallBoundary
 
 
-def compile_zones(case: CaseSpec) -> tuple[Zone, ...]:
+def compile_zones(case: ResolvedCase) -> tuple[Zone, ...]:
     """Compile the immutable zone geometry used by the runtime."""
 
     return tuple(
@@ -36,7 +36,7 @@ def compile_zones(case: CaseSpec) -> tuple[Zone, ...]:
 
 
 def compile_static_transport(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry: CompiledChemistry,
     heavy_energy_closure: HeavyEnergyClosure | None,
 ) -> CompiledTransport:
@@ -68,7 +68,7 @@ def compile_static_transport(
 
 
 def compile_heavy_energy(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
 ) -> HeavyEnergyClosure | None:
@@ -92,7 +92,7 @@ def compile_heavy_energy(
 
 
 def compile_surface_model(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
 ) -> CompiledSurfaceModel | None:
@@ -127,7 +127,7 @@ def compile_surface_model(
 
 
 def compile_walls(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry: CompiledChemistry,
 ) -> tuple[WallBoundary, ...]:
     """Compile wall transport and chemistry for every enabled surface."""
@@ -204,7 +204,7 @@ def _heavy_heat_capacities(
     )
 
 
-def _zone_wall_temperatures(case: CaseSpec) -> np.ndarray:
+def _zone_wall_temperatures(case: ResolvedCase) -> np.ndarray:
     """Area-average each zone's surfaces, falling back to its gas temperature."""
 
     wall_temperatures: list[float] = []
@@ -222,7 +222,7 @@ def _zone_wall_temperatures(case: CaseSpec) -> np.ndarray:
 
 
 def _bohm_h_factor(
-    case: CaseSpec,
+    case: ResolvedCase,
     surface: SurfaceConfig,
 ) -> tuple[float, AutoBohmHFactor | None]:
     config = surface.wall_transport

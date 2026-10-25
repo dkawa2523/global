@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -23,6 +22,7 @@ from plasma_global.core.domain import InitialState, RecipeSegment, SolverSetting
 from plasma_global.core.solver import solve_compiled_model
 from plasma_global.errors import IntegrationError, ModelConfigurationError
 from plasma_global.experimental.accumulators import (
+    DrivenSource,
     GenericState,
     GenericStateAccumulator,
     LinearRelaxation,
@@ -39,6 +39,55 @@ from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
 from plasma_global.models.walls import BoundaryReaction, WallBoundary
 from plasma_global.output import read_result_h5, write_result_h5
 from plasma_global.postprocess import derive_observables
+
+
+def test_transient_bound_violation_fails_for_every_output_sampling_mode() -> None:
+    chemistry = _inert_chemistry(("A", "ion"), (0.0, 1.0))
+    speed = 0.61 * np.sqrt(1.602176634e-19 * 2.0 / chemistry.masses_kg[1])
+    generic = GenericStateAccumulator(
+        states=(
+            GenericState(
+                "marker",
+                owners=("wall",),
+                initial=0.0,
+                lower_bound=0.0,
+                upper_bound=1.0,
+            ),
+        ),
+        processes=(
+            DrivenSource("marker", "ion_flux_m2_s", 20.0 / (1.0e15 * speed)),
+            LinearRelaxation("marker", equilibrium=0.0, time_constant_s=0.2),
+        ),
+    )
+    model = CompiledGlobalModel(
+        chemistry=chemistry,
+        zones=(Zone("z", 1.0),),
+        segments=(
+            RecipeSegment("afterglow", 0.0, 10.0, reduced_field_Td_by_zone={"z": 1.0}),
+        ),
+        electron_closure=LocalFieldClosure(TabulatedMeanEnergy((1.0, 2.0), (3.0, 3.0))),
+        wall_boundaries=(
+            WallBoundary(
+                zone_id="z",
+                area_m2=1.0e-3,
+                bohm_factor=0.61,
+                surface_id="wall",
+                reactions=(BoundaryReaction("neutralize", "ion", {"A": 1.0}),),
+            ),
+        ),
+        extension_accumulator=ExperimentalRuntimeAccumulator(generic=generic),
+    )
+    initial = InitialState(densities_m3_by_zone={"z": {"A": 1.0e20, "ion": 1.0e15}})
+    messages = []
+    for sampling in ({}, {"save_at_s": (0.0, 10.0)}, {"sample_interval_s": 0.5}):
+        with pytest.raises(IntegrationError, match="above upper_bound") as failure:
+            solve_compiled_model(
+                model,
+                initial,
+                SolverSettings(rtol=1.0e-7, atol=1.0e-12, **sampling),
+            )
+        messages.append(str(failure.value))
+    assert len(set(messages)) == 1
 
 
 @dataclass(frozen=True)
@@ -131,10 +180,6 @@ def test_cold_electron_result_is_strictly_reusable_and_hdf_stable(
     energy_index = model.layout.electron_energy_indices["z"]
 
     assert result.state[-1, energy_index] == 0.0
-    assert (
-        result.metadata["provenance"]["accepted_state_zeroed_electron_energy_count"]
-        == 1
-    )
     observables = derive_observables(
         model, result.time_s, result.state, ("mean_energy_eV[z]",)
     )
@@ -248,43 +293,6 @@ def _heavy_model() -> CompiledGlobalModel:
             wall_relaxation_s_inv=np.zeros(1),
         ),
     )
-
-
-def test_solver_rejects_an_accepted_empty_heavy_mixture(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    model = _heavy_model()
-    initial = model.initial_state(
-        InitialState(
-            densities_m3_by_zone={"z": {"A": 1.0}},
-            gas_temperature_K_by_zone={"z": 300.0},
-        )
-    )
-
-    def empty_mixture_solution(**_options: Any) -> Any:
-        return type(
-            "Solution",
-            (),
-            {
-                "success": True,
-                "message": "ok",
-                "t": np.array([0.0, 1.0]),
-                "y": np.column_stack((initial, np.array([-1.0e-13, 1.0e-23]))),
-                "t_events": (),
-                "nfev": 1,
-                "njev": 0,
-                "nlu": 0,
-            },
-        )()
-
-    monkeypatch.setattr(solver_module, "solve_ivp", empty_mixture_solution)
-
-    with pytest.raises(IntegrationError, match="empty mixture"):
-        solve_compiled_model(
-            model,
-            initial,
-            SolverSettings(atol=1.0e-12, save_at_s=(0.0, 1.0)),
-        )
 
 
 def test_zero_heavy_energy_for_a_nonempty_mixture_is_rejected() -> None:

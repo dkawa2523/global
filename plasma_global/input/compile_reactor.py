@@ -27,7 +27,7 @@ from plasma_global.input._compile_reactor_components import (
     compile_walls,
     compile_zones,
 )
-from plasma_global.input.schema import CaseSpec, ZoneConfig
+from plasma_global.input._resolved_case import ResolvedCase, ZoneConfig
 from plasma_global.models.external_table import ExternalTableStore
 from plasma_global.models.gas_energy import HeavyEnergyClosure
 from plasma_global.models.power import PowerCoordinator
@@ -50,7 +50,7 @@ class CompiledReactor:
 
 
 def compile_initial_densities(
-    case: CaseSpec, chemistry: CompiledChemistry
+    case: ResolvedCase, chemistry: CompiledChemistry
 ) -> Mapping[str, Mapping[str, float]]:
     """Compile every zone's selected initial-composition representation."""
 
@@ -91,7 +91,7 @@ def compile_initial_densities(
 
 
 def validate_surface_initial_conditions(
-    case: CaseSpec, chemistry_data: ChemistryData
+    case: ResolvedCase, chemistry_data: ChemistryData
 ) -> None:
     """Validate the public input adapter through the shared surface contract."""
 
@@ -104,7 +104,7 @@ def validate_surface_initial_conditions(
 
 
 def compile_reactor(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
     external_tables: ExternalTableStore,

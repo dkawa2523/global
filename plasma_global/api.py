@@ -5,18 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from plasma_global.core.result import SimulationResult
+from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input.load import load_case as _load_case
-from plasma_global.input.schema import CaseSpec
 from plasma_global.output import ResultPaths
 
 
-def load_case(path: str | Path) -> CaseSpec:
-    """Load and validate one schema-v3 case."""
+def load_case(path: str | Path) -> ResolvedCase:
+    """Load and validate one schema-v4 case."""
 
     return _load_case(path)
 
 
-def simulate(case: CaseSpec) -> SimulationResult:
+def simulate(case: ResolvedCase) -> SimulationResult:
     """Compile and simulate an already loaded case."""
 
     from plasma_global.build import simulate_case
@@ -25,7 +25,7 @@ def simulate(case: CaseSpec) -> SimulationResult:
 
 
 def write_result(result: SimulationResult, out: str | Path) -> ResultPaths:
-    """Write the fixed ``result.h5`` and ``summary.yaml`` artifacts."""
+    """Publish the numerical result and its requested analysis artifacts."""
 
     from plasma_global.output import write_result as _write_result
 

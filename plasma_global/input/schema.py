@@ -1,91 +1,38 @@
-"""Public schema-v3 facade and cross-section case validation.
-
-The private schema modules group input data by domain. This facade preserves the
-historical import and pickle identity of every public model while keeping
-whole-case relationships in :class:`CaseSpec`.
-"""
+"""The single public YAML input schema (version 4)."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Self, assert_never
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import PrivateAttr, model_validator
+from pydantic import Field, model_validator
 
+from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input._schema_base import (
     Identifier,
     InputPath,
+    NonNegativeFloat,
+    PositiveFloat,
     StrictModel,
 )
 from plasma_global.input._schema_models import (
     ApproximateTwoTermElectronModel,
-    ElectronClosure,
-    ElectronDensityModel,
-    ElectronEnergyClosure,
-    ElectronModel,
-    EvolvedGasEnergy,
     FixedGasEnergy,
     GasEnergyModel,
-    LocalFieldClosure,
-    MaxwellianElectronModel,
-    ModelsConfig,
-    PrescribedElectronDensity,
     QuasiNeutralElectronDensity,
-    SurfaceKineticsConfig,
-    TableElectronModel,
-)
-from plasma_global.input._schema_models import CacheConfig as CacheConfig
-from plasma_global.input._schema_models import EnergyGridConfig as EnergyGridConfig
-from plasma_global.input._schema_models import (
-    ReducedFieldGridConfig as ReducedFieldGridConfig,
 )
 from plasma_global.input._schema_power import (
-    ContinuousWaveform,
-    DCSeriesCommand,
     DCSeriesModel,
-    ExperimentalCCPCommand,
     ExperimentalCCPModel,
-    ExperimentalICPCommand,
     ExperimentalICPModel,
-    ExperimentalRFEnvelopeCommand,
     ExperimentalRFEnvelopeModel,
-    ExternalTableCommand,
     ExternalTableModel,
-    PowerModel,
-    PowerPortCommand,
-    PowerPortConfig,
-    PrescribedPowerCommand,
     PrescribedPowerModel,
-    SquarePulseWaveform,
-    Waveform,
-    _power_command_matches_model,
 )
-from plasma_global.input._schema_reactor import (
-    AmbipolarWallTransport,
-    BohmWallTransport,
-    EdgeConfig,
-    GasInletConfig,
-    OffWallTransport,
-    PrescribedFrequencyWallTransport,
-    PumpConfig,
-    ReactorConfig,
-    SurfaceConfig,
-    WallTransport,
-    ZoneConfig,
-)
-from plasma_global.input._schema_recipe import (
-    GasInletCommand,
-    RecipeCommands,
-    RecipeConfig,
-    RecipeStepConfig,
-    SurfaceCommand,
-)
+from plasma_global.input._schema_reactor import WallTransport
+from plasma_global.input._schema_recipe import GasInletCommand, SurfaceCommand
 from plasma_global.input._schema_run import (
     ExperimentalConfig,
-    ExperimentalExtensionsConfig,
-    ExperimentalFilmConfig,
-    ExperimentalInventoryEventConfig,
-    ExperimentalWallInventoryConfig,
     OutputConfig,
     SolverConfig,
 )
@@ -96,238 +43,227 @@ class CaseMetadata(StrictModel):
     description: str = ""
 
 
-class ChemistryConfig(StrictModel):
-    manifest: InputPath
+class InitialConditions(StrictModel):
+    pressure_Pa: PositiveFloat
+    gas_temperature_K: PositiveFloat
+    densities_m3: dict[str, NonNegativeFloat] | None = None
+    mole_fractions: dict[str, NonNegativeFloat] | None = None
+    seed_densities_m3: dict[str, NonNegativeFloat] = Field(default_factory=dict)
+    mean_energy_eV: PositiveFloat | None = None
+
+
+class ZoneDefinition(StrictModel):
+    volume_m3: PositiveFloat
+    description: str = ""
+    initial: InitialConditions
+
+
+class SurfaceDefinition(StrictModel):
+    zone_id: Identifier
+    area_m2: PositiveFloat
+    temperature_K: PositiveFloat
+    wall_transport: WallTransport
+    ion_impact_energy_eV: NonNegativeFloat = 0.0
+    site_density_m2: NonNegativeFloat = 0.0
+    initial_coverages: dict[str, NonNegativeFloat] = Field(default_factory=dict)
+
+
+class EdgeDefinition(StrictModel):
+    from_zone: Identifier
+    to_zone: Identifier
+    conductance_m3_s: NonNegativeFloat
+
+
+class InletDefinition(StrictModel):
+    zone_id: Identifier
+    temperature_K: PositiveFloat
+    flow_sccm: dict[str, NonNegativeFloat] = Field(default_factory=dict)
+
+
+class PumpDefinition(StrictModel):
+    zone_id: Identifier
+    speed_m3_s: NonNegativeFloat
+
+
+class AbsorbedPower(PrescribedPowerModel):
+    default_absorbed_power_W: NonNegativeFloat | None = Field(
+        default=None, alias="absorbed_power_W"
+    )
+
+
+class RFPower(ExperimentalRFEnvelopeModel):
+    default_absorbed_power_W: NonNegativeFloat | None = Field(
+        default=None, alias="absorbed_power_W"
+    )
+    default_voltage_rms_V: NonNegativeFloat | None = Field(
+        default=None, alias="voltage_rms_V"
+    )
+
+
+class CCPPower(ExperimentalCCPModel):
+    default_absorbed_power_W: NonNegativeFloat | None = Field(
+        default=None, alias="absorbed_power_W"
+    )
+    default_voltage_rms_V: NonNegativeFloat | None = Field(
+        default=None, alias="voltage_rms_V"
+    )
+
+
+class ICPPower(ExperimentalICPModel):
+    default_delivered_power_W: NonNegativeFloat | None = Field(
+        default=None, alias="delivered_power_W"
+    )
+
+
+class ExternalPower(ExternalTableModel):
+    bounds_policy: Literal["error", "hold"] = Field(default="error", alias="bounds")
+    time_reference: Literal["run_start", "step_start"] = "run_start"
+
+
+PowerModel = Annotated[
+    AbsorbedPower | DCSeriesModel | ExternalPower | RFPower | CCPPower | ICPPower,
+    Field(discriminator="kind"),
+]
+
+
+class PowerDefinition(StrictModel):
+    zone_id: Identifier
+    coupling_target: str = ""
+    model: PowerModel
+
+
+class ReactorDefinition(StrictModel):
+    chamber_id: Identifier = "reactor"
+    description: str = ""
+    zones: dict[Identifier, ZoneDefinition]
+    surfaces: dict[Identifier, SurfaceDefinition] = Field(default_factory=dict)
+    edges: dict[Identifier, EdgeDefinition] = Field(default_factory=dict)
+    gas_inlets: dict[Identifier, InletDefinition] = Field(default_factory=dict)
+    pumps: dict[Identifier, PumpDefinition] = Field(default_factory=dict)
+    power_ports: dict[Identifier, PowerDefinition] = Field(default_factory=dict)
+
+
+class TableCoefficients(StrictModel):
+    file: InputPath
+    columns: dict[str, str] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    bounds: Literal["error", "hold"] = "error"
+    mobility_reference_neutral_density_m3: PositiveFloat | None = None
+
+
+class MaxwellianCoefficients(StrictModel):
+    kind: Literal["maxwellian"] = "maxwellian"
+
+
+class EnergyBalanceElectrons(StrictModel):
+    kind: Literal["energy_balance"]
+    coefficients: MaxwellianCoefficients | TableCoefficients = Field(
+        default_factory=MaxwellianCoefficients
+    )
+
+
+class LocalFieldElectrons(StrictModel):
+    kind: Literal["local_field"]
+    coefficients: TableCoefficients | ApproximateTwoTermElectronModel
+
+
+ElectronModel = Annotated[
+    EnergyBalanceElectrons | LocalFieldElectrons, Field(discriminator="kind")
+]
+
+
+class SurfaceKinetics(StrictModel):
+    kind: Literal["mass_action"]
+
+
+class DensityProfile(StrictModel):
+    kind: Literal["experimental.prescribed_profile"]
+    file: InputPath
+    columns: dict[str, str] = Field(default_factory=dict)
+    zone_columns: dict[str, Identifier] = Field(default_factory=dict)
+    interpolation: Literal["linear", "previous"] = "linear"
+    bounds: Literal["error", "hold"] = "error"
+    time_offset_s: float = 0.0
+
+
+class ModelsDefinition(StrictModel):
+    electrons: ElectronModel
+    electron_density: Annotated[
+        QuasiNeutralElectronDensity | DensityProfile, Field(discriminator="kind")
+    ] = Field(default_factory=lambda: QuasiNeutralElectronDensity(kind="quasineutral"))
+    gas_energy: GasEnergyModel = Field(
+        default_factory=lambda: FixedGasEnergy(kind="fixed")
+    )
+    surface_kinetics: SurfaceKinetics | None = None
+
+
+class RunCommands(StrictModel):
+    power_ports: dict[Identifier, dict[str, Any]] = Field(default_factory=dict)
+    gas_inlets: dict[Identifier, GasInletCommand] = Field(default_factory=dict)
+    surfaces: dict[Identifier, SurfaceCommand] = Field(default_factory=dict)
+
+
+class RunStep(StrictModel):
+    label: Identifier | None = None
+    duration_s: PositiveFloat
+    commands: RunCommands = Field(default_factory=RunCommands)
+
+
+class RunDefinition(StrictModel):
+    start_time_s: NonNegativeFloat = 0.0
+    duration_s: PositiveFloat | None = None
+    steps: list[RunStep] | None = None
+
+    @model_validator(mode="after")
+    def one_duration(self) -> Self:
+        if (self.duration_s is None) == (self.steps is None):
+            raise ValueError("run requires exactly one of duration_s or steps")
+        if self.steps is not None and not self.steps:
+            raise ValueError("run.steps must not be empty")
+        return self
+
+
+class OutputSelection(OutputConfig):
+    quantities: list[
+        Literal[
+            "electron_density_m3",
+            "electron_temperature_eV",
+            "mean_energy_eV",
+            "gas_temperature_K",
+            "absorbed_power_W",
+            "reduced_field_Td",
+            "charge_residual_m3",
+            "pressure_Pa",
+            "neutral_density_m3",
+            "heavy_density_m3",
+        ]
+    ] = Field(default_factory=list)
+    zones: list[Identifier] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def one_selection_form(self) -> Self:
+        if self.zones and not self.quantities:
+            raise ValueError("output.zones requires output.quantities")
+        if self.quantities and self.observables:
+            raise ValueError("choose quantities/zones or explicit observables")
+        return self
 
 
 class CaseSpec(StrictModel):
-    schema_version: Literal[3]
+    schema_version: Literal[4]
     case: CaseMetadata
-    chemistry: ChemistryConfig
-    reactor: ReactorConfig
-    recipe: RecipeConfig
-    models: ModelsConfig
-    solver: SolverConfig
-    output: OutputConfig
+    chemistry: dict[str, Any]
+    reactor: ReactorDefinition
+    run: RunDefinition
+    models: ModelsDefinition
+    solver: SolverConfig = Field(default_factory=SolverConfig)
+    output: OutputSelection = Field(default_factory=OutputSelection)
     experimental: ExperimentalConfig | None = None
 
-    _source_path: Path | None = PrivateAttr(default=None)
-    _included_files: tuple[Path, ...] = PrivateAttr(default=())
+    def resolve(self, base_directory: Path) -> ResolvedCase:
+        from plasma_global.input._resolve import resolve_case
 
-    def _validate_recipe_commands(self) -> None:
-        inlet_ids = {item.inlet_id for item in self.reactor.gas_inlets}
-        ports = {item.port_id: item for item in self.reactor.power_ports}
-        surface_ids = {item.surface_id for item in self.reactor.surfaces}
-        for step in self.recipe.steps:
-            commands = step.commands
-            for label, references, available in (
-                ("gas inlet", set(commands.gas_inlets), inlet_ids),
-                ("power port", set(commands.power_ports), set(ports)),
-                ("surface", set(commands.surfaces), surface_ids),
-            ):
-                unknown = references - available
-                if unknown:
-                    values = ", ".join(sorted(unknown))
-                    raise ValueError(
-                        f"recipe step {step.step_id!r} references unknown {label}(s): "
-                        f"{values}"
-                    )
-            for port_id, command in commands.power_ports.items():
-                port = ports[port_id]
-                if not _power_command_matches_model(port.model, command):
-                    raise ValueError(
-                        f"recipe step {step.step_id!r} command kind "
-                        f"{command.kind!r} does not match power port {port_id!r} "
-                        f"model kind {port.model.kind!r}"
-                    )
-
-    def _validate_initial_electron_state(
-        self, closure: Literal["electron_energy", "local_field"]
-    ) -> None:
-        for zone in self.reactor.zones:
-            if closure == "electron_energy" and zone.initial_mean_energy_eV is None:
-                raise ValueError(
-                    f"zone {zone.zone_id!r} requires initial_mean_energy_eV for "
-                    "the electron_energy closure"
-                )
-            if closure == "local_field" and zone.initial_mean_energy_eV is not None:
-                raise ValueError(
-                    f"zone {zone.zone_id!r} initial_mean_energy_eV is incompatible "
-                    "with the local_field closure"
-                )
-
-    def _validate_electron_model(
-        self, closure: Literal["electron_energy", "local_field"]
-    ) -> None:
-        electron_model = self.models.electrons
-        if isinstance(electron_model, MaxwellianElectronModel):
-            if closure != "electron_energy":
-                raise ValueError(
-                    "maxwellian electrons require the electron_energy closure"
-                )
-        elif isinstance(electron_model, ApproximateTwoTermElectronModel):
-            if closure != "local_field":
-                raise ValueError(
-                    "experimental.approximate_two_term electrons require the "
-                    "local_field closure"
-                )
-        elif isinstance(electron_model, TableElectronModel):
-            expected_lookup = (
-                "mean_energy" if closure == "electron_energy" else "local_field"
-            )
-            if electron_model.lookup != expected_lookup:
-                raise ValueError(
-                    f"table lookup {electron_model.lookup!r} must match electron "
-                    f"closure {closure!r}"
-                )
-        else:
-            assert_never(electron_model)
-
-    def _validate_gas_energy_references(self, zone_ids: set[str]) -> None:
-        gas_energy = self.models.gas_energy
-        if isinstance(gas_energy, EvolvedGasEnergy):
-            unknown = set(gas_energy.wall_energy_relaxation_s_inv_by_zone) - zone_ids
-            if unknown:
-                values = ", ".join(sorted(unknown))
-                raise ValueError(
-                    "models.gas_energy.wall_energy_relaxation_s_inv_by_zone "
-                    f"references unknown zones: {values}"
-                )
-        elif not isinstance(gas_energy, FixedGasEnergy):
-            assert_never(gas_energy)
-
-    def _validate_wall_inventory_references(self, surface_ids: set[str]) -> None:
-        wall_inventory = (
-            None if self.experimental is None else self.experimental.wall_inventory
-        )
-        if wall_inventory is None:
-            return
-        unknown = set(wall_inventory.initial_by_surface) - surface_ids
-        if unknown:
-            values = ", ".join(sorted(unknown))
-            raise ValueError(
-                "experimental.wall_inventory.initial_by_surface references "
-                f"unknown surfaces: {values}"
-            )
-        unknown_event_surfaces = {
-            event.surface_id for event in wall_inventory.events
-        } - surface_ids
-        if unknown_event_surfaces:
-            raise ValueError(
-                "experimental.wall_inventory.events references unknown "
-                f"surfaces: {', '.join(sorted(unknown_event_surfaces))}"
-            )
-        undeclared_inventory = {
-            (event.surface_id, inventory_id)
-            for event in wall_inventory.events
-            for inventory_id in event.inventory_particles_per_event
-            if inventory_id
-            not in wall_inventory.initial_by_surface.get(event.surface_id, {})
-        }
-        if undeclared_inventory:
-            raise ValueError(
-                "experimental.wall_inventory.events writes undeclared "
-                f"inventory states: {sorted(undeclared_inventory)}"
-            )
-
-    def _validate_save_times(self) -> None:
-        save_at = self.solver.save_at_s
-        if save_at is not None and (
-            save_at[0] < self.recipe.start_time_s
-            or save_at[-1] > self.recipe.end_time_s
-        ):
-            raise ValueError(
-                "solver.save_at_s must lie within the recipe time interval"
-            )
-
-    @model_validator(mode="after")
-    def valid_commands(self) -> Self:
-        zone_ids = {item.zone_id for item in self.reactor.zones}
-        surface_ids = {item.surface_id for item in self.reactor.surfaces}
-        closure: Literal["electron_energy", "local_field"] = (
-            self.models.electron_closure.kind
-        )
-        self._validate_recipe_commands()
-        self._validate_initial_electron_state(closure)
-        self._validate_electron_model(closure)
-        self._validate_gas_energy_references(zone_ids)
-        self._validate_wall_inventory_references(surface_ids)
-        self._validate_save_times()
-        return self
-
-    @property
-    def source_path(self) -> Path | None:
-        return self._source_path
-
-    @property
-    def included_files(self) -> tuple[Path, ...]:
-        return self._included_files
-
-    def _with_source(self, source_path: Path, included_files: tuple[Path, ...]) -> Self:
-        object.__setattr__(self, "_source_path", source_path)
-        object.__setattr__(self, "_included_files", included_files)
-        return self
+        return resolve_case(self, base_directory)
 
 
-__all__ = [
-    "AmbipolarWallTransport",
-    "ApproximateTwoTermElectronModel",
-    "BohmWallTransport",
-    "CaseMetadata",
-    "CaseSpec",
-    "ChemistryConfig",
-    "ContinuousWaveform",
-    "DCSeriesCommand",
-    "DCSeriesModel",
-    "EdgeConfig",
-    "ElectronClosure",
-    "ElectronDensityModel",
-    "ElectronEnergyClosure",
-    "ElectronModel",
-    "EvolvedGasEnergy",
-    "ExperimentalCCPCommand",
-    "ExperimentalCCPModel",
-    "ExperimentalConfig",
-    "ExperimentalExtensionsConfig",
-    "ExperimentalFilmConfig",
-    "ExperimentalICPCommand",
-    "ExperimentalICPModel",
-    "ExperimentalInventoryEventConfig",
-    "ExperimentalRFEnvelopeCommand",
-    "ExperimentalRFEnvelopeModel",
-    "ExperimentalWallInventoryConfig",
-    "ExternalTableCommand",
-    "ExternalTableModel",
-    "FixedGasEnergy",
-    "GasEnergyModel",
-    "GasInletCommand",
-    "GasInletConfig",
-    "InputPath",
-    "LocalFieldClosure",
-    "MaxwellianElectronModel",
-    "ModelsConfig",
-    "OffWallTransport",
-    "OutputConfig",
-    "PowerModel",
-    "PowerPortCommand",
-    "PowerPortConfig",
-    "PrescribedElectronDensity",
-    "PrescribedFrequencyWallTransport",
-    "PrescribedPowerCommand",
-    "PrescribedPowerModel",
-    "PumpConfig",
-    "QuasiNeutralElectronDensity",
-    "ReactorConfig",
-    "RecipeCommands",
-    "RecipeConfig",
-    "RecipeStepConfig",
-    "SolverConfig",
-    "SquarePulseWaveform",
-    "SurfaceCommand",
-    "SurfaceConfig",
-    "SurfaceKineticsConfig",
-    "TableElectronModel",
-    "WallTransport",
-    "Waveform",
-    "ZoneConfig",
-]
+__all__ = ["CaseSpec"]

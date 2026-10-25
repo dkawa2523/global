@@ -1,12 +1,10 @@
-"""Result-level audit interpretation and human-readable summary output."""
+"""Human-readable summary derived entirely from the canonical result."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import yaml
 
 from plasma_global._result_common import (
@@ -15,79 +13,14 @@ from plasma_global._result_common import (
     ensure_parent,
     plain_value,
 )
-from plasma_global.audit import AuditReport, audit_result
-from plasma_global.core.result import SimulationResult, to_plain_mapping
+from plasma_global.core.result import SimulationResult, series_unit, to_plain_mapping
 
 
-def _string_sequence(metadata: Mapping[str, Any], name: str) -> tuple[str, ...]:
-    raw = metadata.get(name, ())
-    if isinstance(raw, str) or not isinstance(raw, Sequence):
-        raise TypeError(f"result metadata {name} must be a sequence of names")
-    return tuple(dict.fromkeys(str(value) for value in raw))
-
-
-def _optional_dict(values: Mapping[str, Any], name: str, error: str) -> dict[str, Any]:
-    value = values.get(name)
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise TypeError(error)
-    return value
-
-
-def _optional_dict_or_none(
-    values: Mapping[str, Any], name: str, error: str
-) -> dict[str, Any] | None:
-    value = values.get(name)
-    if value is not None and not isinstance(value, dict):
-        raise TypeError(error)
-    return value
-
-
-def audit_from_metadata(result: SimulationResult) -> AuditReport:
-    """Audit using only constraints stored with the result metadata."""
-
-    metadata = to_plain_mapping(result.metadata)
-    conservation_names = _string_sequence(metadata, "conservation_observables")
-    residuals = {name: result.series(name) for name in conservation_names}
-    provenance = _optional_dict(
-        metadata,
-        "provenance",
-        "result metadata provenance must be a mapping",
-    )
-    runtime = _optional_dict(
-        provenance,
-        "runtime_diagnostics",
-        "result provenance runtime_diagnostics must be a mapping",
-    )
-    stored_maxima = _optional_dict(
-        runtime,
-        "conservation_max_abs_residual",
-        "runtime diagnostic conservation_max_abs_residual must be a mapping",
-    )
-    for name, value in stored_maxima.items():
-        residuals.setdefault(str(name), np.asarray(float(value)))
-    tolerances = _optional_dict_or_none(
-        metadata,
-        "conservation_tolerances",
-        "result metadata conservation_tolerances must be a mapping",
-    )
-    return audit_result(
-        result,
-        conservation_residuals=residuals,
-        conservation_tolerances=tolerances,
-        default_conservation_tolerance=metadata.get("default_conservation_tolerance"),
-    )
-
-
-def build_summary(
-    result: SimulationResult, *, audit: AuditReport | None = None
-) -> dict[str, Any]:
+def build_summary(result: SimulationResult) -> dict[str, Any]:
     """Build the fixed summary from result-declared quantities only."""
 
     metadata = to_plain_mapping(result.metadata)
-    final_names = _string_sequence(metadata, "summary_series")
-    report = audit or audit_from_metadata(result)
+    final_names = metadata.get("summary_series", ())
     return {
         "format": RESULT_FORMAT,
         "format_version": RESULT_FORMAT_VERSION,
@@ -103,26 +36,64 @@ def build_summary(
         },
         "model_ids": plain_value(metadata.get("model_ids", {})),
         "final": {name: result.final_value(name) for name in final_names},
-        "conservation": {
-            "max_abs_residual": report.max_conservation_residual,
-            "max_abs_residual_by_quantity": dict(report.conservation_max_abs_residual),
-        },
-        "audit": {"passed": report.passed, "issue_count": len(report.issues)},
+        "assessment": plain_value(metadata.get("assessment")),
         "solver": to_plain_mapping(result.solver_stats),
+        **(
+            {
+                "probes": {
+                    name: {
+                        "value": result.final_value(name) if result.n_times else None,
+                        "unit": series_unit(name, metadata.get("series_units", {})),
+                        **definition,
+                    }
+                    for name, definition in metadata.get("probes", {}).items()
+                }
+            }
+            if metadata.get("probes")
+            else {}
+        ),
     }
+
+
+def write_series_yaml(path: str | Path, result: SimulationResult) -> Path:
+    """Describe exported columns without requiring an HDF5 reader."""
+    from plasma_global._result_csv import _result_csv_columns
+
+    units = result.metadata.get("series_units", {})
+    columns = [{"column": "time_s", "series": "time_s", "unit": "s"}]
+    for column, _, _ in _result_csv_columns(result):
+        name = column.partition(":")[2]
+        columns.append(
+            {
+                "column": column,
+                "series": name,
+                "unit": series_unit(name, units),
+                **dict(result.metadata.get("probes", {}).get(name, {})),
+            }
+        )
+    payload = {
+        "columns": columns,
+        "composition_basis": result.metadata.get("composition_basis"),
+        "event_integration": plain_value(result.metadata.get("event_integration")),
+        "observable_time_convention": result.metadata.get("observable_time_convention"),
+        "model_geometry": plain_value(result.metadata.get("model_geometry")),
+    }
+    target = Path(path)
+    ensure_parent(target)
+    with target.open("x", encoding="utf-8") as stream:
+        yaml.safe_dump(payload, stream, sort_keys=False, allow_unicode=True)
+    return target
 
 
 def write_summary_yaml(
     path: str | Path,
     result: SimulationResult,
-    *,
-    audit: AuditReport | None = None,
 ) -> Path:
     target = Path(path)
     ensure_parent(target)
-    with target.open("w", encoding="utf-8") as stream:
+    with target.open("x", encoding="utf-8") as stream:
         yaml.safe_dump(
-            build_summary(result, audit=audit),
+            build_summary(result),
             stream,
             sort_keys=False,
             allow_unicode=True,
@@ -130,4 +101,4 @@ def write_summary_yaml(
     return target
 
 
-__all__ = ["audit_from_metadata", "build_summary", "write_summary_yaml"]
+__all__ = ["build_summary", "write_summary_yaml"]

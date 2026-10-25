@@ -262,22 +262,24 @@ def load_reactions(
     return tuple(result)
 
 
-def _cross_section_rows(path: Path) -> list[tuple[float, float]]:
+def _cross_section_rows(path: Path, channel_id: object) -> list[tuple[float, float]]:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as stream:
             reader = csv.reader(stream)
             header = next(reader, None)
-            if header != ["energy_eV", "sigma_m2"]:
+            grouped = header == ["channel_id", "energy_eV", "sigma_m2"]
+            if header != ["energy_eV", "sigma_m2"] and not grouped:
                 raise ChemistryError(
                     f"{path} must use the exact header energy_eV,sigma_m2"
                 )
             rows: list[tuple[float, float]] = []
             for line, row in enumerate(reader, start=2):
-                if len(row) != 2:
+                if len(row) != (3 if grouped else 2):
                     raise ChemistryError(
                         f"{path}:{line} must contain exactly two numeric fields"
                     )
-                rows.append((float(row[0]), float(row[1])))
+                if not grouped or row[0] == channel_id:
+                    rows.append((float(row[-2]), float(row[-1])))
     except (OSError, ValueError) as exc:
         raise ChemistryError(
             f"cannot read two-column SI cross section {path}: {exc}"
@@ -295,7 +297,9 @@ def load_cross_section_curve(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load one exact two-column SI cross-section curve."""
 
-    values = np.asarray(_cross_section_rows(path), dtype=float).reshape((-1, 2))
+    values = np.asarray(
+        _cross_section_rows(path, cross_section_id), dtype=float
+    ).reshape((-1, 2))
     energy, sigma = np.asarray(values[:, 0], float), np.asarray(values[:, 1], float)
     data_error = cross_section_data_error(
         cross_section_id=cross_section_id,

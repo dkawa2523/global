@@ -13,7 +13,7 @@ from collections.abc import Callable
 from tools.quality_gate.baselines import (
     _assert_findings_not_worse,
     _baseline_payload,
-    _check_native_baseline_sizes,
+    _check_secret_reviews,
     _load_baseline,
     _validate_baseline_monotonic,
     _write_json,
@@ -86,7 +86,7 @@ def _run_pr() -> None:
     _check_quality_config()
     baseline = _load_baseline()
     _validate_baseline_monotonic(baseline)
-    _check_native_baseline_sizes()
+    _check_secret_reviews()
     _check_format(ALL_PYTHON_PATHS)
     ruff = _ruff_findings(ALL_PYTHON_PATHS)
     bandit = _bandit_findings()
@@ -209,8 +209,9 @@ def _delegate_nightly_to_wsl() -> None:
     )
     command = (
         f"cd {shlex.quote(linux_root)} && "
-        f"{wsl_environment} uv sync --frozen --extra dev && "
-        f"{wsl_environment} uv run --frozen python -m tools.quality nightly --native"
+        f"{wsl_environment} uv sync --frozen --all-extras && "
+        f"{wsl_environment} uv run --frozen --all-extras "
+        "python -m tools.quality nightly --native"
     )
     _run(["wsl.exe", "bash", "-lc", command])
 

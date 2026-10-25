@@ -32,9 +32,6 @@ from plasma_global.chemistry._rate_evaluators import (
     compile_rate_evaluator,
     load_rate_table,
 )
-from plasma_global.chemistry._rate_evaluators import (
-    maxwell_rate_table as _build_maxwell_rate_table,
-)
 from plasma_global.chemistry.data import (
     ChemistryData,
     CrossSectionData,
@@ -123,14 +120,6 @@ class _CompiledGasReactions:
     rate_evaluators: tuple[RateEvaluator, ...]
     electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
-
-
-def maxwell_rate_table(
-    cross_section: CrossSectionData,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Precompute Maxwellian ``<sigma v>`` on a tail-safe mean-energy range."""
-
-    return _build_maxwell_rate_table(cross_section)
 
 
 def _rate_evaluator(
@@ -337,6 +326,7 @@ def _compile_jacobian_species_pattern(
         model = data.rate_models[str(reaction.rate_model)]
         if electron_orders[row] != 0.0 or model.kind in {
             "electron_impact",
+            "electron_table",
             "experimental.electron_temperature_power_law",
         }:
             dependencies[row, charged] = True
@@ -408,5 +398,4 @@ __all__ = [
     "RateContextLike",
     "RateEvaluator",
     "compile_chemistry",
-    "maxwell_rate_table",
 ]

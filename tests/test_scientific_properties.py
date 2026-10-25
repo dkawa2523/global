@@ -3,15 +3,12 @@ from __future__ import annotations
 import math
 import tempfile
 from pathlib import Path
-from typing import Any, cast
 
 import numpy as np
 import pytest
-import yaml
 from hypothesis import given
 from hypothesis import strategies as st
 
-from plasma_global import load_case
 from plasma_global.chemistry.compile import compile_chemistry
 from plasma_global.chemistry.data import (
     ChemistryData,
@@ -24,7 +21,6 @@ from plasma_global.core.domain import InitialState, RecipeSegment, Zone
 from plasma_global.core.result import SimulationResult
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
 from plasma_global.errors import ModelConfigurationError
-from plasma_global.input.migrate_v2 import migrate_v2, write_v3_case
 from plasma_global.models.electrons import ElectronEnergyClosure
 from plasma_global.models.rates import ConstantRate
 from plasma_global.output import read_result_h5, write_result_h5
@@ -310,54 +306,3 @@ def test_hdf5_serialization_round_trip_preserves_numeric_contract(
     np.testing.assert_array_equal(restored.time_s, result.time_s)
     np.testing.assert_array_equal(restored.state, result.state)
     np.testing.assert_array_equal(restored.series("signal"), result.series("signal"))
-
-
-def _yaml_mapping(path: Path) -> dict[str, Any]:
-    value = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise AssertionError(f"fixture {path} must contain a mapping")
-    return cast(dict[str, Any], value)
-
-
-@pytest.mark.property
-@given(
-    ion_density=st.integers(min_value=1, max_value=1_000_000_000_000),
-    duration_ns=st.integers(min_value=10, max_value=1_000),
-)
-def test_v2_to_v3_migration_preserves_generated_physical_values(
-    ion_density: int,
-    duration_ns: int,
-) -> None:
-    source = _yaml_mapping(V2_CONFIGS / "case_crane_two_reaction_argon.yaml")
-    chamber = _yaml_mapping(V2_CONFIGS / "chamber_crane_two_reaction_argon.yaml")
-    recipe = _yaml_mapping(V2_CONFIGS / "recipe_crane_two_reaction_argon.yaml")
-    duration_s = duration_ns * 1.0e-9
-    chamber["zones"][0]["initial_densities_m3"]["Ar_plus"] = ion_density
-    recipe["steps"][0]["t_end_s"] = duration_s
-
-    with tempfile.TemporaryDirectory() as directory:
-        temporary = Path(directory)
-        chamber_path = temporary / "chamber.yaml"
-        recipe_path = temporary / "recipe.yaml"
-        chamber_path.write_text(yaml.safe_dump(chamber), encoding="utf-8")
-        recipe_path.write_text(yaml.safe_dump(recipe), encoding="utf-8")
-        source["include"] = str((V2_CONFIGS / "base_case.yaml").resolve())
-        source["files"]["chamber"] = str(chamber_path)
-        source["files"]["recipe"] = str(recipe_path)
-        source["files"]["chemistry"] = {"manifest": str(V2_CHEMISTRY.resolve())}
-        source_path = temporary / "case-v2.yaml"
-        source_path.write_text(yaml.safe_dump(source), encoding="utf-8")
-
-        migrated = migrate_v2(source_path)
-        reloaded = load_case(write_v3_case(migrated, temporary / "case-v3.yaml"))
-
-    migrated_densities = migrated.case.reactor.zones[0].initial_densities_m3
-    assert migrated_densities is not None
-    assert migrated_densities["Ar_plus"] == float(ion_density)
-    assert migrated.case.recipe.steps[0].duration_s == duration_s
-    assert reloaded.model_dump(
-        mode="json", exclude_none=True
-    ) == migrated.case.model_dump(
-        mode="json",
-        exclude_none=True,
-    )

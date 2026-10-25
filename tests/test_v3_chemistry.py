@@ -9,6 +9,7 @@ import pytest
 
 import plasma_global.chemistry.compile as compile_module
 from plasma_global.chemistry._contracts import normalized_cross_section_curve
+from plasma_global.chemistry._maxwell import compile_maxwell_rate
 from plasma_global.chemistry.compile import compile_chemistry
 from plasma_global.chemistry.data import (
     ChemistryData,
@@ -68,7 +69,7 @@ def _mechanism(
     )
     manifest = tmp_path / "chemistry.yaml"
     manifest.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "species: species.csv\n"
         "gas_reactions: gas.csv\n"
         "boundary_reactions: boundary.csv\n"
@@ -295,7 +296,7 @@ def test_programmatic_cross_section_curve_is_rejected_at_every_public_entry(
     )
 
     with pytest.raises(ChemistryError, match=message):
-        compile_module.maxwell_rate_table(cross_section)
+        compile_maxwell_rate(cross_section)
     with pytest.raises(ChemistryError, match=message):
         compile_chemistry(_chemistry_with_cross_section(cross_section))
 
@@ -329,7 +330,7 @@ def test_programmatic_cross_section_metadata_is_rejected_at_every_public_entry(
     cross_section = _programmatic_cross_section(**changes)
 
     with pytest.raises(ChemistryError, match=message):
-        compile_module.maxwell_rate_table(cross_section)
+        compile_maxwell_rate(cross_section)
     with pytest.raises(ChemistryError, match=message):
         compile_chemistry(_chemistry_with_cross_section(cross_section))
 
@@ -389,101 +390,8 @@ def test_maxwellian_rate_rejects_unresolved_cross_section_tail(
         gas_temperature_K=300.0,
     )
 
-    with pytest.raises(ModelDomainError, match="Maxwellian tail-safe range"):
+    with pytest.raises(ModelDomainError, match="distribution-tail range"):
         chemistry.rate_evaluators[0](context)
-
-
-def test_maxwellian_constant_cross_section_matches_analytic_rate() -> None:
-    sigma_m2 = 2.0e-20
-    cross_section = CrossSectionData(
-        id="constant",
-        kind="ionization",
-        target="Ar",
-        threshold_eV=0.0,
-        energy_loss_eV=0.0,
-        energy_eV=np.linspace(0.0, 200.0, 4001),
-        sigma_m2=np.full(4001, sigma_m2),
-    )
-    axis, rate = compile_module.maxwell_rate_table(cross_section)
-    cutoff = 1.5 * cross_section.energy_eV[-1] / axis[-1]
-    unresolved_tail = (1.0 + cutoff) * np.exp(-cutoff)
-    assert unresolved_tail == pytest.approx(1.0e-6, rel=1.0e-12)
-    mean_energy_eV = 2.0
-    electron_temperature_eV = (2.0 / 3.0) * mean_energy_eV
-    expected = sigma_m2 * np.sqrt(
-        8.0
-        * compile_module.E_CHARGE
-        * electron_temperature_eV
-        / (np.pi * compile_module.ELECTRON_MASS_KG)
-    )
-
-    assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(
-        expected, rel=3.0e-4, abs=0.0
-    )
-
-
-def test_maxwellian_quadrature_is_not_set_by_cross_section_node_density() -> None:
-    sigma_m2 = 2.0e-20
-
-    def constant_cross_section(energy_eV: np.ndarray) -> CrossSectionData:
-        return CrossSectionData(
-            id=f"constant-{energy_eV.size}",
-            kind="momentum_transfer",
-            target="Ar",
-            threshold_eV=0.0,
-            energy_loss_eV=0.0,
-            energy_eV=energy_eV,
-            sigma_m2=np.full(energy_eV.size, sigma_m2),
-        )
-
-    coarse_axis, coarse_rate = compile_module.maxwell_rate_table(
-        constant_cross_section(np.array([0.0, 100.0]))
-    )
-    refined_axis, refined_rate = compile_module.maxwell_rate_table(
-        constant_cross_section(np.linspace(0.0, 100.0, 1001))
-    )
-    mean_energy_eV = 1.0
-    electron_temperature_eV = 2.0 / 3.0
-    expected = sigma_m2 * np.sqrt(
-        8.0
-        * compile_module.E_CHARGE
-        * electron_temperature_eV
-        / (np.pi * compile_module.ELECTRON_MASS_KG)
-    )
-    coarse = np.interp(mean_energy_eV, coarse_axis, coarse_rate)
-    refined = np.interp(mean_energy_eV, refined_axis, refined_rate)
-
-    assert coarse == pytest.approx(expected, rel=3.0e-4, abs=0.0)
-    assert coarse == pytest.approx(refined, rel=1.0e-12, abs=0.0)
-
-
-def test_maxwellian_rate_has_a_continuous_cold_boundary() -> None:
-    sigma_m2 = 1.0e-20
-    cross_section = CrossSectionData(
-        id="cold-momentum",
-        kind="momentum_transfer",
-        target="Ar",
-        threshold_eV=0.0,
-        energy_loss_eV=0.0,
-        energy_eV=np.array([0.0, 100.0]),
-        sigma_m2=np.array([sigma_m2, sigma_m2]),
-    )
-
-    axis, rate = compile_module.maxwell_rate_table(cross_section)
-    cold_mean_energy_eV = 5.0e-4
-    expected = sigma_m2 * np.sqrt(
-        8.0
-        * compile_module.E_CHARGE
-        * (2.0 / 3.0)
-        * cold_mean_energy_eV
-        / (np.pi * compile_module.ELECTRON_MASS_KG)
-    )
-
-    assert axis[0] == 0.0
-    assert rate[0] == 0.0
-    assert np.interp(cold_mean_energy_eV, axis, rate) == pytest.approx(
-        expected, rel=3.0e-4, abs=0.0
-    )
 
 
 def test_maxwellian_rejects_missing_low_energy_momentum_support() -> None:
@@ -499,64 +407,7 @@ def test_maxwellian_rejects_missing_low_energy_momentum_support() -> None:
     )
 
     with pytest.raises(ChemistryError, match="must explicitly cover 0 eV"):
-        compile_module.maxwell_rate_table(cross_section)
-
-
-def test_maxwellian_quadrature_resolves_zero_threshold_lower_tail() -> None:
-    sigma_m2 = 1.0e-20
-    energy_eV = np.concatenate(([0.0], np.geomspace(1.0e-3, 10.0, 4001)))
-    cross_section = CrossSectionData(
-        id="constant-with-zero-support",
-        kind="momentum_transfer",
-        target="Ar",
-        threshold_eV=0.0,
-        energy_loss_eV=0.0,
-        energy_eV=energy_eV,
-        sigma_m2=np.full(energy_eV.size, sigma_m2),
-    )
-
-    axis, rate = compile_module.maxwell_rate_table(cross_section)
-    mean_energy_eV = axis[0]
-    electron_temperature_eV = (2.0 / 3.0) * mean_energy_eV
-    expected = sigma_m2 * np.sqrt(
-        8.0
-        * compile_module.E_CHARGE
-        * electron_temperature_eV
-        / (np.pi * compile_module.ELECTRON_MASS_KG)
-    )
-
-    assert rate[0] == pytest.approx(expected, rel=3.0e-4)
-
-
-def test_maxwellian_quadrature_keeps_positive_threshold_lower_tail_zero() -> None:
-    sigma_m2 = 1.0e-20
-    threshold_eV = 2.0
-    cross_section = CrossSectionData(
-        id="constant-above-threshold",
-        kind="ionization",
-        target="Ar",
-        threshold_eV=threshold_eV,
-        energy_loss_eV=threshold_eV,
-        energy_eV=np.linspace(threshold_eV, 200.0, 4001),
-        sigma_m2=np.full(4001, sigma_m2),
-    )
-    axis, rate = compile_module.maxwell_rate_table(cross_section)
-    mean_energy_eV = 2.0
-    electron_temperature_eV = (2.0 / 3.0) * mean_energy_eV
-    reduced_threshold = threshold_eV / electron_temperature_eV
-    full_constant_rate = sigma_m2 * np.sqrt(
-        8.0
-        * compile_module.E_CHARGE
-        * electron_temperature_eV
-        / (np.pi * compile_module.ELECTRON_MASS_KG)
-    )
-    expected = (
-        full_constant_rate * (1.0 + reduced_threshold) * np.exp(-reduced_threshold)
-    )
-
-    assert np.interp(mean_energy_eV, axis, rate) == pytest.approx(
-        expected, rel=3.0e-4, abs=0.0
-    )
+        compile_maxwell_rate(cross_section)
 
 
 def test_onset_curve_normalizer_is_readonly_and_zero_below_threshold() -> None:

@@ -53,10 +53,12 @@ class _SurfaceRuntime:
         for indices, occupancies in zip(
             self.free_state_indices, self.free_state_occupancies, strict=True
         ):
-            occupied = values[..., indices] @ occupancies
+            occupied = np.sum(values[..., indices] * occupancies, axis=-1)
             if not np.any(occupied > 1.0):
                 continue
-            scale = np.maximum(occupied, 1.0)
+            # Keep the radial continuation inside the closed simplex after rounding.
+            margin = 4.0 * max(len(indices) - 1, 0) * np.finfo(float).eps
+            scale = np.where(occupied > 1.0, occupied * (1.0 + margin), 1.0)
             values[..., indices] = values[..., indices] / np.expand_dims(scale, -1)
 
     def free_coverages(self, state: np.ndarray) -> np.ndarray:
@@ -64,7 +66,7 @@ class _SurfaceRuntime:
         for surface_index, (indices, occupancies) in enumerate(
             zip(self.free_state_indices, self.free_state_occupancies, strict=True)
         ):
-            values[surface_index] = 1.0 - float(occupancies @ state[indices])
+            values[surface_index] = 1.0 - float(np.sum(occupancies * state[indices]))
         return values
 
     def validate_coverages(

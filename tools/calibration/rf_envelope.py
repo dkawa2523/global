@@ -9,10 +9,10 @@ from typing import Any
 
 import yaml
 
-from plasma_global.input.schema import (
+from plasma_global.input._resolved_case import (
     ExperimentalRFEnvelopeCommand,
-    ExperimentalRFEnvelopeModel,
 )
+from plasma_global.input.schema import RFPower
 
 
 @dataclass
@@ -130,7 +130,7 @@ def estimate_rf_envelope_coefficients(
 
 
 def canonical_fragments(coefficients: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return schema-validated v3 model and recipe-command fragments."""
+    """Return v4 port-model and step-command fragments."""
 
     role = "bias" if "bias" in str(coefficients.get("role", "")).lower() else "source"
     shared_keys = (
@@ -151,7 +151,7 @@ def canonical_fragments(coefficients: dict[str, Any]) -> dict[str, dict[str, Any
     if voltage is not None:
         model_data.update(
             control="voltage",
-            default_voltage_rms_V=voltage,
+            voltage_rms_V=voltage,
         )
         command_data.update(
             voltage_rms_V=voltage,
@@ -159,22 +159,24 @@ def canonical_fragments(coefficients: dict[str, Any]) -> dict[str, dict[str, Any
     elif absorbed is not None:
         model_data.update(
             control="absorbed_power",
-            default_absorbed_power_W=absorbed,
+            absorbed_power_W=absorbed,
         )
         command_data.update(
             absorbed_power_W=absorbed,
         )
 
-    model = ExperimentalRFEnvelopeModel.model_validate(model_data)
+    model = RFPower.model_validate(model_data)
     command = ExperimentalRFEnvelopeCommand.model_validate(command_data)
     return {
         "power_model": model.model_dump(
             mode="json",
+            by_alias=True,
             exclude_none=True,
             exclude_unset=True,
         ),
         "power_command": command.model_dump(
             mode="json",
+            exclude={"kind"},
             exclude_none=True,
             exclude_unset=True,
         ),

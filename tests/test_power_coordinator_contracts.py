@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import importlib
-import inspect
-import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import get_type_hints
 
 import numpy as np
 import pytest
@@ -18,11 +14,9 @@ from plasma_global.models.external_table import (
 from plasma_global.models.kinetics import TabulatedElectronKinetics
 from plasma_global.models.power import (
     CompiledPowerCommand,
-    DCSeriesPort,
     ExternalTablePowerPort,
     PowerCoordinator,
     PowerCouplingResult,
-    PowerPort,
     PowerPortResult,
     PowerState,
     PrescribedPowerPort,
@@ -368,45 +362,12 @@ def test_reduced_field_capability_only_annotates_off_commands() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "public_type",
-    [
-        CompiledPowerCommand,
-        DCSeriesPort,
-        ExternalTablePowerPort,
-        PowerCoordinator,
-        PowerCouplingResult,
-        PowerPort,
-        PowerPortResult,
-        PowerState,
-        PrescribedPowerPort,
-    ],
-)
-def test_public_power_types_keep_their_module_identity(
-    public_type: type[object],
-) -> None:
-    assert public_type.__module__ == "plasma_global.models.power"
-    assert get_type_hints(public_type) is not None
-    assert f"class {public_type.__name__}" in inspect.getsource(public_type)
-    pickle_payload = pickle.dumps(public_type)
-    assert b"plasma_global.models.power" in pickle_payload
-    assert (
-        getattr(importlib.import_module(public_type.__module__), public_type.__name__)
-        is public_type
-    )
-    assert all(
-        not base.__module__.startswith("plasma_global.models._power")
-        for base in public_type.__bases__
-    )
-
-
 def test_coordinator_returns_only_public_power_value_types() -> None:
     port = PrescribedPowerPort("source", "plasma", default_power_W=3.0)
     coordinator = PowerCoordinator((port,), ("plasma",))
 
     result = _evaluate(coordinator)
 
-    assert type(result) is PowerCouplingResult
-    assert type(result.power_state_by_zone["plasma"]) is PowerState
-    assert type(result.port_results["source"]) is PowerPortResult
+    assert isinstance(result, PowerCouplingResult)
+    assert isinstance(result.power_state_by_zone["plasma"], PowerState)
     assert isinstance(result.port_results["source"], PowerPortResult)

@@ -89,14 +89,21 @@ def _validate_baseline_monotonic(current: dict[str, Any]) -> None:
         _die("Baseline weakening is forbidden:\n  " + "\n  ".join(failures))
 
 
-def _check_native_baseline_sizes() -> None:
+def _check_secret_reviews() -> None:
     base = _base_ref()
     if base is None:
         return
     previous = _read_json_at_ref(".secrets.baseline", base) or {}
     current = json.loads(SECRETS_BASELINE_PATH.read_text(encoding="utf-8"))
-    if _secret_fingerprints(current) - _secret_fingerprints(previous):
-        _die(".secrets.baseline accepts findings absent from the base branch")
+    added = _secret_fingerprints(current) - _secret_fingerprints(previous)
+    reviewed = {
+        "results": {
+            path: [item for item in items if item.get("is_secret") is False]
+            for path, items in current.get("results", {}).items()
+        }
+    }
+    if added - _secret_fingerprints(reviewed):
+        _die("new secret baseline entries require explicit false-positive review")
 
 
 def _baseline_payload(

@@ -7,8 +7,7 @@ from typing import assert_never
 from plasma_global.errors import CaseValidationError
 from plasma_global.experimental.profile import PrescribedElectronProfile
 from plasma_global.input._compile_power import compile_external_binding
-from plasma_global.input.schema import (
-    CaseSpec,
+from plasma_global.input._resolved_case import (
     ContinuousWaveform,
     DCSeriesModel,
     ExperimentalCCPCommand,
@@ -23,13 +22,14 @@ from plasma_global.input.schema import (
     PowerPortConfig,
     PrescribedPowerModel,
     RecipeStepConfig,
+    ResolvedCase,
     SquarePulseWaveform,
     Waveform,
 )
-from plasma_global.input.schema import (
+from plasma_global.input._resolved_case import (
     DCSeriesCommand as DCSeriesCommandConfig,
 )
-from plasma_global.input.schema import (
+from plasma_global.input._resolved_case import (
     PrescribedPowerCommand as PrescribedPowerCommandConfig,
 )
 from plasma_global.models.external_table import ExternalTableBinding, ExternalTableStore
@@ -86,8 +86,12 @@ def resolved_step_power_commands(
         )
         for port_id, binding in external_bindings.items()
     }
-    for port_id, command in step.commands.power_ports.items():
+    for port_id, port in ports.items():
         if port_id in external_bindings:
+            continue
+        command = step.commands.power_ports.get(port_id)
+        if command is None:
+            commands[port_id] = _required_default_command(port, step.step_id)
             continue
         waveform = _command_waveform(command)
         enabled = waveform is None or _waveform_is_on(
@@ -96,18 +100,51 @@ def resolved_step_power_commands(
             step_start_s,
         )
         resolved_command = _resolved_port_command(
-            ports[port_id],
+            port,
             command,
             enabled=enabled,
             external_tables=external_tables,
         )
-        if resolved_command is not None:
-            commands[port_id] = resolved_command
+        commands[port_id] = (
+            resolved_command
+            if resolved_command is not None
+            else _required_default_command(port, step.step_id)
+        )
     return commands
 
 
+def _required_default_command(
+    port: PowerPortConfig, step_id: str
+) -> CompiledPowerCommand:
+    model = port.model
+    if isinstance(model, PrescribedPowerModel):
+        kind, value = "power", model.default_absorbed_power_W
+    elif isinstance(model, DCSeriesModel):
+        kind, value = "voltage", model.source_voltage_V
+    elif isinstance(model, ExperimentalICPModel):
+        kind, value = "power", model.default_delivered_power_W
+    elif isinstance(model, (ExperimentalRFEnvelopeModel, ExperimentalCCPModel)):
+        kind, value = (
+            ("power", model.default_absorbed_power_W)
+            if model.control == "absorbed_power"
+            else ("voltage", model.default_voltage_rms_V)
+        )
+    else:
+        raise TypeError(f"port {port.port_id!r} requires an external-table binding")
+    if value is None:
+        raise CaseValidationError(
+            f"recipe step {step_id!r}, power port {port.port_id!r} requires a "
+            f"{kind} command or a model default"
+        )
+    return (
+        CompiledPowerCommand(kind="power", power_W=value)
+        if kind == "power"
+        else CompiledPowerCommand(kind="voltage", voltage_V=value)
+    )
+
+
 def prescribed_electron_density_at(
-    case: CaseSpec,
+    case: ResolvedCase,
     prescribed_electron_profile: PrescribedElectronProfile | None,
     time_s: float,
 ) -> dict[str, float]:
@@ -169,7 +206,8 @@ def _waveform_boundaries(
         return []
     if not isinstance(waveform, SquarePulseWaveform):
         assert_never(waveform)
-    phase = start_s + waveform.phase_s
+    origin = start_s if waveform.origin_s is None else waveform.origin_s
+    phase = origin + waveform.phase_s
     if waveform.duty_cycle == 0.0:
         return []
     if waveform.duty_cycle == 1.0:
@@ -185,7 +223,7 @@ def _square_pulse_boundaries(
 ) -> list[float]:
     period = 1.0 / waveform.repetition_Hz
     values: list[float] = []
-    cycle = 0
+    cycle = max(0, int((start_s - phase) // period) - 1)
     while True:
         rising = phase + cycle * period
         falling = rising + waveform.duty_cycle * period
@@ -196,7 +234,7 @@ def _square_pulse_boundaries(
         if start_s < falling < end_s:
             values.append(falling)
         cycle += 1
-        if cycle > MAX_COMPILED_SEGMENTS:
+        if len(values) > MAX_COMPILED_SEGMENTS:
             raise CaseValidationError(
                 "square-pulse recipe creates too many discontinuity segments"
             )
@@ -208,7 +246,8 @@ def _waveform_is_on(waveform: Waveform, time_s: float, step_start_s: float) -> b
         return True
     if not isinstance(waveform, SquarePulseWaveform):
         assert_never(waveform)
-    relative = time_s - step_start_s - waveform.phase_s
+    origin = step_start_s if waveform.origin_s is None else waveform.origin_s
+    relative = time_s - origin - waveform.phase_s
     if relative < 0.0 or waveform.duty_cycle == 0.0:
         return False
     if waveform.duty_cycle == 1.0:
@@ -373,6 +412,7 @@ def _external_bindings_for_step(
                 f"external-table port {port_id!r} has an invalid command type"
             )
         binding = compile_external_binding(model, external_tables, command)
+        binding.validate_interval(start_s, end_s)
         bindings[port_id] = binding
         boundaries.update(_external_binding_boundaries(binding, start_s, end_s))
     return bindings, boundaries

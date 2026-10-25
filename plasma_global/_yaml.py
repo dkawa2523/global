@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import IO, Any
 
 import yaml
@@ -9,6 +10,54 @@ import yaml
 
 class _UniqueKeyLoader(yaml.SafeLoader):
     pass
+
+
+# Use YAML 1.2 scalar meanings without changing PyYAML's global loader.
+# In particular, 012 is decimal and 1:20 is a string, never octal/base-60.
+_UniqueKeyLoader.yaml_implicit_resolvers = {
+    key: [
+        (tag, pattern)
+        for tag, pattern in resolvers
+        if tag
+        not in {
+            "tag:yaml.org,2002:bool",
+            "tag:yaml.org,2002:int",
+            "tag:yaml.org,2002:float",
+            "tag:yaml.org,2002:timestamp",
+        }
+    ]
+    for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+_UniqueKeyLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+    list("tTfF"),
+)
+_UniqueKeyLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:int",
+    re.compile(r"^[+-]?(?:[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$"),
+    list("+-0123456789"),
+)
+
+
+def _construct_integer(loader: _UniqueKeyLoader, node: yaml.ScalarNode) -> int:
+    value = loader.construct_scalar(node)
+    digits = value.lstrip("+-")
+    base = 8 if digits.startswith("0o") else (16 if digits.startswith("0x") else 10)
+    return int(value, base)
+
+
+_UniqueKeyLoader.add_constructor("tag:yaml.org,2002:int", _construct_integer)
+_UniqueKeyLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"^[+-]?(?:(?:[0-9]+\.[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
+        r"|[0-9]+[eE][+-]?[0-9]+|\.(?:inf|Inf|INF|nan|NaN|NAN))$"
+    ),
+    list("+-0123456789."),
+)
 
 
 def _construct_unique_mapping(

@@ -39,7 +39,7 @@ saved_output:
   peak_saved_electron_density_m3: 3.571898e17
   peak_saved_electron_density_time_s: 1.151027e-5
 comparison_note: >
-  Electron density is the same broad order as the local Ar LXCat production
+  Electron density is the same broad order as the local experimental Ar LXCat trend
   case, but the regimes differ strongly: ZDPlaskin example2 is a high-pressure,
   tiny-volume external-circuit discharge with Ar* and Ar2+ chemistry, while the
   local baseline is a low-pressure two-zone absorbed-power ICP model with no

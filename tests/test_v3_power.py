@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -252,6 +253,99 @@ def test_external_table_is_strict_and_interpolated(tmp_path: Path) -> None:
     assert result.reduced_field_Td == 2.0
     with pytest.raises(ModelDomainError, match="outside"):
         port.evaluate(2.0, STATE, None)
+
+
+@pytest.mark.parametrize(
+    ("interpolation", "expected_total"), [("linear", 90.0), ("previous", 40.0)]
+)
+def test_external_vi_power_uses_scaled_interpolated_physical_inputs(
+    tmp_path: Path, interpolation: str, expected_total: float
+) -> None:
+    path = tmp_path / "vi.csv"
+    path.write_text(
+        "time_s,voltage_V,current_A,gas_power_W\n0,2,2,1\n1,4,4,1\n", encoding="utf-8"
+    )
+    binding = replace(
+        _external_port(path, port_id="table", zone_id="plasma").default,
+        interpolation=interpolation,
+        voltage_scale=2.0,
+        current_scale=5.0,
+        power_scale=3.0,
+    )
+    table = binding.bind_previous(0.5) if interpolation == "previous" else binding
+    port = ExternalTablePowerPort("table", "plasma", binding)
+    evaluated = port.evaluate(
+        0.5, STATE, CompiledPowerCommand(kind="external_table", external_table=table)
+    )
+    assert evaluated.electron_power_W + evaluated.gas_power_W == pytest.approx(
+        3.0 * expected_total
+    )
+    assert evaluated.gas_power_W == 3.0
+
+
+def test_external_absorbed_power_is_total_including_gas_partition(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "total.csv"
+    path.write_text(
+        "time_s,absorbed_power_W,gas_power_W\n0,10,3\n1,20,5\n", encoding="utf-8"
+    )
+    evaluated = _external_port(path, port_id="table", zone_id="plasma").evaluate(
+        0.5, STATE, None
+    )
+    assert evaluated.electron_power_W == 11.0
+    assert evaluated.gas_power_W == 4.0
+
+
+def test_external_binding_rejects_scaling_a_missing_column(tmp_path: Path) -> None:
+    path = tmp_path / "power.csv"
+    path.write_text("time_s,electron_power_W\n0,1\n1,1\n", encoding="utf-8")
+    port = _external_port(path, port_id="table", zone_id="plasma")
+    with pytest.raises(CaseValidationError, match="corresponding CSV column"):
+        replace(port.default, voltage_scale=2.0)
+
+
+@pytest.mark.parametrize(
+    ("update", "message"),
+    [
+        ({"interpolation": "cubic"}, "interpolation must"),
+        ({"bounds": "clip"}, "bounds must"),
+        ({"power_scale": np.nan}, "scales must be finite"),
+        ({"time_offset_s": np.inf}, "offset and potential"),
+        ({"gap_m": -1.0}, "finite and positive"),
+        ({"gap_m": 0.1}, "gap_m requires voltage"),
+        ({"total_density_m3": 1e20}, "total_density_m3 requires gap"),
+    ],
+)
+def test_external_binding_rejects_unusable_controls(
+    tmp_path: Path, update: dict, message: str
+) -> None:
+    path = tmp_path / "power.csv"
+    path.write_text("time_s,electron_power_W\n0,1\n1,1\n", encoding="utf-8")
+    port = _external_port(path, port_id="table", zone_id="plasma")
+    with pytest.raises(CaseValidationError, match=message):
+        replace(port.default, **update)
+
+
+def test_dc_field_does_not_report_zero_for_an_undefined_density() -> None:
+    port = DCSeriesPort(
+        "dc",
+        "plasma",
+        ballast_resistance_ohm=1.0,
+        gap_m=0.1,
+        electrode_area_m2=0.01,
+        configured_mobility_m2_V_s=0.5,
+        default_voltage_V=10.0,
+    )
+    with pytest.raises(ModelDomainError, match="positive neutral density"):
+        port.evaluate(0.0, replace(STATE, neutral_density_m3=0.0), None)
+
+
+def test_vi_forcing_rejects_negative_power_between_valid_knots(tmp_path: Path) -> None:
+    path = tmp_path / "vi.csv"
+    path.write_text("time_s,voltage_V,current_A\n0,-2,-3\n1,4,5\n", encoding="utf-8")
+    with pytest.raises(CaseValidationError, match="electron power cannot be negative"):
+        _external_port(path, port_id="table", zone_id="plasma")
 
 
 def test_external_table_rejects_unknown_columns(tmp_path: Path) -> None:

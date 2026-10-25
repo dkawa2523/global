@@ -190,6 +190,7 @@ def evaluate_wall(
                     bohm_speed_m_s=transport_speed,
                     electron_energy_loss_J_m3_s=energy_loss,
                     branch_rates_m3_s=branch_rates,
+                    sheath_energy_eV=sheath_energy_eV,
                 )
             )
     return WallEvaluation(

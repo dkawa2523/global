@@ -14,8 +14,6 @@ from plasma_global.chemistry._contracts import cross_section_support_error
 from plasma_global.chemistry._data_csv import (
     electron_energy_values,
     load_cross_section_curve,
-    load_reactions,
-    load_species,
 )
 from plasma_global.chemistry.data import (
     ChemistryData,
@@ -72,6 +70,7 @@ def _optional_path(base: Path, value: object, where: str) -> Path | None:
 
 
 _RATE_KEYS: dict[str, set[str]] = {
+    "electron_table": {"rate_id", "branching_yield", "overall_order"},
     "electron_impact": {"cross_section", "branching_yield"},
     "arrhenius": {"A", "beta", "activation_eV", "overall_order"},
     "constant": {"value", "overall_order"},
@@ -96,6 +95,7 @@ _RATE_KEYS: dict[str, set[str]] = {
 }
 
 _RATE_REQUIRED: dict[str, set[str]] = {
+    "electron_table": {"rate_id"},
     "electron_impact": {"cross_section", "branching_yield"},
     "arrhenius": {"A", "beta", "activation_eV"},
     "constant": {"value"},
@@ -222,7 +222,13 @@ def _validate_rate_parameters(kind: str, model: Mapping[str, Any], where: str) -
         raise ChemistryError(f"{where} is missing: {', '.join(missing)}")
     if "overall_order" in model:
         _finite_number(model, "overall_order", where, minimum=0.0)
+    if kind == "electron_table":
+        _required_text(model["rate_id"], f"{where}.rate_id")
+        if "branching_yield" in model:
+            _finite_number(model, "branching_yield", where, minimum=0.0)
+        return
     if kind in {
+        "electron_table",
         "electron_impact",
         "arrhenius",
         "constant",
@@ -241,6 +247,12 @@ def _load_rate_models(
     raw = _yaml_mapping(path)
     _only_keys(raw, {"rate_models"}, str(path))
     models = _mapping(raw.get("rate_models"), f"{path}.rate_models")
+    return parse_rate_models(models, path, source_files)
+
+
+def parse_rate_models(
+    models: dict[str, Any], path: Path, source_files: list[Path]
+) -> Mapping[str, RateModelData]:
     result: dict[str, RateModelData] = {}
     for model_id, value in models.items():
         model = _mapping(value, f"{path}.rate_models.{model_id}")
@@ -352,56 +364,8 @@ def _load_cross_sections(
 
 
 def load_chemistry(path: str | Path) -> ChemistryData:
-    """Load a canonical v3 chemistry manifest and all referenced SI data."""
+    """Read one reusable schema-v4 chemistry definition."""
+    from plasma_global.chemistry._data_yaml import load_definition
 
     source = Path(path).resolve()
-    if not source.is_file():
-        raise ChemistryError(f"chemistry manifest does not exist: {source}")
-    raw = _yaml_mapping(source)
-    allowed = {
-        "schema_version",
-        "species",
-        "gas_reactions",
-        "boundary_reactions",
-        "surface_reactions",
-        "rate_models",
-        "cross_sections",
-        "experimental",
-        "provenance",
-    }
-    _only_keys(raw, allowed, str(source))
-    if raw.get("schema_version") != 3:
-        raise ChemistryError(f"{source}: chemistry schema_version must be 3")
-    base = source.parent
-    species_path = _required_path(base, raw.get("species"), "chemistry.species")
-    gas_path = _required_path(base, raw.get("gas_reactions"), "chemistry.gas_reactions")
-    rate_path = _required_path(base, raw.get("rate_models"), "chemistry.rate_models")
-    boundary_path = _optional_path(
-        base, raw.get("boundary_reactions"), "chemistry.boundary_reactions"
-    )
-    surface_path = _optional_path(
-        base, raw.get("surface_reactions"), "chemistry.surface_reactions"
-    )
-    cross_section_path = _optional_path(
-        base, raw.get("cross_sections"), "chemistry.cross_sections"
-    )
-    experimental = _mapping(raw.get("experimental", {}), "chemistry.experimental")
-    provenance = _mapping(raw.get("provenance", {}), "chemistry.provenance")
-    source_files = [source, species_path, gas_path, rate_path]
-    source_files.extend(
-        item
-        for item in (boundary_path, surface_path, cross_section_path)
-        if item is not None
-    )
-    return ChemistryData(
-        source=source,
-        species=load_species(species_path),
-        gas_reactions=load_reactions(gas_path),
-        boundary_reactions=load_reactions(boundary_path, family="boundary"),
-        surface_reactions=load_reactions(surface_path, family="surface"),
-        rate_models=_load_rate_models(rate_path, source_files),
-        cross_sections=_load_cross_sections(cross_section_path, source_files),
-        experimental=MappingProxyType(experimental),
-        provenance=MappingProxyType(provenance),
-        source_files=tuple(dict.fromkeys(source_files)),
-    )
+    return load_definition(_yaml_mapping(source), source, source.parent)

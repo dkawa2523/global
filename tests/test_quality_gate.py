@@ -157,6 +157,40 @@ def test_secret_baseline_update_preserves_review_decision() -> None:
     assert merged["results"]["tests/example.py"][0]["is_secret"] is False
 
 
+@pytest.mark.parametrize("review", [False, True, None])
+def test_new_secret_exception_requires_explicit_false_positive_review(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, review: bool | None
+) -> None:
+    import json
+
+    from tools.quality_gate import baselines
+
+    path = tmp_path / "baseline.json"
+    path.write_text(
+        json.dumps(
+            {
+                "results": {
+                    "example.py": [
+                        {
+                            "type": "checksum",
+                            "hashed_secret": "fingerprint",
+                            "is_secret": review,
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(baselines, "SECRETS_BASELINE_PATH", path)
+    monkeypatch.setattr(baselines, "_base_ref", lambda: "base")
+    monkeypatch.setattr(baselines, "_read_json_at_ref", lambda *_: {})
+    if review is False:
+        baselines._check_secret_reviews()
+    else:
+        with pytest.raises(QualityFailure, match="explicit false-positive review"):
+            baselines._check_secret_reviews()
+
+
 def test_secret_fingerprints_preserve_duplicate_counts() -> None:
     fingerprint_key = "hashed_" + chr(115) + "ecret"
     finding = {"type": "checksum", fingerprint_key: "fingerprint"}

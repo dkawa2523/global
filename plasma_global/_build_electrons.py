@@ -1,26 +1,28 @@
-"""Electron-model compilation used by the schema-v3 composition root."""
+"""Electron-model compilation used by the schema-v4 composition root."""
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, assert_never
 
 from plasma_global.chemistry.data import ChemistryData
 from plasma_global.errors import CaseValidationError
-from plasma_global.input.schema import (
+from plasma_global.input._resolved_case import (
     ApproximateTwoTermElectronModel,
-    CaseSpec,
     MaxwellianElectronModel,
     PrescribedElectronDensity,
     QuasiNeutralElectronDensity,
+    ResolvedCase,
     TableElectronModel,
 )
-from plasma_global.input.schema import (
+from plasma_global.input._resolved_case import (
     ElectronEnergyClosure as ElectronEnergyClosureConfig,
 )
-from plasma_global.input.schema import LocalFieldClosure as LocalFieldClosureConfig
+from plasma_global.input._resolved_case import (
+    LocalFieldClosure as LocalFieldClosureConfig,
+)
 from plasma_global.models.electrons import (
     ElectronClosure,
     ElectronEnergyClosure,
@@ -36,11 +38,22 @@ def _required_table_rate_ids(chemistry_data: ChemistryData) -> tuple[str, ...]:
         if (model := chemistry_data.rate_models[str(reaction.rate_model)]).kind
         == "electron_impact"
     }
+    values.update(
+        str(model.parameters["rate_id"])
+        for reaction in chemistry_data.gas_reactions
+        if (model := chemistry_data.rate_models[str(reaction.rate_model)]).kind
+        == "electron_table"
+    )
+    values.update(
+        cross_section.id
+        for cross_section in chemistry_data.cross_sections.values()
+        if cross_section.kind == "momentum_transfer"
+    )
     return tuple(sorted(values))
 
 
 def _compile_approximate_two_term(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     initial_densities: Mapping[str, Mapping[str, float]],
 ) -> tuple[ElectronClosure, Mapping[str, TabulatedElectronKinetics], Mapping[str, Any]]:
@@ -75,79 +88,53 @@ def _compile_approximate_two_term(
     )
 
 
-def _initial_neutral_densities(
-    chemistry_data: ChemistryData,
-    initial_densities: Mapping[str, Mapping[str, float]],
-) -> dict[str, float]:
-    neutral_ids = tuple(
-        species.id
-        for species in chemistry_data.species
-        if species.phase == "gas" and species.charge == 0
+def _needs_table_mobility(case: ResolvedCase) -> bool:
+    return any(
+        port.model.kind == "dc_series"
+        and (
+            isinstance(case.models.electron_closure, LocalFieldClosureConfig)
+            or port.model.electron_mobility_m2_V_s is None
+        )
+        for port in case.reactor.power_ports
     )
-    return {
-        zone_id: sum(
-            float(densities.get(species_id, 0.0)) for species_id in neutral_ids
-        )
-        for zone_id, densities in initial_densities.items()
-    }
-
-
-def _table_mobility_reference(
-    config: TableElectronModel,
-    neutral_density_by_zone: Mapping[str, float],
-) -> tuple[float, str]:
-    explicit = config.mobility_reference_neutral_density_m3
-    if explicit is not None:
-        return float(explicit), "input"
-    values = tuple(neutral_density_by_zone.values())
-    if not values or values[0] <= 0.0:
-        raise CaseValidationError(
-            "table electron mobility requires positive initial neutral density"
-        )
-    reference = values[0]
-    if any(
-        not math.isclose(value, reference, rel_tol=1.0e-12, abs_tol=0.0)
-        for value in values[1:]
-    ):
-        raise CaseValidationError(
-            "table electron mobility shared by zones with different initial neutral "
-            "densities requires mobility_reference_neutral_density_m3"
-        )
-    return reference, "uniform_initial_neutral_density"
 
 
 def _compile_table(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     initial_densities: Mapping[str, Mapping[str, float]],
 ) -> tuple[ElectronClosure, Mapping[str, TabulatedElectronKinetics], Mapping[str, Any]]:
     config = case.models.electrons
     if not isinstance(config, TableElectronModel):
         raise TypeError("expected tabulated electron configuration")
-    reference_density, reference_source = _table_mobility_reference(
-        config,
-        _initial_neutral_densities(chemistry_data, initial_densities),
-    )
-    table = TabulatedElectronKinetics.from_hdf5(
+    del initial_densities
+    table = TabulatedElectronKinetics.from_csv(
         config.file,
+        columns=config.columns,
         lookup=config.lookup,
         bounds=config.bounds_policy,
         required_rate_ids=_required_table_rate_ids(chemistry_data),
-        optional_rate_ids=tuple(
-            sorted(
-                cross_section.id
-                for cross_section in chemistry_data.cross_sections.values()
-                if cross_section.kind == "momentum_transfer"
-            )
-        ),
-        mobility_reference_neutral_density_m3=reference_density,
+        mobility_reference_neutral_density_m3=config.mobility_reference_neutral_density_m3,
+        require_mobility=_needs_table_mobility(case),
     )
+    _validate_mobility_source(case, table)
     by_zone = MappingProxyType({zone.zone_id: table for zone in case.reactor.zones})
     provenance = MappingProxyType(
         {
-            "mobility_scaling": "inverse_neutral_density",
-            "mobility_reference_neutral_density_m3": reference_density,
-            "mobility_reference_source": reference_source,
+            "mobility_scaling": (
+                "inverse_neutral_density"
+                if table.mobility_quantity is not None
+                else None
+            ),
+            "mobility_quantity": table.mobility_quantity,
+            "mobility_reference_neutral_density_m3": (
+                table.mobility_reference_neutral_density_m3
+            ),
+            "mobility_reference_source": "table_input",
+            "source": config.provenance,
+            "momentum_rate_ids": tuple(
+                name for name in table.rate_tables if name.startswith("momentum:")
+            ),
         }
     )
     closure = case.models.electron_closure
@@ -162,14 +149,33 @@ def _compile_table(
     assert_never(closure)
 
 
+def _validate_mobility_source(
+    case: ResolvedCase, table: TabulatedElectronKinetics
+) -> None:
+    for port in case.reactor.power_ports:
+        if (
+            port.model.kind == "dc_series"
+            and port.model.electron_mobility_m2_V_s is not None
+            and table.mobility_quantity is not None
+        ):
+            raise CaseValidationError(
+                f"port {port.port_id!r}: choose table mobility or configured mobility"
+            )
+
+
 def compile_electrons(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     initial_densities: Mapping[str, Mapping[str, float]],
 ) -> tuple[ElectronClosure, Mapping[str, TabulatedElectronKinetics], Mapping[str, Any]]:
     """Compile the configured electron closure and optional kinetic tables."""
 
     config = case.models.electrons
+    if not isinstance(config, TableElectronModel) and any(
+        chemistry_data.rate_models[str(reaction.rate_model)].kind == "electron_table"
+        for reaction in chemistry_data.gas_reactions
+    ):
+        raise CaseValidationError("electron_table reactions require a coefficient CSV")
     if isinstance(config, MaxwellianElectronModel):
         if not isinstance(case.models.electron_closure, ElectronEnergyClosureConfig):
             raise CaseValidationError(
@@ -183,7 +189,7 @@ def compile_electrons(
     assert_never(config)
 
 
-def compile_electron_density(case: CaseSpec) -> Any | None:
+def compile_electron_density(case: ResolvedCase) -> Any | None:
     """Compile the optional prescribed electron-density provider."""
 
     config = case.models.electron_density
@@ -194,10 +200,18 @@ def compile_electron_density(case: CaseSpec) -> Any | None:
 
         profile = PrescribedElectronProfile.from_csv(
             config.file,
+            columns=config.columns,
             zone_columns=config.zone_columns or None,
             interpolation=config.interpolation,
             bounds="hold" if config.hold == "edge" else "error",
         )
+        if config.time_offset_s != 0.0:
+            profile = replace(profile, time_s=profile.time_s + config.time_offset_s)
+        zone_ids = {zone.zone_id for zone in case.reactor.zones}
+        if unknown := set(profile.density_m3_by_zone) - zone_ids - {"*"}:
+            raise CaseValidationError(
+                f"electron profile selects unknown zones: {sorted(unknown)}"
+            )
         for zone in case.reactor.zones:
             profile.density(case.recipe.start_time_s, zone.zone_id)
             profile.density(case.recipe.end_time_s, zone.zone_id)

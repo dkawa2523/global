@@ -37,7 +37,11 @@ def _argon_model() -> ApproximateTwoTermEEDF:
 def test_approximate_two_term_returns_normalized_finite_quantities() -> None:
     result = _argon_model().evaluate(80.0, {"Ar": 2.4e20})
 
-    assert np.isclose(np.trapezoid(result.distribution_eV_inv, result.energy_eV), 1.0)
+    probability = 0.5 * np.dot(
+        result.distribution_eV_inv[:-1] + result.distribution_eV_inv[1:],
+        np.diff(result.energy_eV),
+    )
+    assert np.isclose(probability, 1.0)
     assert np.all(result.distribution_eV_inv >= 0.0)
     assert np.all(np.isfinite(result.distribution_eV_inv))
     assert np.all(

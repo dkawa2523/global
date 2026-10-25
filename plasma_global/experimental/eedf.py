@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Literal
 
 import numpy as np
+from scipy.integrate import trapezoid
 
 ELECTRON_CHARGE_C = 1.602176634e-19
 ELECTRON_MASS_KG = 9.1093837015e-31
@@ -71,7 +72,7 @@ def _validate_terminal_bin_probability(
 ) -> None:
     """Reject a solved EEDF whose final energy bin still carries material mass."""
 
-    terminal_mass = float(np.trapezoid(distribution_eV_inv[-2:], energy_eV[-2:]))
+    terminal_mass = float(trapezoid(distribution_eV_inv[-2:], energy_eV[-2:]))
     if terminal_mass > _MAX_TERMINAL_BIN_PROBABILITY:
         raise ValueError(
             "approximate two-term EEDF energy_max_eV is too low: "
@@ -319,12 +320,12 @@ class ApproximateTwoTermEEDF:
         log_distribution[1:] = -np.cumsum(step[:-1])
         distribution = np.exp(log_distribution - np.max(log_distribution))
         distribution /= np.sqrt(energy + 0.02)
-        distribution /= max(float(np.trapezoid(distribution, energy)), 1.0e-300)
+        distribution /= max(float(trapezoid(distribution, energy)), 1.0e-300)
         return distribution
 
     def _rate(self, sigma_m2: np.ndarray, distribution: np.ndarray) -> float:
         return float(
-            np.trapezoid(sigma_m2 * self._speed_m_s * distribution, self.energy_eV)
+            trapezoid(sigma_m2 * self._speed_m_s * distribution, self.energy_eV)
         )
 
     def _transport(
@@ -334,7 +335,7 @@ class ApproximateTwoTermEEDF:
         mobility = ELECTRON_CHARGE_C / max(
             ELECTRON_MASS_KG * momentum_frequency_s, 1.0e-300
         )
-        mean_energy = float(np.trapezoid(self.energy_eV * distribution, self.energy_eV))
+        mean_energy = float(trapezoid(self.energy_eV * distribution, self.energy_eV))
         diffusion = mobility * (2.0 / 3.0) * mean_energy
         return mobility, diffusion, mean_energy
 

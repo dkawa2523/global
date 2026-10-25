@@ -9,25 +9,25 @@ import plasma_global.input.compile_experimental as compile_module
 from plasma_global import load_case
 from plasma_global.chemistry.data import ChemistryData, load_chemistry
 from plasma_global.errors import CaseValidationError
+from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input.compile_experimental import (
     compile_experimental_accumulator,
 )
-from plasma_global.input.schema import CaseSpec
 
 ROOT = Path(__file__).parents[1]
-MINIMAL = ROOT / "tests" / "fixtures" / "v3_minimal" / "case.yaml"
-SMOKE = ROOT / "examples" / "v3" / "cases" / "smoke.yaml"
+MINIMAL = ROOT / "tests" / "fixtures" / "minimal" / "case.yaml"
+SMOKE = ROOT / "plasma_global" / "assets" / "examples" / "cases" / "smoke.yaml"
 
 
-def _smoke_inputs() -> tuple[CaseSpec, ChemistryData]:
+def _smoke_inputs() -> tuple[ResolvedCase, ChemistryData]:
     case = load_case(SMOKE)
     return case, load_chemistry(case.chemistry.manifest)
 
 
-def _updated_case(case: CaseSpec, **updates: object) -> CaseSpec:
+def _updated_case(case: ResolvedCase, **updates: object) -> ResolvedCase:
     data = case.model_dump(mode="python")
     data.update(updates)
-    return CaseSpec.model_validate(data)
+    return ResolvedCase.model_validate(data)
 
 
 def test_compiles_film_and_inventory_event_contract() -> None:
@@ -123,22 +123,11 @@ def test_surface_event_template_validation_precedes_unbound_inventory() -> None:
         )
 
 
-def test_absent_or_stop_only_experimental_state_needs_no_accumulator() -> None:
+def test_absent_experimental_state_needs_no_accumulator() -> None:
     case = load_case(MINIMAL)
     chemistry = load_chemistry(case.chemistry.manifest)
 
     assert compile_experimental_accumulator(case, chemistry, None) == (None, ())
-
-    stop_only = _updated_case(
-        case,
-        experimental={
-            "stop_when_quasi_steady": {
-                "relative_rhs_norm_s_inv": 1.0e-3,
-                "min_time_s": 0.0,
-            }
-        },
-    )
-    assert compile_experimental_accumulator(stop_only, chemistry, None) == (None, ())
 
 
 def test_extensions_require_chemistry_declared_state() -> None:
@@ -201,7 +190,7 @@ def test_wall_inventory_rejects_empty_or_unbound_configuration() -> None:
 
     data = case.model_dump(mode="python")
     data["experimental"]["film"] = None
-    inventory_only = CaseSpec.model_validate(data)
+    inventory_only = ResolvedCase.model_validate(data)
     with pytest.raises(
         CaseValidationError,
         match=r"wall-inventory events require models\.surface_kinetics",
@@ -209,7 +198,7 @@ def test_wall_inventory_rejects_empty_or_unbound_configuration() -> None:
         compile_experimental_accumulator(inventory_only, chemistry, None)
 
     data["experimental"]["wall_inventory"]["events"][0]["reaction_id"] = "missing"
-    unbound = CaseSpec.model_validate(data)
+    unbound = ResolvedCase.model_validate(data)
     with pytest.raises(
         CaseValidationError,
         match="reference unknown or inapplicable reaction/surface pairs",
@@ -232,7 +221,7 @@ def test_film_event_requires_positive_site_density() -> None:
     case, chemistry = _smoke_inputs()
     data = case.model_dump(mode="python")
     data["reactor"]["surfaces"][0]["site_density_m2"] = 0.0
-    zero_site_density = CaseSpec.model_validate(data)
+    zero_site_density = ResolvedCase.model_validate(data)
 
     with pytest.raises(
         CaseValidationError,

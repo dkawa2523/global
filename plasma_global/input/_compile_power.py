@@ -14,9 +14,7 @@ import numpy as np
 
 from plasma_global.chemistry.compile import CompiledChemistry
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._schema_reactor import _power_coupling_target_error
-from plasma_global.input.schema import (
-    CaseSpec,
+from plasma_global.input._resolved_case import (
     DCSeriesModel,
     ExperimentalCCPModel,
     ExperimentalICPModel,
@@ -25,9 +23,11 @@ from plasma_global.input.schema import (
     ExternalTableModel,
     PowerPortConfig,
     PrescribedPowerModel,
+    ResolvedCase,
     SurfaceConfig,
     ZoneConfig,
 )
+from plasma_global.input._schema_reactor import _power_coupling_target_error
 from plasma_global.models.external_table import ExternalTableBinding, ExternalTableStore
 from plasma_global.models.power import (
     DCSeriesPort,
@@ -63,7 +63,7 @@ def compile_external_binding(
         )
         resolved = model.model_copy(update=overrides)
     return ExternalTableBinding(
-        data=store.get(resolved.file),
+        data=store.get(resolved.file, columns=resolved.columns),
         interpolation=resolved.interpolation,
         bounds=resolved.bounds_policy,
         power_scale=resolved.power_scale,
@@ -138,7 +138,7 @@ def _compile_rf_envelope_port(
 
 
 def _compile_ccp_port(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry: CompiledChemistry,
     port: PowerPortConfig,
     model: ExperimentalCCPModel,
@@ -170,7 +170,7 @@ def _compile_ccp_port(
 
 
 def _compile_power_port(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry: CompiledChemistry,
     external_tables: ExternalTableStore,
     port: PowerPortConfig,
@@ -217,7 +217,7 @@ def _compile_power_port(
 
 
 def compile_power_coordinator(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry: CompiledChemistry,
     external_tables: ExternalTableStore,
 ) -> PowerCoordinator | None:

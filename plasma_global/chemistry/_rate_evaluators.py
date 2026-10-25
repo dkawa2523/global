@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import csv
-import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 
-from plasma_global.chemistry._contracts import (
-    normalized_cross_section_curve,
-)
+from plasma_global.chemistry._maxwell import compile_maxwell_rate
 from plasma_global.chemistry.data import CrossSectionData, RateModelData
 from plasma_global.errors import ChemistryError, ModelDomainError
 
@@ -19,31 +16,9 @@ E_CHARGE = 1.602176634e-19
 ELECTRON_MASS_KG = 9.1093837139e-31
 EV_TO_K = E_CHARGE / 1.380649e-23
 
-# A cross section is never extrapolated past its final energy node.  The table
-# stops where the unresolved energy-weighted Maxwellian tail is negligible.
-_MAXWELL_UNRESOLVED_TAIL_FRACTION = 1.0e-6
-_MAXWELL_MIN_POSITIVE_MEAN_ENERGY_EV = 1.0e-12
-_MAXWELL_TABLE_POINTS = 768
 
 RateEvaluator = Callable[[Any], float]
 RateTableLoader = Callable[[Any], tuple[np.ndarray, np.ndarray]]
-
-
-def _maxwell_tail_cutoff(tolerance: float) -> float:
-    """Return ``x`` where ``integral_x^inf u exp(-u) du`` reaches tolerance."""
-
-    lower, upper = 0.0, 64.0
-    for _ in range(80):
-        middle = 0.5 * (lower + upper)
-        tail = (1.0 + middle) * math.exp(-middle)
-        if tail > tolerance:
-            lower = middle
-        else:
-            upper = middle
-    return upper
-
-
-_MAXWELL_TAIL_CUTOFF = _maxwell_tail_cutoff(_MAXWELL_UNRESOLVED_TAIL_FRACTION)
 
 
 def _rate_table_rows(path: Any) -> list[tuple[float, float]]:
@@ -113,89 +88,6 @@ def _bounded_interp(
     return float(np.interp(x, axis, values))
 
 
-def _maxwell_mean_energy_axis(cross_section: CrossSectionData) -> np.ndarray:
-    maximum_cross_section_energy = float(cross_section.energy_eV[-1])
-    maximum_mean_energy = 1.5 * maximum_cross_section_energy / _MAXWELL_TAIL_CUTOFF
-    if maximum_mean_energy <= _MAXWELL_MIN_POSITIVE_MEAN_ENERGY_EV:
-        raise ChemistryError(
-            f"cross section {cross_section.id!r} ends at "
-            f"{maximum_cross_section_energy:g} eV and cannot support the minimum "
-            "positive Maxwellian mean energy "
-            f"{_MAXWELL_MIN_POSITIVE_MEAN_ENERGY_EV:g} eV with "
-            f"unresolved tail <= {_MAXWELL_UNRESOLVED_TAIL_FRACTION:g}"
-        )
-    positive = np.geomspace(
-        _MAXWELL_MIN_POSITIVE_MEAN_ENERGY_EV,
-        maximum_mean_energy,
-        _MAXWELL_TABLE_POINTS - 1,
-    )
-    return np.concatenate(([0.0], positive))
-
-
-def _weighted_maxwell_moments(
-    lower: np.ndarray, upper: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Integrate ``u exp(-u)`` and ``u**2 exp(-u)`` over each interval."""
-
-    lower_decay = np.exp(-lower)
-    upper_decay = np.exp(-upper)
-    first = (1.0 + lower) * lower_decay - (1.0 + upper) * upper_decay
-    second = (lower**2 + 2.0 * lower + 2.0) * lower_decay - (
-        upper**2 + 2.0 * upper + 2.0
-    ) * upper_decay
-    return first, second
-
-
-def _integrate_piecewise_linear_cross_section(
-    temperature_eV: float,
-    energy_eV: np.ndarray,
-    sigma_m2: np.ndarray,
-) -> float:
-    """Exactly integrate the declared linear cross-section interpolant."""
-
-    energy_low = energy_eV[:-1]
-    energy_high = energy_eV[1:]
-    sigma_low = sigma_m2[:-1]
-    slope = np.diff(sigma_m2) / np.diff(energy_eV)
-    reduced_low = energy_low / temperature_eV
-    reduced_high = energy_high / temperature_eV
-    first, second = _weighted_maxwell_moments(reduced_low, reduced_high)
-    interval_integrals = temperature_eV**2 * (
-        sigma_low * first + slope * temperature_eV * (second - reduced_low * first)
-    )
-    return max(float(np.sum(interval_integrals)), 0.0)
-
-
-def _integrate_maxwell_rates(
-    mean_energy: np.ndarray, energy: np.ndarray, sigma: np.ndarray
-) -> np.ndarray:
-    temperature = 2.0 * mean_energy / 3.0
-    prefactor = 2.0 / np.sqrt(np.pi) * np.sqrt(2.0 * E_CHARGE / ELECTRON_MASS_KG)
-    rates = np.zeros_like(mean_energy)
-    for index, te_eV in enumerate(temperature):
-        if te_eV == 0.0:
-            continue
-        integral = _integrate_piecewise_linear_cross_section(te_eV, energy, sigma)
-        rates[index] = prefactor * integral / te_eV**1.5
-    return rates
-
-
-def maxwell_rate_table(
-    cross_section: CrossSectionData,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Precompute Maxwellian ``<sigma v>`` on a tail-safe mean-energy range."""
-
-    try:
-        energy, sigma = normalized_cross_section_curve(cross_section)
-    except ValueError as exc:
-        raise ChemistryError(str(exc)) from exc
-    mean_energy = _maxwell_mean_energy_axis(cross_section)
-    rates = _integrate_maxwell_rates(mean_energy, energy, sigma)
-    mean_energy.setflags(write=False)
-    rates.setflags(write=False)
-    return mean_energy, rates
-
-
 def _electron_impact_evaluator(
     model: RateModelData, cross_sections: Mapping[str, CrossSectionData]
 ) -> tuple[RateEvaluator, float | None]:
@@ -206,7 +98,7 @@ def _electron_impact_evaluator(
             f"{cross_section_id!r}"
         )
     cross_section = cross_sections[cross_section_id]
-    axis, values = maxwell_rate_table(cross_section)
+    rate = compile_maxwell_rate(cross_section)
     branch = float(model.parameters["branching_yield"])
     if not np.isfinite(branch) or branch < 0.0:
         raise ChemistryError(f"rate model {model.id} has invalid branching_yield")
@@ -215,12 +107,7 @@ def _electron_impact_evaluator(
         supplied = getattr(context, "rate_coefficients", None)
         if supplied is not None and cross_section_id in supplied:
             return branch * float(supplied[cross_section_id])
-        return branch * _bounded_interp(
-            axis,
-            values,
-            context.mean_energy_eV,
-            name="mean_energy_eV (Maxwellian tail-safe range)",
-        )
+        return branch * rate(context.mean_energy_eV)
 
     return electron_impact, cross_section.resolved_electron_energy_transfer_eV
 
@@ -295,6 +182,17 @@ def compile_rate_evaluator(
 
     if model.kind == "electron_impact":
         return _electron_impact_evaluator(model, cross_sections)
+    if model.kind == "electron_table":
+        rate_id = str(model.parameters["rate_id"])
+        branch = float(model.parameters.get("branching_yield", 1.0))
+
+        def supplied_rate(context: Any) -> float:
+            supplied = getattr(context, "rate_coefficients", {})
+            if rate_id not in supplied:
+                raise ModelDomainError(f"electron table requires rate {rate_id!r}")
+            return branch * float(supplied[rate_id])
+
+        return supplied_rate, None
     if model.kind == "arrhenius":
         return _arrhenius_evaluator(model), None
     if model.kind == "constant":

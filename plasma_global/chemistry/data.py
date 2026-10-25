@@ -1,4 +1,4 @@
-"""Public data contract for canonical schema-v3 chemistry.
+"""Public data contract for canonical schema-v4 chemistry.
 
 The immutable objects in this module are the boundary between canonical input
 and model compilation.  Strict file decoding lives in the private
@@ -158,7 +158,7 @@ def parse_equation(equation: str) -> tuple[Mapping[str, float], Mapping[str, flo
 
 
 def load_chemistry(path: str | Path) -> ChemistryData:
-    """Load a canonical v3 chemistry manifest and all referenced SI data."""
+    """Load a schema-v4 chemistry definition and its referenced SI data."""
 
     # The private loader imports these public data classes.  Deferring this
     # implementation import keeps the dependency one-way at module load time.

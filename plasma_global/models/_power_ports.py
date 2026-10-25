@@ -168,9 +168,9 @@ def dc_series_evaluation(
         plasma_voltage = current * plasma_resistance
         absorbed = current * current * plasma_resistance * absorption_fraction
     field = abs(plasma_voltage) / gap_m
-    reduced_field = (
-        field / neutral_density_m3 / TD_TO_V_M2 if neutral_density_m3 > 0.0 else 0.0
-    )
+    if neutral_density_m3 <= 0.0:
+        raise ModelDomainError("DC-series E/N requires positive neutral density")
+    reduced_field = field / neutral_density_m3 / TD_TO_V_M2
     return _PortEvaluation(
         electron_power_W=absorbed,
         gas_power_W=0.0,
@@ -294,44 +294,13 @@ def solve_dc_series_local_field(
     return min(candidates, key=distance_from_selector)
 
 
-def _sample_external_table(
-    table: ExternalTableBinding | ExternalTableSample,
-    time_s: float,
-) -> ExternalTableSample:
-    if isinstance(table, ExternalTableSample):
-        return table
-    data = table.data
-    return ExternalTableSample(
-        electron_power_W=table.power_scale * table._at(data.electron_power_W, time_s),
-        gas_power_W=table.power_scale * table._at(data.gas_power_W, time_s),
-        voltage_V=(
-            None
-            if data.voltage_V is None
-            else table.voltage_scale * table._at(data.voltage_V, time_s)
-        ),
-        current_A=(
-            None
-            if data.current_A is None
-            else table.current_scale * table._at(data.current_A, time_s)
-        ),
-        reduced_field_Td=(
-            None
-            if data.reduced_field_Td is None
-            else table._at(data.reduced_field_Td, time_s)
-        ),
-        gap_m=table.gap_m,
-        total_density_m3=table.total_density_m3,
-        plasma_potential_V=table.plasma_potential_V,
-    )
-
-
 def external_table_evaluation(
     *,
     table: ExternalTableBinding | ExternalTableSample,
     time_s: float,
     neutral_density_m3: float,
 ) -> _PortEvaluation:
-    sample = _sample_external_table(table, time_s)
+    sample = table.sample(time_s) if isinstance(table, ExternalTableBinding) else table
     reduced_field = sample.reduced_field_Td
     if (
         reduced_field is None
@@ -343,11 +312,11 @@ def external_table_evaluation(
             if sample.total_density_m3 is None
             else sample.total_density_m3
         )
-        reduced_field = (
-            abs(sample.voltage_V) / sample.gap_m / density / TD_TO_V_M2
-            if density > 0.0
-            else 0.0
-        )
+        if density <= 0.0:
+            raise ModelDomainError(
+                "voltage-derived E/N requires positive neutral density"
+            )
+        reduced_field = abs(sample.voltage_V) / sample.gap_m / density / TD_TO_V_M2
     observables = {
         "absorbed_power_W": sample.electron_power_W + sample.gas_power_W,
         "plasma_potential_V": sample.plasma_potential_V,

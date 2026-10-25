@@ -11,7 +11,6 @@ from plasma_global.input._schema_base import (
     NonNegativeFloat,
     PositiveFloat,
     StrictModel,
-    _publish_schema_types,
     _require_unique,
 )
 from plasma_global.input._schema_power import PowerPortCommand
@@ -33,6 +32,7 @@ class RecipeCommands(StrictModel):
 
 class RecipeStepConfig(StrictModel):
     step_id: Identifier
+    label: str | None = None
     duration_s: PositiveFloat
     commands: RecipeCommands = Field(default_factory=RecipeCommands)
 
@@ -66,6 +66,3 @@ class RecipeConfig(StrictModel):
             bounds.append((start, end))
             start = end
         return bounds
-
-
-_publish_schema_types(globals())

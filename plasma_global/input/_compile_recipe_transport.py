@@ -10,17 +10,17 @@ from plasma_global.chemistry.compile import CompiledChemistry
 from plasma_global.chemistry.data import ChemistryData
 from plasma_global.core.transport import SCCM_TO_PARTICLES_PER_S, SegmentTransport
 from plasma_global.errors import CaseValidationError
-from plasma_global.input.schema import (
-    CaseSpec,
+from plasma_global.input._resolved_case import (
     EvolvedGasEnergy,
     FixedGasEnergy,
     RecipeStepConfig,
+    ResolvedCase,
 )
 
 _BOLTZMANN_J_K = 1.380649e-23
 
 
-def _evolves_gas_energy(case: CaseSpec) -> bool:
+def _evolves_gas_energy(case: ResolvedCase) -> bool:
     gas_energy = case.models.gas_energy
     if isinstance(gas_energy, EvolvedGasEnergy):
         return True
@@ -62,7 +62,7 @@ def _add_inlet_species(
 
 
 def compile_segment_transport(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
     step: RecipeStepConfig,
@@ -109,7 +109,7 @@ def compile_segment_transport(
 
 
 def step_temperatures(
-    case: CaseSpec, step: RecipeStepConfig
+    case: ResolvedCase, step: RecipeStepConfig
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Resolve explicit surface temperatures and zone wall averages."""
 
@@ -125,7 +125,7 @@ def step_temperatures(
 
 
 def _wall_temperatures_by_zone(
-    case: CaseSpec, overrides: dict[str, float]
+    case: ResolvedCase, overrides: dict[str, float]
 ) -> dict[str, float]:
     values: dict[str, float] = {}
     for zone in case.reactor.zones:

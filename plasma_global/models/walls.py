@@ -230,6 +230,7 @@ class WallFluxRecord:
     bohm_speed_m_s: float
     electron_energy_loss_J_m3_s: float
     branch_rates_m3_s: Mapping[str, float]
+    sheath_energy_eV: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(

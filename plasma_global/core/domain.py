@@ -239,21 +239,6 @@ def _normalized_save_times(
     return save_at
 
 
-def _validate_quasi_steady_controls(
-    threshold_s_inv: float | None, min_time_s: float
-) -> None:
-    if threshold_s_inv is not None and (
-        not math.isfinite(threshold_s_inv) or threshold_s_inv < 0.0
-    ):
-        raise ModelConfigurationError(
-            "experimental quasi-steady threshold must be finite and nonnegative"
-        )
-    if not math.isfinite(min_time_s) or min_time_s < 0.0:
-        raise ModelConfigurationError(
-            "experimental quasi-steady min_time_s must be finite and nonnegative"
-        )
-
-
 @dataclass(frozen=True)
 class SolverSettings:
     """Numerical controls for sequential BDF integration.
@@ -269,8 +254,6 @@ class SolverSettings:
     max_step_s: float | None = None
     sample_interval_s: float | None = None
     save_at_s: tuple[float, ...] | None = None
-    experimental_quasi_steady_threshold_s_inv: float | None = None
-    experimental_quasi_steady_min_time_s: float = 0.0
 
     def __post_init__(self) -> None:
         _validate_solver_tolerances(self.rtol, self.atol)
@@ -284,10 +267,6 @@ class SolverSettings:
                 "sample_interval_s and save_at_s are mutually exclusive"
             )
         object.__setattr__(self, "save_at_s", _normalized_save_times(self.save_at_s))
-        _validate_quasi_steady_controls(
-            self.experimental_quasi_steady_threshold_s_inv,
-            self.experimental_quasi_steady_min_time_s,
-        )
 
 
 __all__ = [

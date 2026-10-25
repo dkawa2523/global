@@ -26,5 +26,5 @@ def test_generated_minimal_case_matches_the_public_schema() -> None:
 
     case = CaseSpec.model_validate(document)
 
-    assert case.schema_version == 3
-    assert case.models.electron_closure.kind == "electron_energy"
+    assert case.schema_version == 4
+    assert case.models.electrons.kind == "energy_balance"

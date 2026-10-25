@@ -13,8 +13,8 @@ from plasma_global.input._schema_base import (
     NonNegativeFloat,
     PositiveFloat,
     StrictModel,
-    _publish_schema_types,
 )
+from plasma_global.input._schema_output import OutputConfig as OutputConfig
 
 
 def _validate_save_times(save_at: list[float] | None) -> None:
@@ -58,23 +58,6 @@ class SolverConfig(StrictModel):
         return self
 
 
-class OutputConfig(StrictModel):
-    observables: list[str] = Field(default_factory=list)
-    summary_series: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def valid_series_selection(self) -> Self:
-        for field_name, values in (
-            ("observables", self.observables),
-            ("summary_series", self.summary_series),
-        ):
-            if any(not value.strip() for value in values):
-                raise ValueError(f"output.{field_name} must not contain empty names")
-            if len(set(values)) != len(values):
-                raise ValueError(f"output.{field_name} must not contain duplicates")
-        return self
-
-
 class ExperimentalFilmConfig(StrictModel):
     """Presence enables chemistry-declared film state."""
 
@@ -115,18 +98,10 @@ class ExperimentalExtensionsConfig(StrictModel):
     """Presence enables experimental chemistry extension state and terms."""
 
 
-class ExperimentalStopWhenQuasiSteadyConfig(StrictModel):
-    """Legacy-named nonterminal quasi-steady observation, not a root solve."""
-
-    relative_rhs_norm_s_inv: NonNegativeFloat = 1.0e-3
-    min_time_s: NonNegativeFloat = 0.0
-
-
 class ExperimentalConfig(StrictModel):
     film: ExperimentalFilmConfig | None = None
     wall_inventory: ExperimentalWallInventoryConfig | None = None
     extensions: ExperimentalExtensionsConfig | None = None
-    stop_when_quasi_steady: ExperimentalStopWhenQuasiSteadyConfig | None = None
 
     @model_validator(mode="after")
     def enables_at_least_one_feature(self) -> Self:
@@ -134,10 +109,6 @@ class ExperimentalConfig(StrictModel):
             self.film is None
             and self.wall_inventory is None
             and self.extensions is None
-            and self.stop_when_quasi_steady is None
         ):
             raise ValueError("experimental must enable at least one explicit feature")
         return self
-
-
-_publish_schema_types(globals())

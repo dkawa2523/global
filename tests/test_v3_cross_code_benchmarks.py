@@ -17,18 +17,19 @@ from tools.benchmarks.build_zdplaskin_rate_table import (
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCES = ROOT / "benchmarks" / "references"
 RAW_ZDP_TABLE = ROOT / "benchmarks" / "raw" / "zdplaskin_example2_eovern"
-CRANE_CASE = ROOT / "examples" / "v3" / "cases" / "crane_two_reaction_argon.yaml"
-ZDP_CASE = ROOT / "examples" / "v3" / "cases" / "zdplaskin_example2.yaml"
-ZDP_TABLE = (
+CRANE_CASE = (
     ROOT
+    / "plasma_global"
+    / "assets"
     / "examples"
-    / "v3"
-    / "chemistry"
-    / "zdplaskin_example2"
-    / "tables"
-    / "zdplaskin_example2_eovern_rates.h5"
+    / "cases"
+    / "crane_two_reaction_argon.yaml"
 )
-ZDP_TABLE_SHA256 = "fa469b82fe486c10d25de10587a0cb3cb057661b7a7d26f201c5f12e678417de"
+ZDP_CASE = (
+    ROOT / "plasma_global" / "assets" / "examples" / "cases" / "zdplaskin_example2.yaml"
+)
+ZDP_TABLE = ROOT / "plasma_global/assets/examples/data/zdplaskin_example2/electrons.csv"
+ZDP_TABLE_SHA256 = "30c8a22acf6c6afc4a1cf9f9c0cc70bc5f0b9b57b6424d5c0b29d35266148100"
 
 
 def _load_yaml(path: Path) -> dict[str, object]:
@@ -57,7 +58,7 @@ def test_zdplaskin_table_is_reproducible_from_strict_raw_inputs(
     tmp_path: Path,
 ) -> None:
     rebuilt = build_zdplaskin_rate_table(
-        tmp_path / "zdplaskin.h5", raw_dir=RAW_ZDP_TABLE
+        tmp_path / "zdplaskin.csv", raw_dir=RAW_ZDP_TABLE
     )
 
     assert _sha256(ZDP_TABLE) == ZDP_TABLE_SHA256

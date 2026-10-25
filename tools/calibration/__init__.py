@@ -1,1 +1,1 @@
-"""Calibration helpers that emit schema-v3 model fragments."""
+"""Calibration helpers that emit current public model and command fragments."""

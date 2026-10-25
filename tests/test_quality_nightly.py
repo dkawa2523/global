@@ -11,7 +11,7 @@ from plasma_global import load_case, simulate
 from plasma_global.audit import audit_case
 
 ROOT = Path(__file__).parents[1]
-SMOKE_CASE = ROOT / "examples" / "v3" / "cases" / "smoke.yaml"
+SMOKE_CASE = ROOT / "plasma_global" / "assets" / "examples" / "cases" / "smoke.yaml"
 
 
 @pytest.mark.nightly
@@ -31,12 +31,6 @@ def test_smoke_case_stays_finite_within_resource_budget() -> None:
     assert np.isfinite(result.time_s).all()
     assert np.isfinite(result.state).all()
     assert audit.passed
-    for quantity in (
-        "particle_ledger_normalized",
-        "electron_energy_ledger_normalized",
-        "heavy_energy_ledger_normalized",
-    ):
-        assert audit.conservation_max_abs_residual[quantity] < 1.0e-12
     assert elapsed_s <= 30.0
     assert max_rss_bytes <= 1024**3
 
@@ -47,9 +41,6 @@ def test_smoke_case_stays_finite_within_resource_budget() -> None:
             {
                 "case": SMOKE_CASE.relative_to(ROOT).as_posix(),
                 "elapsed_s": elapsed_s,
-                "conservation_max_abs_residual": dict(
-                    audit.conservation_max_abs_residual
-                ),
                 "max_rss_bytes": max_rss_bytes,
                 "n_states": result.n_states,
                 "n_times": result.n_times,

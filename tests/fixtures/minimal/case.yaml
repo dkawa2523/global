@@ -1,0 +1,76 @@
+schema_version: 4
+case:
+  name: canonical-minimal
+  description: Minimal executable schema-v4 fixture
+chemistry:
+  file: chemistry/chemistry.yaml
+reactor:
+  chamber_id: chamber
+  description: ''
+  zones:
+    plasma:
+      description: ''
+      volume_m3: 0.01
+      initial:
+        densities_m3:
+          Ar: 2.0e+20
+          Ar_plus: 1000000000000.0
+        seed_densities_m3: {}
+        mean_energy_eV: 3.0
+        pressure_Pa: 0.8283894
+        gas_temperature_K: 300.0
+  edges: {}
+  surfaces:
+    wall:
+      zone_id: plasma
+      area_m2: 0.1
+      temperature_K: 300.0
+      ion_impact_energy_eV: 0.0
+      site_density_m2: 0.0
+      initial_coverages: {}
+      wall_transport:
+        kind: bohm
+        h_factor: 1.0
+        min_h_factor: 0.02
+        max_h_factor: 1.0
+        ion_neutral_cross_section_m2: 1.0e-18
+  gas_inlets: {}
+  pumps: {}
+  power_ports:
+    source:
+      zone_id: plasma
+      coupling_target: ''
+      model:
+        kind: prescribed_power
+        electron_fraction: 1.0
+        gas_fraction: 0.0
+models:
+  electrons:
+    kind: energy_balance
+    coefficients:
+      kind: maxwellian
+  electron_density:
+    kind: quasineutral
+  gas_energy:
+    kind: fixed
+solver:
+  method: BDF
+  rtol: 1.0e-06
+  atol: 1.0e-14
+  max_step_s: 2.5e-08
+output:
+  observables: []
+  summary_series: []
+run:
+  steps:
+  - duration_s: 1.0e-07
+    commands:
+      gas_inlets: {}
+      power_ports:
+        source:
+          absorbed_power_W: 1.0e-06
+          waveform:
+            kind: continuous
+      surfaces: {}
+    label: powered
+  start_time_s: 0.0

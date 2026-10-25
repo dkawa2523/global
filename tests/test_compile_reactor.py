@@ -9,28 +9,28 @@ import pytest
 
 from plasma_global.build import compile_case
 from plasma_global.errors import CaseValidationError
+from plasma_global.input._resolved_case import (
+    ExternalTableCommand,
+    ExternalTableModel,
+    ResolvedCase,
+)
 from plasma_global.input.compile_reactor import (
     compile_external_binding,
     compile_initial_densities,
 )
 from plasma_global.input.load import load_case
-from plasma_global.input.schema import (
-    CaseSpec,
-    ExternalTableCommand,
-    ExternalTableModel,
-)
 from plasma_global.models.external_table import ExternalTableStore
 
-FIXTURE = Path(__file__).parent / "fixtures" / "v3_minimal" / "case.yaml"
+FIXTURE = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
 
 
 def _updated_case(
-    case: CaseSpec,
+    case: ResolvedCase,
     update: Callable[[dict[str, Any]], None],
-) -> CaseSpec:
+) -> ResolvedCase:
     data = case.model_dump(mode="python")
     update(data)
-    return CaseSpec.model_validate(data)
+    return ResolvedCase.model_validate(data)
 
 
 def test_initial_densities_keep_read_only_mapping_and_state_array_contract() -> None:
@@ -85,7 +85,8 @@ def test_external_table_command_overrides_only_explicit_fields(tmp_path: Path) -
     override_path = tmp_path / "override.csv"
     for path, power_W in ((default_path, 1.0), (override_path, 2.0)):
         path.write_text(
-            f"time_s,electron_power_W\n0.0,{power_W}\n1.0,{power_W}\n",
+            f"time_s,electron_power_W,voltage_V,current_A\n"
+            f"0.0,{power_W},2,1\n1.0,{power_W},2,1\n",
             encoding="utf-8",
         )
     model = ExternalTableModel(

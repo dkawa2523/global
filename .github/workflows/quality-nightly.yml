@@ -29,10 +29,10 @@ jobs:
           enable-cache: true
 
       - name: Sync the locked quality environment
-        run: uv sync --frozen --extra dev
+        run: uv sync --frozen --all-extras
 
       - name: Run seeded, stress, and mutation checks
-        run: uv run --frozen python -m tools.quality nightly --native
+        run: uv run --frozen --all-extras python -m tools.quality nightly --native
 
       - name: Upload nightly reports
         if: always()

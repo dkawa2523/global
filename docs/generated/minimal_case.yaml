@@ -1,33 +1,36 @@
-schema_version: 3
+schema_version: 4
 case:
   name: minimal_argon
 chemistry:
-  manifest: chemistry/chemistry.yaml
+  species:
+  - id: e
+    charge: -1
+    mass_amu: 0.00054858
+    state_tags:
+    - electron
+  - id: Ar
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+  - id: Ar_plus
+    charge: 1
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
 reactor:
-  chamber_id: reactor
   zones:
-  - zone_id: plasma
-    volume_m3: 0.01
-    pressure_Pa: 9.94067280414195
-    gas_temperature_K: 300.0
-    initial_densities_m3:
-      Ar: 2.4e+21
-      Ar_plus: 1000000000000.0
-    initial_mean_energy_eV: 3.0
-recipe:
-  recipe_id: one_step
-  steps:
-  - step_id: hold
-    duration_s: 0.001
+    plasma:
+      volume_m3: 0.01
+      initial:
+        pressure_Pa: 1.0
+        gas_temperature_K: 300.0
+        mole_fractions:
+          Ar: 1.0
+        seed_densities_m3:
+          Ar_plus: 1000000000000.0
+        mean_energy_eV: 3.0
 models:
   electrons:
-    kind: maxwellian
-  electron_closure:
-    kind: electron_energy
-  electron_density:
-    kind: quasineutral
-  gas_energy:
-    kind: fixed
-solver:
-  method: BDF
-output: {}
+    kind: energy_balance
+run:
+  duration_s: 0.001

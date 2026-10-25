@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
-from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 
-import plasma_global
 from plasma_global import cli
 from plasma_global.audit import AuditReport
 from plasma_global.core.result import SimulationResult
+from plasma_global.input._schema_output import OutputConfig
 from plasma_global.output import ResultPaths
 
 
@@ -25,23 +24,17 @@ def _result(*, success: bool = True) -> SimulationResult:
     )
 
 
-def test_top_level_api_exposes_only_three_operations() -> None:
-    assert plasma_global.__all__ == ["load_case", "simulate", "write_result"]
-
-
-def test_cli_validate_is_monkeypatchable_without_build(tmp_path, monkeypatch) -> None:
-    case = object()
-    compiled: list[object] = []
-    monkeypatch.setattr(cli, "load_case", lambda _path: case)
-    monkeypatch.setattr(cli, "_compile_case", compiled.append)
-
-    assert cli.main(["validate", str(tmp_path / "case.yaml")]) == 0
-    assert compiled == [case]
+def test_cli_validate_reports_its_scope_and_assessment(capsys) -> None:
+    case = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
+    assert cli.main(["validate", str(case)]) == 0
+    captured = capsys.readouterr()
+    assert "integration has not run" in captured.out
+    assert "Missing neutral momentum-transfer data" in captured.err
 
 
 def test_cli_run_uses_three_public_operations(tmp_path, monkeypatch) -> None:
     output = tmp_path / "run"
-    case = object()
+    case = SimpleNamespace(output=OutputConfig())
     result = _result()
     calls: list[tuple[SimulationResult, Path]] = []
     monkeypatch.setattr(cli, "load_case", lambda _path: case)
@@ -61,33 +54,12 @@ def test_cli_run_uses_three_public_operations(tmp_path, monkeypatch) -> None:
     assert calls == [(result, output)]
 
 
-def test_cli_run_returns_failure_when_result_audit_has_errors(
-    tmp_path, monkeypatch
-) -> None:
-    output = tmp_path / "run"
-    result = _result()
-    monkeypatch.setattr(cli, "load_case", lambda _path: object())
-    monkeypatch.setattr(cli, "simulate", lambda _case: result)
-    monkeypatch.setattr(
-        cli,
-        "write_result",
-        lambda _result, directory: ResultPaths(
-            directory,
-            directory / "result.h5",
-            directory / "summary.yaml",
-            audit_passed=False,
-        ),
-    )
-
-    assert cli.main(["run", "case.yaml", "--output", str(output)]) == 1
-
-
-def test_cli_run_preserves_failed_solver_status_with_legacy_writer(
-    tmp_path, monkeypatch
-) -> None:
+def test_cli_run_preserves_failed_solver_status(tmp_path, monkeypatch) -> None:
     output = tmp_path / "run"
     result = _result(success=False)
-    monkeypatch.setattr(cli, "load_case", lambda _path: object())
+    monkeypatch.setattr(
+        cli, "load_case", lambda _path: SimpleNamespace(output=OutputConfig())
+    )
     monkeypatch.setattr(cli, "simulate", lambda _case: result)
     monkeypatch.setattr(
         cli,
@@ -150,39 +122,10 @@ def test_cli_audit_export_and_plot_use_canonical_syntax(tmp_path, monkeypatch) -
     assert calls["plot"][2]["series"] == ["density"]
 
 
-def test_cli_migrate_v2_calls_the_real_migration_boundary(
-    tmp_path, monkeypatch
-) -> None:
-    migration = import_module("plasma_global.input.migrate_v2")
-
-    source = tmp_path / "v2.yaml"
-    destination = tmp_path / "v3.yaml"
-    called: list[tuple[Path, Path]] = []
-
-    def fake_migrate(source_path, destination_path, **options):
-        called.append((source_path, destination_path))
-        assert options == {
-            "boundary_products": None,
-            "cross_section_segments": None,
-        }
-        return SimpleNamespace(
-            report=SimpleNamespace(warnings=("review me",), unused_keys=("old.key",))
-        )
-
-    monkeypatch.setattr(migration, "migrate_v2_to_yaml", fake_migrate)
-
-    assert cli.main(["migrate-v2", str(source), "--output", str(destination)]) == 0
-    assert called == [(source, destination)]
-
-
 def test_cli_models_lists_schema_v3_discriminator_ids(capsys) -> None:
     assert cli.main(["models", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
 
-    assert payload["electrons"] == [
-        "maxwellian",
-        "table",
-        "experimental.approximate_two_term",
-    ]
+    assert payload["electrons"] == ["energy_balance", "local_field"]
     assert "experimental.icp" in payload["power"]
     assert "bohm" in payload["wall_transport"]

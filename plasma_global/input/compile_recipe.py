@@ -19,12 +19,12 @@ from plasma_global.input._compile_recipe_transport import (
     compile_segment_transport,
     step_temperatures,
 )
-from plasma_global.input.schema import CaseSpec
+from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.models.external_table import ExternalTableStore
 
 
 def compile_recipe(
-    case: CaseSpec,
+    case: ResolvedCase,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
     external_tables: ExternalTableStore,

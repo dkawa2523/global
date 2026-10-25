@@ -10,17 +10,15 @@ from typing import Any, get_args
 
 import yaml
 
+from plasma_global._yaml import YamlLoadError
 from plasma_global.api import load_case, simulate, write_result
 from plasma_global.audit import audit_case
-from plasma_global.output import export_result_csv, plot_result_h5
-
-
-def _compile_case(case: Any) -> Any:
-    """Lazy boundary kept separate so validation tests need no finished solver."""
-
-    from plasma_global.build import compile_case
-
-    return compile_case(case)
+from plasma_global.output import (
+    export_result_csv,
+    network_result_h5,
+    plot_result_h5,
+    preflight_output,
+)
 
 
 def _kind_ids(annotation: Any) -> tuple[str, ...]:
@@ -39,18 +37,16 @@ def _kind_ids(annotation: Any) -> tuple[str, ...]:
 
 
 def _model_catalog() -> dict[str, tuple[str, ...]]:
-    from plasma_global.input.schema import (
-        ElectronClosure,
+    from plasma_global.input._resolved_case import (
         ElectronDensityModel,
-        ElectronModel,
         GasEnergyModel,
         PowerModel,
         WallTransport,
     )
+    from plasma_global.input.schema import ElectronModel
 
     return {
         "electrons": _kind_ids(ElectronModel),
-        "electron_closure": _kind_ids(ElectronClosure),
         "electron_density": _kind_ids(ElectronDensityModel),
         "gas_energy": _kind_ids(GasEnergyModel),
         "power": _kind_ids(PowerModel),
@@ -59,19 +55,60 @@ def _model_catalog() -> dict[str, tuple[str, ...]]:
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
+    from plasma_global.build import compile_case
+
     case = load_case(args.case)
-    _compile_case(case)
-    print("Validation OK")
+    compiled = compile_case(case)
+    print("Validation OK (input and compilation; integration has not run)")
+    print(
+        f"Case: {case.case.name}; zones: {len(case.reactor.zones)}; "
+        f"duration: {case.recipe.duration_s:g} s"
+    )
+    print(
+        f"Electrons: {case.models.electron_closure.kind}; "
+        f"coefficients: {case.models.electrons.kind}"
+    )
+    for zone in case.reactor.zones:
+        print(
+            f"Initial {zone.zone_id}: {zone.pressure_Pa:g} Pa, "
+            f"{zone.gas_temperature_K:g} K"
+        )
+    for table in dict.fromkeys(
+        id(table) for table in compiled.model.electron_kinetics_by_zone.values()
+    ):
+        value = next(
+            item
+            for item in compiled.model.electron_kinetics_by_zone.values()
+            if id(item) == table
+        )
+        print(
+            f"Table: {value.source}; {value.lookup}: "
+            f"[{value.axis[0]:g}, {value.axis[-1]:g}]"
+        )
+    for issue in compiled.assessment.issues:
+        print(f"{issue.level}: {issue.message}", file=sys.stderr)
     return 0
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
+    if args.output.exists():
+        raise FileExistsError(
+            f"Output directory already exists: {args.output}; "
+            "choose a new run directory"
+        )
     case = load_case(args.case)
+    preflight_output(case.output)
     result = simulate(case)
     paths = write_result(result, args.output)
     print(paths.result_h5)
     print(paths.summary_yaml)
-    return int(not (result.status.success and paths.audit_passed))
+    if paths.result_csv is not None:
+        print(paths.result_csv)
+    for path in paths.analysis_files:
+        print(path)
+    for issue in result.metadata.get("assessment", {}).get("issues", ()):
+        print(f"{issue['level']}: {issue['message']}", file=sys.stderr)
+    return int(not result.status.success)
 
 
 def _cmd_audit(args: argparse.Namespace) -> int:
@@ -80,36 +117,17 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
-def _cmd_migrate_v2(args: argparse.Namespace) -> int:
-    from plasma_global.input.migrate_v2 import migrate_v2_to_yaml
+def _cmd_migrate_v3(args: argparse.Namespace) -> int:
+    from plasma_global.input.migrate_v3 import migrate_v3
 
-    def optional_mapping(path: Path | None) -> dict[str, Any] | None:
-        if path is None:
-            return None
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(value, dict):
-            raise TypeError(f"{path} must contain a YAML mapping")
-        return {str(key): item for key, item in value.items()}
+    print(migrate_v3(args.source, args.output))
+    return 0
 
-    products = optional_mapping(args.boundary_products)
-    raw_segments = optional_mapping(args.cross_section_segments)
-    segments = (
-        None
-        if raw_segments is None
-        else {key: int(value) for key, value in raw_segments.items()}
-    )
-    result = migrate_v2_to_yaml(
-        args.source,
-        args.output,
-        boundary_products=products,
-        cross_section_segments=segments,
-    )
-    print(args.output)
-    print(args.output.with_name(f"{args.output.stem}.migration.yaml"))
-    for warning in result.report.warnings:
-        print(f"WARNING: {warning}", file=sys.stderr)
-    for key in result.report.unused_keys:
-        print(f"UNUSED: {key}", file=sys.stderr)
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    from plasma_global.examples import initialize_example
+
+    print(initialize_example(args.example, args.output))
     return 0
 
 
@@ -145,6 +163,75 @@ def _cmd_plot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_outputs(args: argparse.Namespace) -> int:
+    from plasma_global._output_values import PORT_UNITS, port_values
+    from plasma_global.build import compile_case
+    from plasma_global.core.result import series_unit
+    from plasma_global.postprocess import available_observables
+
+    compiled = compile_case(load_case(args.case))
+    plan = compiled.output_plan
+    model = compiled.model
+    initial = model.initial_state(compiled.initial_state)
+    segment = model.segments[0]
+    ports = port_values(model.evaluate(segment.start_s, initial, segment))
+    names = tuple(
+        dict.fromkeys(
+            (
+                *compiled.model.layout.labels,
+                *available_observables(compiled.model),
+                *plan.port_names,
+                *ports,
+                *plan.aliases,
+            )
+        )
+    )
+    units = {
+        **plan.metadata["series_units"],
+        **{
+            name: PORT_UNITS[name.partition("[")[0].removeprefix("port_")]
+            for name in ports
+        },
+    }
+    rows = {
+        name: {
+            "unit": series_unit(name, units),
+            "stored": name in compiled.model.layout.labels
+            or name in plan.stored
+            or name in plan.aliases,
+        }
+        for name in names
+    }
+    print(
+        json.dumps(rows, indent=2, ensure_ascii=False)
+        if args.json
+        else yaml.safe_dump(rows, sort_keys=False, allow_unicode=True).strip()
+    )
+    return 0
+
+
+def _cmd_network(args: argparse.Namespace) -> int:
+    from plasma_global.input._schema_output import NetworkConfig
+
+    values = {
+        "mode": args.mode,
+        "measure": args.measure,
+        "time_s": args.time_s,
+        "domains": args.domains,
+        "zones": args.zones,
+        "surfaces": args.surfaces,
+        "min_fraction": args.min_fraction,
+        "species": args.species,
+    }
+    overrides = {key: value for key, value in values.items() if value is not None}
+    config = NetworkConfig.model_validate(overrides) if overrides else None
+    for path in network_result_h5(
+        args.result, args.output, config=config, image_format=args.format
+    ):
+        print(path)
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="plasma-global")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -153,35 +240,60 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("case", type=Path)
     validate.set_defaults(handler=_cmd_validate)
 
-    run = commands.add_parser("run", help="Simulate a case and write fixed outputs")
+    run = commands.add_parser(
+        "run", help="Simulate a case and write its requested outputs"
+    )
     run.add_argument("case", type=Path)
     run.add_argument("--output", type=Path, required=True)
     run.set_defaults(handler=_cmd_run)
 
     audit = commands.add_parser(
-        "audit", help="Simulate a case and report provenance and physical balances"
+        "audit", help="Simulate a case and report model assessment and provenance"
     )
     audit.add_argument("case", type=Path)
     audit.set_defaults(handler=_cmd_audit)
 
-    migrate = commands.add_parser("migrate-v2", help="Convert a v2 case to v3 YAML")
+    initialize = commands.add_parser(
+        "init", help="Copy a working example with its input data"
+    )
+    initialize.add_argument("example", nargs="?", default="argon_maxwellian")
+    initialize.add_argument("--output", type=Path, required=True)
+    initialize.set_defaults(handler=_cmd_init)
+
+    migrate = commands.add_parser(
+        "migrate-v3", help="Convert v3 inputs into a new v4 bundle"
+    )
     migrate.add_argument("source", type=Path)
     migrate.add_argument("--output", type=Path, required=True)
-    migrate.add_argument(
-        "--boundary-products",
-        type=Path,
-        help="YAML mapping from ambiguous positive-ion IDs to product sides",
-    )
-    migrate.add_argument(
-        "--cross-section-segments",
-        type=Path,
-        help="YAML mapping selecting one axis from a concatenated legacy curve",
-    )
-    migrate.set_defaults(handler=_cmd_migrate_v2)
+    migrate.set_defaults(handler=_cmd_migrate_v3)
 
     models = commands.add_parser("models", help="List accepted model IDs")
     models.add_argument("--json", action="store_true")
     models.set_defaults(handler=_cmd_models)
+
+    outputs = commands.add_parser(
+        "outputs", help="List available physical series and stored selections"
+    )
+    outputs.add_argument("case", type=Path)
+    outputs.add_argument("--json", action="store_true")
+    outputs.set_defaults(handler=_cmd_outputs)
+
+    network = commands.add_parser(
+        "network",
+        help="Draw a Graphviz reaction mechanism or event network from saved results",
+    )
+    network.add_argument("result", type=Path)
+    network.add_argument("--output", type=Path, required=True)
+    network.add_argument("--mode", choices=("mechanism", "events"))
+    network.add_argument("--measure", choices=("cumulative", "rate"))
+    network.add_argument("--time-s", type=float)
+    network.add_argument("--domains", nargs="+", choices=("gas", "boundary", "surface"))
+    network.add_argument("--zones", nargs="+")
+    network.add_argument("--surfaces", nargs="+")
+    network.add_argument("--species", nargs="+")
+    network.add_argument("--min-fraction", type=float)
+    network.add_argument("--format", choices=("svg", "png", "pdf", "dot"))
+    network.set_defaults(handler=_cmd_network)
 
     export = commands.add_parser("export", help="Export result.h5 to CSV")
     export.add_argument("result", type=Path)
@@ -192,8 +304,8 @@ def _parser() -> argparse.ArgumentParser:
     plot.add_argument("result", type=Path)
     plot.add_argument("series", nargs="*")
     plot.add_argument("--output", type=Path)
-    plot.add_argument("--format", default="png")
-    plot.add_argument("--dpi", type=int, default=150)
+    plot.add_argument("--format")
+    plot.add_argument("--dpi", type=int)
     plot.set_defaults(handler=_cmd_plot)
     return parser
 
@@ -202,7 +314,14 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         return int(args.handler(args))
-    except (OSError, KeyError, TypeError, ValueError, RuntimeError) as exc:
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        RuntimeError,
+        YamlLoadError,
+    ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

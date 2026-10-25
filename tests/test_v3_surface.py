@@ -39,7 +39,7 @@ def _chemistry(tmp_path: Path) -> Path:
     )
     manifest = tmp_path / "chemistry.yaml"
     manifest.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "species: species.csv\n"
         "gas_reactions: gas.csv\n"
         "surface_reactions: surface.csv\n"

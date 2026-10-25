@@ -1,15 +1,13 @@
 site_name: Plasma Global Model
-site_description: YAML-driven low-pressure plasma global model
+site_description: 低圧プラズマのモデリングマニュアル兼統合仕様書
 docs_dir: docs
 site_dir: site
 theme:
   name: readthedocs
 nav:
-  - Architecture: ARCHITECTURE.md
-  - Schema: SCHEMA.md
-  - Physics and Numerics: PHYSICS_NUMERICS.md
-  - Migration: MIGRATION.md
-  - Benchmarks: BENCHMARKS.md
+  - モデリングマニュアル・統合仕様: index.md
+  - 開発・保守: DEVELOPMENT.md
+  - 計画と残る課題: ROADMAP.md
 markdown_extensions:
   - fenced_code
   - tables

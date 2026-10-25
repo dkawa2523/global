@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from plasma_global._audit_types import AuditIssue, CaseAssessment
+
 
 def _heavy_ions(chemistry_data: Any) -> tuple[Any, ...]:
     return tuple(
@@ -117,4 +119,45 @@ def case_classification(case: Any, chemistry_data: Any) -> str:
     return "standard" if standard else "experimental"
 
 
-__all__ = ["case_classification"]
+def assess_case(
+    case: Any,
+    chemistry_data: Any,
+    missing_momentum_targets: tuple[str, ...],
+) -> CaseAssessment:
+    classification = case_classification(case, chemistry_data)
+    issues: list[AuditIssue] = []
+    if classification == "experimental":
+        issues.append(
+            AuditIssue(
+                "WARNING",
+                "EXPERIMENTAL_MODEL",
+                "This case uses models outside the standard feature envelope; "
+                "device prediction accuracy has not been established.",
+                "case",
+            )
+        )
+    if missing_momentum_targets:
+        targets = ", ".join(missing_momentum_targets)
+        issues.append(
+            AuditIssue(
+                "WARNING",
+                "MISSING_MOMENTUM_CROSS_SECTION",
+                f"Missing neutral momentum-transfer data: {targets}; "
+                "elastic transfer is omitted.",
+                targets,
+            )
+        )
+    if chemistry_data.surface_reactions and case.models.surface_kinetics is None:
+        issues.append(
+            AuditIssue(
+                "WARNING",
+                "SURFACE_REACTIONS_DISABLED",
+                "Chemistry declares surface reactions, but models.surface_kinetics "
+                "is absent; these reactions are not integrated.",
+                "models.surface_kinetics",
+            )
+        )
+    return CaseAssessment(classification, tuple(issues))
+
+
+__all__ = ["assess_case", "case_classification"]
