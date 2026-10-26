@@ -1,0 +1,869 @@
+{
+  "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "dependencies": {
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "h5py": "3.16.0",
+    "pydantic": "2.14.1",
+    "PyYAML": "6.0.3",
+    "matplotlib": "3.11.2"
+  },
+  "maxwell": {
+    "constant": [
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 0.5,
+        "actual_m3_s": 7.72769769377365e-15,
+        "analytic_m3_s": 7.72769769377365e-15,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 1.0,
+        "actual_m3_s": 1.0928614884453985e-14,
+        "analytic_m3_s": 1.0928614884453985e-14,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 1.5,
+        "actual_m3_s": 1.3384765031148802e-14,
+        "analytic_m3_s": 1.3384765031148802e-14,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 2.0,
+        "actual_m3_s": 1.54553953875473e-14,
+        "analytic_m3_s": 1.54553953875473e-14,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 3.0,
+        "actual_m3_s": 1.892891623622778e-14,
+        "analytic_m3_s": 1.8928916236227778e-14,
+        "relative_error": 1.6669964521502237e-16
+      },
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 5.0,
+        "actual_m3_s": 2.4437125781555117e-14,
+        "analytic_m3_s": 2.4437125781555117e-14,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 8.0,
+        "actual_m3_s": 3.091079077509454e-14,
+        "analytic_m3_s": 3.091079077509454e-14,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 0.0,
+        "mean_energy_eV": 10.0,
+        "actual_m3_s": 3.455931470559222e-14,
+        "analytic_m3_s": 3.4559314705592216e-14,
+        "relative_error": 1.8261031202528152e-16
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 0.5,
+        "actual_m3_s": 1.3408533235342726e-16,
+        "analytic_m3_s": 1.3408533235342723e-16,
+        "relative_error": 1.8385234876532352e-16
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 1.0,
+        "actual_m3_s": 2.176414785673465e-15,
+        "analytic_m3_s": 2.1764147856734645e-15,
+        "relative_error": 1.8122944909531769e-16
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 1.5,
+        "actual_m3_s": 5.434292899638096e-15,
+        "analytic_m3_s": 5.434292899638097e-15,
+        "relative_error": 1.4516348672953327e-16
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 2.0,
+        "actual_m3_s": 8.621412119951832e-15,
+        "analytic_m3_s": 8.621412119951832e-15,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 3.0,
+        "actual_m3_s": 1.3927118253929034e-14,
+        "analytic_m3_s": 1.3927118253929034e-14,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 5.0,
+        "actual_m3_s": 2.1458206370577248e-14,
+        "analytic_m3_s": 2.1458206370577245e-14,
+        "relative_error": 1.4705066986449916e-16
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 8.0,
+        "actual_m3_s": 2.9211400760675874e-14,
+        "analytic_m3_s": 2.9211400760675874e-14,
+        "relative_error": 0.0
+      },
+      {
+        "threshold_eV": 2.0,
+        "mean_energy_eV": 10.0,
+        "actual_m3_s": 3.3282821036625564e-14,
+        "analytic_m3_s": 3.328282103662556e-14,
+        "relative_error": 1.8961395233965827e-16
+      }
+    ],
+    "argon": [
+      {
+        "mean_energy_eV": 0.5,
+        "actual_m3_s": 3.3591316215193455e-35,
+        "quadrature_m3_s": 3.3591316215193423e-35,
+        "relative_error": 9.548055906960735e-16
+      },
+      {
+        "mean_energy_eV": 1.0,
+        "actual_m3_s": 9.021417296871168e-25,
+        "quadrature_m3_s": 9.02141729687116e-25,
+        "relative_error": 8.143775474378458e-16
+      },
+      {
+        "mean_energy_eV": 1.5,
+        "actual_m3_s": 2.9882547703784165e-21,
+        "quadrature_m3_s": 2.9882547703784157e-21,
+        "relative_error": 2.5175777915046877e-16
+      },
+      {
+        "mean_energy_eV": 2.0,
+        "actual_m3_s": 1.8087406272860038e-19,
+        "quadrature_m3_s": 1.8087406272860034e-19,
+        "relative_error": 2.661976398568923e-16
+      },
+      {
+        "mean_energy_eV": 3.0,
+        "actual_m3_s": 1.1748018929933543e-17,
+        "quadrature_m3_s": 1.1748018929933537e-17,
+        "relative_error": 5.245970285539897e-16
+      },
+      {
+        "mean_energy_eV": 5.0,
+        "actual_m3_s": 3.6994046159435437e-16,
+        "quadrature_m3_s": 3.6994046159435486e-16,
+        "relative_error": 1.3327497717828872e-15
+      },
+      {
+        "mean_energy_eV": 8.0,
+        "actual_m3_s": 2.860283963635245e-15,
+        "quadrature_m3_s": 2.860283963635247e-15,
+        "relative_error": 6.89495269744492e-16
+      }
+    ]
+  },
+  "analytic": {
+    "decay": {
+      "name": "analytic-decay",
+      "elapsed_s": 0.27783069002907723,
+      "time_count": 101,
+      "solver": {
+        "nfev": 122,
+        "njev": 1,
+        "nlu": 14,
+        "segments_completed": 1
+      },
+      "input_files": {},
+      "result_h5": "runs/analytic-decay/result.h5",
+      "max_pointwise_relative_error": 1.8609323186001206e-05
+    },
+    "transport": {
+      "name": "analytic-transport",
+      "elapsed_s": 0.28361313202185556,
+      "time_count": 101,
+      "solver": {
+        "nfev": 54,
+        "njev": 1,
+        "nlu": 9,
+        "segments_completed": 1
+      },
+      "input_files": {},
+      "result_h5": "runs/analytic-transport/result.h5",
+      "source_error": 2.6600312288287706e-06,
+      "target_error": 1.9869542637995627e-06,
+      "particle_conservation_error": 3.6354460869893146e-16
+    }
+  },
+  "cross_code": {
+    "crane": {
+      "name": "crane",
+      "elapsed_s": 0.7803142030024901,
+      "time_count": 200,
+      "solver": {
+        "nfev": 1633,
+        "njev": 1,
+        "nlu": 88,
+        "segments_completed": 1
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/crane_two_reaction_argon/chemistry.yaml": {
+          "sha256": "e97bd19d8c10d013d09afb89592106befe926051681b8e6e782c3ba122c47caa",
+          "size_bytes": 1567,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/crane/result.h5",
+      "actual": 2.1735225936815948e+19,
+      "reference": 2.1735277364398e+19,
+      "relative_error": 2.3660881427048856e-06
+    },
+    "zdplaskin": {
+      "name": "zdplaskin",
+      "elapsed_s": 2.1647155300015584,
+      "time_count": 200,
+      "solver": {
+        "nfev": 3865,
+        "njev": 13,
+        "nlu": 249,
+        "segments_completed": 1
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/zdplaskin_example2/chemistry.yaml": {
+          "sha256": "53260cf8aba23054db58af07efbd17d172688a07519f134686d219acb37b18fc",
+          "size_bytes": 6145,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/data/zdplaskin_example2/electrons.csv": {
+          "sha256": "30c8a22acf6c6afc4a1cf9f9c0cc70bc5f0b9b57b6424d5c0b29d35266148100",
+          "size_bytes": 42535,
+          "roles": [
+            "electron_kinetics_table"
+          ]
+        }
+      },
+      "result_h5": "runs/zdplaskin/result.h5",
+      "comparisons": [
+        {
+          "quantity": "Ar_star",
+          "actual": 2.0147789093457917e+17,
+          "reference": 2.01427e+17,
+          "relative_error": 0.00025265200086963517,
+          "unit": "m^-3"
+        },
+        {
+          "quantity": "Ar_plus",
+          "actual": 2083213810488884.0,
+          "reference": 2079332000000000.0,
+          "relative_error": 0.0018668545902645658,
+          "unit": "m^-3"
+        },
+        {
+          "quantity": "Ar2_plus",
+          "actual": 3.1496228592093715e+17,
+          "reference": 3.14957e+17,
+          "relative_error": 1.6782992399445003e-05,
+          "unit": "m^-3"
+        },
+        {
+          "quantity": "electron_final",
+          "actual": 3.1704549973142605e+17,
+          "reference": 3.170363e+17,
+          "relative_error": 2.9017911911184935e-05,
+          "unit": "m^-3"
+        },
+        {
+          "quantity": "electron_peak",
+          "actual": 3.530828259002197e+17,
+          "reference": 3.571898e+17,
+          "relative_error": 0.011498016180138088,
+          "unit": "m^-3"
+        },
+        {
+          "quantity": "voltage",
+          "actual": 33.00283525572999,
+          "reference": 33.2225,
+          "relative_error": 0.006611926985326376,
+          "unit": "V"
+        },
+        {
+          "quantity": "current",
+          "actual": 0.0096699716474427,
+          "reference": 0.009667775,
+          "relative_error": 0.00022721333943948792,
+          "unit": "A"
+        },
+        {
+          "quantity": "reduced_field",
+          "actual": 2.563261194635951,
+          "reference": 2.561342,
+          "relative_error": 0.0007492926114323507,
+          "unit": "Td"
+        }
+      ]
+    }
+  },
+  "argon_convergence": {
+    "runs": [
+      {
+        "name": "argon-tolerance-0",
+        "elapsed_s": 1.8070134129957296,
+        "time_count": 201,
+        "solver": {
+          "nfev": 774,
+          "njev": 5,
+          "nlu": 61,
+          "segments_completed": 2
+        },
+        "input_files": {
+          "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+            "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+            "size_bytes": 33148,
+            "roles": [
+              "chemistry_input"
+            ]
+          },
+          "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+            "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+            "size_bytes": 319265,
+            "roles": [
+              "chemistry_input"
+            ]
+          }
+        },
+        "result_h5": "runs/argon-tolerance-0/result.h5",
+        "rtol": 1e-06,
+        "atol": 1e-14,
+        "electron_density_m3": 44157686600053.34,
+        "electron_temperature_eV": 0.012507081982140601,
+        "density_waveform_error": 1.122194038272291e-06,
+        "temperature_waveform_error": 1.4123786137083654e-06
+      },
+      {
+        "name": "argon-tolerance-1",
+        "elapsed_s": 2.257070957974065,
+        "time_count": 201,
+        "solver": {
+          "nfev": 1116,
+          "njev": 5,
+          "nlu": 79,
+          "segments_completed": 2
+        },
+        "input_files": {
+          "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+            "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+            "size_bytes": 33148,
+            "roles": [
+              "chemistry_input"
+            ]
+          },
+          "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+            "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+            "size_bytes": 319265,
+            "roles": [
+              "chemistry_input"
+            ]
+          }
+        },
+        "result_h5": "runs/argon-tolerance-1/result.h5",
+        "rtol": 1e-07,
+        "atol": 1e-15,
+        "electron_density_m3": 44157811151756.68,
+        "electron_temperature_eV": 0.01250698414271274,
+        "density_waveform_error": 1.910611772235808e-07,
+        "temperature_waveform_error": 2.633495483718202e-07
+      },
+      {
+        "name": "argon-tolerance-2",
+        "elapsed_s": 2.733547970012296,
+        "time_count": 201,
+        "solver": {
+          "nfev": 1624,
+          "njev": 6,
+          "nlu": 107,
+          "segments_completed": 2
+        },
+        "input_files": {
+          "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+            "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+            "size_bytes": 33148,
+            "roles": [
+              "chemistry_input"
+            ]
+          },
+          "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+            "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+            "size_bytes": 319265,
+            "roles": [
+              "chemistry_input"
+            ]
+          }
+        },
+        "result_h5": "runs/argon-tolerance-2/result.h5",
+        "rtol": 1e-08,
+        "atol": 1e-16,
+        "electron_density_m3": 44157836078153.92,
+        "electron_temperature_eV": 0.012506970219384102,
+        "density_waveform_error": 0.0,
+        "temperature_waveform_error": 0.0
+      }
+    ]
+  },
+  "software": {
+    "package": {
+      "name": "plasma-global-model",
+      "version": "0.5.0"
+    },
+    "source_tree": {
+      "algorithm": "sha256-python-source-v1",
+      "sha256": "16164d73c01d785608e650ec70c92e2a4f980fe3e80fe83d17a79a3a6a3f50eb",
+      "file_count": 111
+    },
+    "project_lock": {
+      "name": "uv.lock",
+      "sha256": "95f82f918178eede3b8a29020490eb2415905d683b3f28a246eb2f9ebe12f6be",
+      "size_bytes": 544515
+    },
+    "platform": {
+      "system": "Linux",
+      "machine": "x86_64"
+    },
+    "runtime": {
+      "python": "3.12.3",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1",
+      "h5py": "3.16.0",
+      "pydantic": "2.14.1",
+      "pyyaml": "6.0.3",
+      "typing_extensions": "4.16.0"
+    }
+  },
+  "sensitivity": [
+    {
+      "name": "argon-power-0.9",
+      "elapsed_s": 1.6149969149846584,
+      "time_count": 201,
+      "solver": {
+        "nfev": 758,
+        "njev": 5,
+        "nlu": 60,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/argon-power-0.9/result.h5",
+      "parameter": "power",
+      "factor": 0.9,
+      "electron_density_m3": 39744719889550.734,
+      "electron_temperature_eV": 0.012507080517662118,
+      "density_change_percent": -9.993654673243856,
+      "temperature_change_percent": -1.1709193914466454e-05
+    },
+    {
+      "name": "argon-power-1.1",
+      "elapsed_s": 2.454993096005637,
+      "time_count": 201,
+      "solver": {
+        "nfev": 785,
+        "njev": 5,
+        "nlu": 61,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/argon-power-1.1/result.h5",
+      "parameter": "power",
+      "factor": 1.1,
+      "electron_density_m3": 48570727207698.15,
+      "electron_temperature_eV": 0.012507083095663932,
+      "density_change_percent": 9.993822021553722,
+      "temperature_change_percent": 8.903142489913307e-06
+    },
+    {
+      "name": "argon-pressure-0.9",
+      "elapsed_s": 2.014804906968493,
+      "time_count": 201,
+      "solver": {
+        "nfev": 779,
+        "njev": 5,
+        "nlu": 60,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/argon-pressure-0.9/result.h5",
+      "parameter": "pressure",
+      "factor": 0.9,
+      "electron_density_m3": 41601188988233.64,
+      "electron_temperature_eV": 0.011777322201465781,
+      "density_change_percent": -5.7894736084671,
+      "temperature_change_percent": -5.834772505024555
+    },
+    {
+      "name": "argon-pressure-1.1",
+      "elapsed_s": 1.7337899450212717,
+      "time_count": 201,
+      "solver": {
+        "nfev": 779,
+        "njev": 5,
+        "nlu": 62,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/argon-pressure-1.1/result.h5",
+      "parameter": "pressure",
+      "factor": 1.1,
+      "electron_density_m3": 46620811091602.51,
+      "electron_temperature_eV": 0.013220221918855277,
+      "density_change_percent": 5.578019776847154,
+      "temperature_change_percent": 5.701889039609709
+    },
+    {
+      "name": "argon-area-0.9",
+      "elapsed_s": 1.6682038440485485,
+      "time_count": 201,
+      "solver": {
+        "nfev": 792,
+        "njev": 6,
+        "nlu": 61,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/argon-area-0.9/result.h5",
+      "parameter": "area",
+      "factor": 0.9,
+      "electron_density_m3": 54361744505539.52,
+      "electron_temperature_eV": 0.01607682590838136,
+      "density_change_percent": 23.108225749928323,
+      "temperature_change_percent": 28.54178081936416
+    },
+    {
+      "name": "argon-area-1.1",
+      "elapsed_s": 1.8627925349865109,
+      "time_count": 201,
+      "solver": {
+        "nfev": 779,
+        "njev": 6,
+        "nlu": 62,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/argon-area-1.1/result.h5",
+      "parameter": "area",
+      "factor": 1.1,
+      "electron_density_m3": 36545157746805.04,
+      "electron_temperature_eV": 0.009952416531915892,
+      "density_change_percent": -17.23941954250635,
+      "temperature_change_percent": -20.425751217371293
+    }
+  ],
+  "event_sampling": [
+    {
+      "name": "events-4e-05",
+      "elapsed_s": 2.2375490849954076,
+      "time_count": 51,
+      "solver": {
+        "nfev": 1624,
+        "njev": 6,
+        "nlu": 107,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/events-4e-05/result.h5",
+      "sample_interval_s": 4e-05,
+      "ionization_count": 7497203323430.424,
+      "wall_count": 8044824686185.053,
+      "ion_particle_change": -558421639218.4608,
+      "balance_residual": 0.0013425123461520108,
+      "ionization_relative_to_finest": 0.003943961846655226,
+      "wall_relative_to_finest": 0.0024000362009376276
+    },
+    {
+      "name": "events-2e-05",
+      "elapsed_s": 3.067434731987305,
+      "time_count": 101,
+      "solver": {
+        "nfev": 1624,
+        "njev": 6,
+        "nlu": 107,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/events-2e-05/result.h5",
+      "sample_interval_s": 2e-05,
+      "ionization_count": 7480747189825.013,
+      "wall_count": 8031245808072.407,
+      "ion_particle_change": -558421639218.4608,
+      "balance_residual": 0.0009865245268800833,
+      "ionization_relative_to_finest": 0.0017403353401067865,
+      "wall_relative_to_finest": 0.0007080828716055141
+    },
+    {
+      "name": "events-1e-05",
+      "elapsed_s": 3.442031190963462,
+      "time_count": 201,
+      "solver": {
+        "nfev": 1624,
+        "njev": 6,
+        "nlu": 107,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/events-1e-05/result.h5",
+      "sample_interval_s": 1e-05,
+      "ionization_count": 7473430342598.739,
+      "wall_count": 8027011328363.306,
+      "ion_particle_change": -558421639218.4608,
+      "balance_residual": 0.0006030455490688102,
+      "ionization_relative_to_finest": 0.0007605427060168574,
+      "wall_relative_to_finest": 0.00018045886744484668
+    },
+    {
+      "name": "events-5e-06",
+      "elapsed_s": 2.7848581500002183,
+      "time_count": 401,
+      "solver": {
+        "nfev": 1624,
+        "njev": 6,
+        "nlu": 107,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/events-5e-06/result.h5",
+      "sample_interval_s": 5e-06,
+      "ionization_count": 7470798680057.62,
+      "wall_count": 8025887065505.339,
+      "ion_particle_change": -558421639218.4608,
+      "balance_residual": 0.0004153128175785254,
+      "ionization_relative_to_finest": 0.00040813906911433146,
+      "wall_relative_to_finest": 4.037363582251477e-05
+    },
+    {
+      "name": "events-2.5e-06",
+      "elapsed_s": 3.4127282080007717,
+      "time_count": 801,
+      "solver": {
+        "nfev": 1624,
+        "njev": 6,
+        "nlu": 107,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/events-2.5e-06/result.h5",
+      "sample_interval_s": 2.5e-06,
+      "ionization_count": 7469026916618.336,
+      "wall_count": 8025632028963.305,
+      "ion_particle_change": -558421639218.4608,
+      "balance_residual": 0.00022634066288318376,
+      "ionization_relative_to_finest": 0.00017088377137803784,
+      "wall_relative_to_finest": 8.595610950619747e-06
+    },
+    {
+      "name": "events-1.25e-06",
+      "elapsed_s": 3.682549298973754,
+      "time_count": 1601,
+      "solver": {
+        "nfev": 1624,
+        "njev": 6,
+        "nlu": 107,
+        "segments_completed": 2
+      },
+      "input_files": {
+        "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml": {
+          "sha256": "b1951c613570293bf97c92bf8c76ef4c6ae6fab4a91380aecfec3f2bec893304",
+          "size_bytes": 33148,
+          "roles": [
+            "chemistry_input"
+          ]
+        },
+        "plasma_global/assets/examples/chemistry/argon_lxcat/cross_sections.csv": {
+          "sha256": "ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74",
+          "size_bytes": 319265,
+          "roles": [
+            "chemistry_input"
+          ]
+        }
+      },
+      "result_h5": "runs/events-1.25e-06/result.h5",
+      "sample_interval_s": 1.25e-06,
+      "ionization_count": 7467750799198.058,
+      "wall_count": 8025563044345.716,
+      "ion_particle_change": -558421639218.4608,
+      "balance_residual": 7.593162840231518e-05,
+      "ionization_relative_to_finest": 0.0,
+      "wall_relative_to_finest": 0.0
+    }
+  ]
+}

@@ -20,7 +20,12 @@ dependencies = [
 [project.optional-dependencies]
 plot = ["matplotlib>=3.7.5"]
 graph = ["graphviz>=0.21"]
-docs = ["mkdocs>=1.6"]
+docs = [
+  "defusedxml>=0.7.1",
+  "mkdocs>=1.6",
+  "pymdown-extensions>=10.12",
+  "reportlab>=4.2",
+]
 dev = [
   "bandit[toml]>=1.8",
   "coverage[toml]>=7.6",

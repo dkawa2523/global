@@ -12,6 +12,8 @@ __pycache__/
 coverage.json
 coverage.xml
 htmlcov/
+output/pdf/
+tmp/pdfs/
 mutants/
 site/
 site_ja/

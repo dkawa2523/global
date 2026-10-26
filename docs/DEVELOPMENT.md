@@ -41,12 +41,13 @@ CSVの形状・数値・列対応は `_numeric_csv` に共通化しています�
 
 ## 文書と例の保守
 
-説明は次の4ファイルにまとめます。細分化した機能説明や過去の設計提案を追加しません。
+説明は次の5ファイルにまとめます。操作と理論の役割を分け、細分化した機能説明や過去の設計提案を追加しません。
 
 | ファイル | 役割 |
 |---|---|
 | `README.md` | パッケージの概要、初回コマンド、マニュアルへの案内 |
 | `docs/index.md` | 利用者向けマニュアル兼統合仕様書 |
+| `docs/THEORY.md` | 保存則からの導出、近似、数値実験、参考文献。PDFの原本 |
 | `docs/DEVELOPMENT.md` | 内部構造と保守・検証手順 |
 | `docs/ROADMAP.md` | 現在地、未解決事項、次の作業 |
 
@@ -71,6 +72,24 @@ uv run --frozen --all-extras mkdocs serve
 `docs/assets/argon-plasma.png`、`argon-events.svg` として収録しています。
 更新時は新しい入力・runディレクトリへ `init`／`run` して図と数値を確認し、
 対応する物理条件や終端値の説明も照合します。図に合わせて入力を別管理しません。
+
+理論文書の根拠は `python -m tools.benchmarks.theory --output .quality-reports/theory-new` で
+再計算できます。plot依存を使い、新しい出力先へ数値JSON、4図、19 runの結果を作ります。
+採用した数値を `benchmarks/theory/results.json`、図を `docs/assets/theory-*.png` に記録し、
+本文の丸め値と照合します。過去の計算時間を再実行時の計算時間として再利用しません。
+
+PDFは別の原稿を維持せず、同じMarkdownから作ります。docsとplot依存、および日本語TrueType fontが必要です。
+
+```bash
+python -m pip install ".[docs,plot]"
+python -m tools.render_theory --output output/pdf/global-model-theory.pdf --font /path/to/Japanese.ttf
+```
+
+`--bold-font` に太字fontも指定できます。出力先は新しいファイルを使います。
+数式番号・図・表・参考文献リンクとPDFのしおりを生成し、Popplerで全ページを画像へ描画して確認します。
+Web版はArithmatexで数式を保ち、MathJax 3.2.2をCDNから読みます。CDNに接続しない閲覧にはPDFを使えます。
+生成中のPDFは `output/pdf/`、確認用画像は `tmp/pdfs/` に置きます。
+確認済みの完成版だけを `docs/assets/global-model-theory.pdf` に収録し、原稿・結果データとともに版管理します。
 
 ## 検証の実行
 

@@ -1,3 +1,4 @@
 * text=auto eol=lf
 *.h5 -text
 *.png -text
+*.pdf binary
