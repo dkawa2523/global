@@ -55,7 +55,7 @@ def test_constant_cross_section_matches_analytic_truncated_maxwell_average(
 def test_argon_ionization_matches_independent_quadrature() -> None:
     root = Path(__file__).parents[1]
     data = load_chemistry(
-        root / "plasma_global/assets/examples/chemistry/argon_lxcat/chemistry.yaml"
+        root / "plasma_global/examples/chemistry/argon_lxcat/chemistry.yaml"
     )
     cross_section = data.cross_sections["xs_ar_ionization_zenodo"]
     rate = compile_maxwell_rate(cross_section)

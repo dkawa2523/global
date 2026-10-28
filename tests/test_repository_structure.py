@@ -47,6 +47,13 @@ def test_wheel_contains_the_runtime_and_cli(tmp_path: Path) -> None:
 
     assert "plasma_global/__init__.py" in names
     assert "plasma_global/cli.py" in names
+    assets = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "plasma_global/examples").rglob("*")
+        if path.suffix in {".yaml", ".csv"}
+    }
+    assert assets <= names
+    assert "plasma_global/examples/__init__.py" in names
     assert "plasma-global = plasma_global.cli:main" in entry_points
     assert "quality-" not in entry_points
     assert not any(

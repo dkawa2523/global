@@ -1,0 +1,80 @@
+schema_version: 4
+case:
+  name: zdplaskin_example2_dc_series
+  description: ZDPlaskin保存参照と同じ終了時刻の化学・DC回路比較。係数CSVは保存出力から逆算したもので、独立した装置検証ではない。
+chemistry:
+  file: ../chemistry/zdplaskin_example2/chemistry.yaml
+reactor:
+  chamber_id: zdplaskin_example2_single_zone
+  description: 'Single-zone chamber matching the nominal dimensions and pressure of
+    ZDPlaskin example2. The original example is a voltage-resistor circuit discharge;
+    this chamber carries the geometry, pressure, gas, wall area, and a local DC series-circuit
+    power port into the global-model framework. The electron-impact rates are supplied
+    separately by the case E/N-rate table.
+
+    '
+  zones:
+    plasma:
+      volume_m3: 2.010619298e-07
+      description: ZDPlaskin example2 cylinder volume
+      initial:
+        pressure_Pa: 13332.23684
+        gas_temperature_K: 300.0
+        densities_m3:
+          Ar: 3.218833278166041e+24
+          Ar_star: 0.0
+          Ar_plus: 1000000000000.0
+          Ar2_plus: 1000000000000.0
+  surfaces:
+    wall:
+      zone_id: plasma
+      area_m2: 0.0002010619298
+      temperature_K: 300.0
+      wall_transport:
+        kind: prescribed_frequency
+        frequency_s_inv: 3230.0
+  power_ports:
+    dc_series_drive:
+      zone_id: plasma
+      model:
+        kind: dc_series
+        ballast_resistance_ohm: 100000.0
+        gap_m: 0.004
+        electrode_area_m2: 5.0265482457e-05
+        source_voltage_V: 1000.0
+run:
+  duration_s: 0.0007520833
+models:
+  electrons:
+    kind: local_field
+    coefficients:
+      file: ../data/zdplaskin_example2/electrons.csv
+      mobility_reference_neutral_density_m3: 3.218833278166041e+24
+      provenance:
+        source: ZDPlaskin example2 committed output
+        source_repository: https://github.com/Hemadityamalla/ZDPlaskin
+        source_artifact: example2/Ar2Reac_1000V_100kOhm_100t_0.4d_0.4r.dat
+        note: Rates are reverse-engineered from saved ZDPlaskin reaction-rate columns,
+          including the BOLSIG+/superelastic behavior present in that run.
+        generator: tools.benchmarks.build_zdplaskin_rate_table
+solver:
+  rtol: 3.0e-06
+  first_step_s: 1.0e-12
+  max_step_s: 1.0e-06
+  sample_interval_s: 5.025125628140704e-06
+output:
+  observables:
+  - electron_density_m3[plasma]
+  - mean_energy_eV[plasma]
+  - reduced_field_Td[plasma]
+  - absorbed_power_W[plasma]
+  - charge_residual_m3[plasma]
+  summary_series:
+  - n[plasma,Ar]
+  - n[plasma,Ar_star]
+  - n[plasma,Ar_plus]
+  - n[plasma,Ar2_plus]
+  - electron_density_m3[plasma]
+  - reduced_field_Td[plasma]
+  - absorbed_power_W[plasma]
+  csv: true

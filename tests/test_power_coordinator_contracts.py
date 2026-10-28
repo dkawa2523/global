@@ -158,7 +158,7 @@ def test_coordinator_rejects_multiple_fields_returned_by_undeclared_ports() -> N
 def test_coupling_waits_until_electron_power_also_converges() -> None:
     port = _SettlingPowerPort()
     table = TabulatedElectronKinetics(
-        source=Path("settling-power.h5"),
+        source=Path("settling-power.csv"),
         lookup="local_field",
         bounds="error",
         axis=np.array([10.0, 20.0]),
@@ -200,7 +200,7 @@ class _IncrementingFieldPort:
 
 def test_coupled_field_reports_the_field_used_for_final_kinetics() -> None:
     table = TabulatedElectronKinetics(
-        source=Path("sharp-rate.h5"),
+        source=Path("sharp-rate.csv"),
         lookup="local_field",
         bounds="error",
         axis=np.array([1.0, 2.0, 3.0]),
@@ -224,7 +224,7 @@ def test_coupled_field_reports_the_field_used_for_final_kinetics() -> None:
 
 def test_local_field_off_uses_explicit_zero_field_kinetics() -> None:
     table = TabulatedElectronKinetics(
-        source=Path("positive-field-only.h5"),
+        source=Path("positive-field-only.csv"),
         lookup="local_field",
         bounds="clip",
         axis=np.array([1.0, 2.0]),
@@ -256,7 +256,7 @@ def test_local_field_off_uses_explicit_zero_field_kinetics() -> None:
 
 def test_local_field_off_preserves_an_explicit_zero_field_table_node() -> None:
     table = TabulatedElectronKinetics(
-        source=Path("explicit-zero-field.h5"),
+        source=Path("explicit-zero-field.csv"),
         lookup="local_field",
         bounds="error",
         axis=np.array([0.0, 1.0]),
@@ -312,7 +312,7 @@ def test_external_table_default_override_and_off_use_command_field_capability(
     )
     off = CompiledPowerCommand(kind="off", reduced_field_capability=True)
     table = TabulatedElectronKinetics(
-        source=Path("positive-field-only.h5"),
+        source=Path("positive-field-only.csv"),
         lookup="local_field",
         bounds="clip",
         axis=np.array([1.0, 10.0]),

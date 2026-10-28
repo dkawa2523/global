@@ -207,7 +207,7 @@ def test_local_field_is_algebraic_and_rejects_out_of_table_domain() -> None:
 
 def test_explicit_zero_field_uses_the_same_cold_boundary_as_an_off_port() -> None:
     kinetics = TabulatedElectronKinetics(
-        source=Path("positive-field-only.h5"),
+        source=Path("positive-field-only.csv"),
         lookup="local_field",
         bounds="error",
         axis=np.array([1.0, 2.0]),
@@ -381,7 +381,7 @@ def test_zero_electron_density_skips_mean_energy_kinetics_lookup() -> None:
         reaction_zones=((),),
     )
     kinetics = TabulatedElectronKinetics(
-        source=Path("unused-zero-electron-table.h5"),
+        source=Path("unused-zero-electron-table.csv"),
         lookup="mean_energy",
         bounds="error",
         axis=np.array([1.0, 2.0]),

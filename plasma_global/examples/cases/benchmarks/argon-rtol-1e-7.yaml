@@ -1,0 +1,63 @@
+schema_version: 4
+case:
+  name: argon-rtol-1e-7
+  description: 低圧Arの許容差収束。rtol=1e-07、保存間隔10 μs。装置精度の検証には用いない。
+chemistry:
+  file: ../../chemistry/argon_lxcat/chemistry.yaml
+reactor:
+  chamber_id: argon
+  zones:
+    plasma:
+      volume_m3: 0.01
+      initial:
+        pressure_Pa: 0.8283894
+        gas_temperature_K: 300.0
+        mean_energy_eV: 3.0
+        mole_fractions:
+          Ar: 1.0
+        seed_densities_m3:
+          Ar_plus: 1.0e14
+  surfaces:
+    wall:
+      zone_id: plasma
+      area_m2: 0.1
+      temperature_K: 300.0
+      wall_transport:
+        kind: bohm
+        h_factor: auto
+  power_ports:
+    source:
+      zone_id: plasma
+      model:
+        kind: prescribed_power
+        electron_fraction: 1.0
+        gas_fraction: 0.0
+run:
+  steps:
+  - label: powered
+    duration_s: 0.001
+    commands:
+      power_ports:
+        source:
+          absorbed_power_W: 0.1
+  - label: afterglow
+    duration_s: 0.001
+    commands:
+      power_ports:
+        source:
+          absorbed_power_W: 0.0
+models:
+  electrons:
+    kind: energy_balance
+solver:
+  sample_interval_s: 1.0e-05
+  rtol: 1.0e-07
+  atol: 1.0e-15
+output:
+  quantities:
+  - electron_density_m3
+  - electron_temperature_eV
+  - pressure_Pa
+  - absorbed_power_W
+  reaction_rates: true
+  csv: true

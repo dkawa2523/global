@@ -1,0 +1,35 @@
+digraph architecture {
+  graph [rankdir=TB, bgcolor="white", pad="0.15", nodesep="0.24", ranksep="0.30", compound=true];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=12,
+        color="#526d7b", fillcolor="#edf3f6", margin="0.16,0.12"];
+  edge [color="#526d7b", arrowsize=0.7, fontname="DejaVu Sans", fontsize=10];
+  input [label="MODEL INPUT\nChemistry + cross sections\nGeometry + wall data | Power + flow commands",
+         fillcolor="#dce9f0", color="#234b61"];
+  subgraph cluster_physics {
+    graph [label="PHYSICAL TERMS AT THE CURRENT STATE", fontname="DejaVu Sans",
+           fontsize=11, color="#b7c9d1", style=rounded];
+    electron [label="Electron kinetics\nEEDF, rates, mobility\nPower / circuit coupling"];
+    chemistry [label="Gas reactions\nStoichiometry + rates\nParticle / energy sources"];
+    boundary [label="Walls and surfaces\nIon flux, branching\nCoverage, energy loss"];
+    flow [label="Gas exchange\nInlet, pump, transfer\nParticles + enthalpy"];
+    { rank=same; electron; chemistry; }
+    { rank=same; boundary; flow; }
+    electron -> boundary [style=invis];
+    chemistry -> flow [style=invis];
+  }
+  input -> electron;
+  input -> chemistry;
+  balance [label="COUPLED BALANCE EQUATIONS\nSpecies densities | Electron energy\nOptional gas energy + surface state",
+           fillcolor="#dceee7", color="#276354", penwidth=1.4];
+  electron -> balance;
+  chemistry -> balance;
+  boundary -> balance;
+  flow -> balance;
+  solver [label="TIME INTEGRATION\nAdaptive BDF | Switching points\nAccepted-state validation"];
+  balance -> solver;
+  solver -> electron [label="current state", lhead=cluster_physics, style=dashed,
+                      color="#348274", constraint=false];
+  output [label="RESULTS AND ANALYSIS\nHDF5 + summary | Time series + composition\nReaction graphs + event integrals",
+          fillcolor="#f5efe3", color="#8a6a32"];
+  solver -> output [label="saved states"];
+}

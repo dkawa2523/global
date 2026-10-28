@@ -58,9 +58,9 @@ def _result() -> SimulationResult:
         status=SimulationStatus.completed("integration finished"),
         solver_stats={"nfev": 42, "method": "BDF"},
         metadata={
-            "effective_case_yaml": "schema_version: 3\ncase:\n  name: argon\n",
+            "effective_case_yaml": "schema_version: 4\ncase:\n  name: argon\n",
             "model_ids": {"electrons": "maxwellian", "solver": "BDF"},
-            "provenance": {"source": "fixture", "include_chain": []},
+            "provenance": {"source": "fixture", "input_files": {"files": {}}},
             "summary_series": ["electron_density_m3", "absorbed_power_W"],
             "conservation_observables": ["particle_residual"],
             "default_conservation_tolerance": 1.0e-8,

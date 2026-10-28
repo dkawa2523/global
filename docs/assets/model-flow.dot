@@ -1,0 +1,21 @@
+digraph flow {
+  graph [rankdir=TB, bgcolor="white", pad="0.15", nodesep="0.28", ranksep="0.38"];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=12,
+        color="#526d7b", fillcolor="#edf3f6", margin="0.15,0.10"];
+  edge [color="#526d7b", arrowsize=0.7, fontname="DejaVu Sans", fontsize=10];
+  read [label="1. RESOLVE INPUT\nYAML + CSV, paths,\nreferences, clocks"];
+  build [label="2. COMPILE MODEL\nStates, chemistry, boundaries,\ncommands, output plan"];
+  read -> build;
+  state [label="3. RECONSTRUCT STATE\nDensities, temperatures,\nelectron closure at (t, y)"];
+  physics [label="4. EVALUATE AND ASSEMBLE RHS\nElectron + power, reactions,\nwalls, flow, energy exchange"];
+  step [label="5. ADVANCE ONE BDF STEP\nImplicit trials, adaptive time step,\nvalidate accepted state",
+        fillcolor="#dceee7", color="#276354"];
+  build -> state;
+  state -> physics -> step;
+  step -> state [label="repeat", style=dashed, color="#348274", constraint=false];
+  save [label="6. SAMPLE AND ANALYSE\nSaved states, derived quantities,\nsegmented event quadrature"];
+  publish [label="7. PUBLISH A NEW RUN\nHDF5, summary YAML,\nCSV / plots / graphs",
+           fillcolor="#f5efe3", color="#8a6a32"];
+  step -> save [label="dense output"];
+  save -> publish;
+}

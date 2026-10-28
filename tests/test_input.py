@@ -189,14 +189,28 @@ def test_model_selects_closure_and_required_initial_energy(tmp_path: Path) -> No
         load_case(_write(tmp_path / "invalid.yaml", document))
 
 
-def test_working_example_copies_only_needed_inputs(tmp_path: Path) -> None:
-    path = initialize_example("argon_maxwellian", tmp_path / "argon")
+@pytest.mark.parametrize(
+    ("name", "csv_count"),
+    [
+        ("argon_maxwellian", 1),
+        ("zdplaskin_example2", 1),
+        ("benchmarks/analytic-decay", 0),
+        ("benchmarks/argon-rtol-1e-6", 1),
+    ],
+)
+def test_working_example_copies_only_needed_inputs(
+    tmp_path: Path, name: str, csv_count: int
+) -> None:
+    path = initialize_example(name, tmp_path / "input")
     case = load_case(path)
-    assert simulate(case).status.success is True
+    result = simulate(case)
+    assert result.status.success is True
+    inputs = result.metadata["provenance"]["input_files"]["files"]
+    assert all(Path(source).is_relative_to(path.parent) for source in inputs)
     assert not tuple(path.parent.rglob("*.h5"))
-    assert len(tuple(path.parent.rglob("*.csv"))) == 1
+    assert len(tuple(path.parent.rglob("*.csv"))) == csv_count
     with pytest.raises(FileExistsError):
-        initialize_example("argon_maxwellian", path.parent)
+        initialize_example(name, path.parent)
 
 
 def test_v3_conversion_is_self_contained_and_preserves_state(tmp_path: Path) -> None:

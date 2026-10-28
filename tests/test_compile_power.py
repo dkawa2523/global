@@ -15,12 +15,7 @@ from plasma_global.input.load import load_case
 from plasma_global.models.external_table import ExternalTableStore
 
 SMOKE = (
-    Path(__file__).parents[1]
-    / "plasma_global"
-    / "assets"
-    / "examples"
-    / "cases"
-    / "smoke.yaml"
+    Path(__file__).parents[1] / "plasma_global" / "examples" / "cases" / "smoke.yaml"
 )
 _INVALID_TARGETS = (
     ("source_rf", "source", "does not support coupling_target"),

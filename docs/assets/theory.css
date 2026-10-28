@@ -1,0 +1,44 @@
+/* Keep equations intact; narrow viewports scroll an equation instead of wrapping it. */
+.arithmatex {
+  max-width: 100%;
+}
+
+div.arithmatex {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.3rem 0;
+}
+
+.arithmatex mjx-container[display="true"] {
+  min-width: min-content;
+  margin: 0.8rem 0 !important;
+}
+
+.rst-content img {
+  height: auto;
+}
+
+/* Parameter references stay readable when long public variable names wrap. */
+.rst-content .wy-table-responsive table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+.rst-content table td code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rst-content table td:first-child:has(> code) {
+  min-width: 14rem;
+}
+
+.rst-content table:has(th:nth-child(4)) td:nth-child(2):has(> code) {
+  min-width: 10rem;
+}
+
+@media (max-width: 768px) {
+  .rst-content .wy-table-responsive table {
+    min-width: 42rem;
+  }
+}

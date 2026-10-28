@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+MATH_DPI = 300
 
 
 class TheoryRenderer:
@@ -41,16 +42,19 @@ class TheoryRenderer:
                 spaceBefore=before,
                 spaceAfter=after,
                 splitLongWords=True,
+                allowWidows=False,
+                allowOrphans=False,
                 keepWithNext=keep,
                 textColor=color,
             )
             for name, face, size, leading, before, after, keep, color in (
-                ("Body", "Japanese", 9.6, 16, 0, 6, False, "#202a34"),
+                ("Body", "Japanese", 10, 17, 0, 7, False, "#202a34"),
                 ("H1", "JapaneseBold", 20, 29, 0, 14, True, "#17384c"),
                 ("H2", "JapaneseBold", 14, 21, 14, 8, True, "#17384c"),
                 ("H3", "JapaneseBold", 11, 17, 10, 6, True, "#17665e"),
-                ("Cell", "Japanese", 8.1, 12, 0, 0, False, "#202a34"),
+                ("Cell", "Japanese", 8.5, 13, 0, 0, False, "#202a34"),
                 ("Caption", "Japanese", 8.5, 13, 2, 10, False, "#40515f"),
+                ("Reference", "Japanese", 9, 14, 0, 9, False, "#202a34"),
                 ("Code", "Courier", 7.2, 10.5, 5, 9, False, "#202a34"),
             )
         }
@@ -76,14 +80,16 @@ class TheoryRenderer:
             self.mathtext.math_to_image(
                 f"${expression}$",
                 path,
-                prop=self.font_properties(size=11 if display else 9.6),
-                dpi=240,
+                prop=self.font_properties(
+                    size=11 if display else 10, math_fontfamily="stix"
+                ),
+                dpi=MATH_DPI,
                 format="png",
             )
             self.math_count += 1
         with self.images.open(path) as bitmap:
             width, height = bitmap.size
-        return path, width * 72 / 240, height * 72 / 240
+        return path, width * 72 / MATH_DPI, height * 72 / MATH_DPI
 
     def inline(self, node: Any) -> str:
         if node.get("class") == "arithmatex":
@@ -117,7 +123,12 @@ class TheoryRenderer:
         expression = "".join(node.itertext())
         number = re.search(r"\\tag\{([^}]+)\}", expression)
         path, width, height = self.math_image(expression, display=True)
-        scale = min(1.0, (self.width - 37) / width)
+        scale = min(1.0, (self.width - 42) / width)
+        if scale < 0.9:
+            label = number[1] if number else expression
+            raise ValueError(
+                f"Equation {label} is too wide to read; split its definitions."
+            )
         image = self.flow.Image(str(path), width=width * scale, height=height * scale)
         table = self.flow.Table(
             [[image, f"({number[1]})" if number else ""]],
@@ -131,6 +142,8 @@ class TheoryRenderer:
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("ALIGN", (0, 0), (0, 0), "CENTER"),
                     ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                     ("TOPPADDING", (0, 0), (-1, -1), 5),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
                 ]
@@ -140,10 +153,7 @@ class TheoryRenderer:
 
     def table(self, node: Any) -> Any:
         rows = [
-            [
-                self.flow.Paragraph(self.inline(cell), self.styles["Cell"])
-                for cell in row
-            ]
+            [self.text_paragraph(self.inline(cell), "Cell") for cell in row]
             for row in node.findall(".//tr")
         ]
         columns = len(rows[0])
@@ -164,13 +174,13 @@ class TheoryRenderer:
             )
         )
         table.spaceBefore, table.spaceAfter = 6, 12
-        return table
+        return self.flow.KeepTogether([table])
 
     def figure(self, node: Any, source: Path) -> Any:
         path = (source.parent / str(node.get("src"))).resolve()
         with self.images.open(path) as bitmap:
             width, height = bitmap.size
-        scale = min(self.width / width, 335 / height)
+        scale = min(self.width / width, 420 / height)
         figure = self.flow.Image(str(path), width=width * scale, height=height * scale)
         figure.keepWithNext = True
         self.figure_count += 1
@@ -178,11 +188,25 @@ class TheoryRenderer:
 
     def blocks(self, document: Any, source: Path) -> list[Any]:
         result = []
-        for node in document:
-            result.extend(self.block(node, source))
+        nodes = list(document)
+        for index, node in enumerate(nodes):
+            blocks = self.block(node, source)
+            if (
+                node.tag == "p"
+                and index + 1 < len(nodes)
+                and nodes[index + 1].get("class") == "arithmatex"
+            ):
+                blocks[-1].keepWithNext = True
+            result.extend(blocks)
         return result
 
     def block(self, node: Any, source: Path) -> list[Any]:
+        identities = _standalone_anchor_ids(node)
+        if identities:
+            bookmarks = [self.flow.AnchorFlowable(identity) for identity in identities]
+            for bookmark in bookmarks:
+                bookmark.keepWithNext = True
+            return bookmarks
         if node.get("class") == "arithmatex":
             return [self.display_math(node)]
         if node.tag == "table":
@@ -200,19 +224,48 @@ class TheoryRenderer:
 
     def paragraph(self, node: Any) -> Any:
         style = {"h1": "H1", "h2": "H2", "h3": "H3"}.get(node.tag, "Body")
-        if (node.text or "").startswith("図"):
+        if re.match(r"^[図表]\d+\.", node.text or ""):
             style = "Caption"
-        return self.flow.Paragraph(self.inline(node), self.styles[style])
+        reference = re.match(r"^\[\d+\]", "".join(node.itertext()).lstrip())
+        if reference:
+            style = "Reference"
+        paragraph = self.text_paragraph(self.inline(node), style)
+        return self.flow.KeepTogether([paragraph]) if reference else paragraph
+
+    def text_paragraph(self, content: str, style: str, **options: Any) -> Any:
+        paragraph = self.flow.Paragraph(content, self.styles[style], **options)
+        # ReportLab measures callbacks by their own width and never draws their
+        # text. An object replacement character keeps CJK's ord() checks valid
+        # for inline equations/anchors while retaining Japanese line breaking.
+        if paragraph.frags and all(
+            fragment.text or hasattr(fragment, "cbDefn") for fragment in paragraph.frags
+        ):
+            for fragment in paragraph.frags:
+                if not fragment.text and hasattr(fragment, "cbDefn"):
+                    fragment.text = "\ufffc"
+            paragraph.style = paragraph.style.clone(style, wordWrap="CJK")
+        return paragraph
 
     def list_items(self, node: Any) -> list[Any]:
         return [
-            self.flow.Paragraph(
+            self.text_paragraph(
                 self.inline(item),
-                self.styles["Body"],
+                "Body",
                 bulletText=f"{index}." if node.tag == "ol" else "•",
             )
             for index, item in enumerate(node, 1)
         ]
+
+
+def _standalone_anchor_ids(node: Any) -> list[str]:
+    if (
+        node.tag == "p"
+        and len(node)
+        and not "".join(node.itertext()).strip()
+        and all(child.tag == "a" and child.get("id") for child in node)
+    ):
+        return [str(child.get("id")) for child in node]
+    return []
 
 
 def _anchor(node: Any, content: str) -> str:
@@ -301,7 +354,7 @@ def render(source: Path, output: Path, font: Path, bold_font: Path) -> tuple[int
             rightMargin=64,
             topMargin=49,
             bottomMargin=44,
-            title="体積平均プラズマモデルの理論と数値検証",
+            title="低圧プラズマの体積平均モデル",
             author="Plasma Global Model technical documentation",
         )
         page.afterFlowable = partial(_outline, page)

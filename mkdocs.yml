@@ -6,7 +6,7 @@ theme:
   name: readthedocs
 nav:
   - モデリングマニュアル・統合仕様: index.md
-  - 理論と数値検証: THEORY.md
+  - 理論・構成・数値検証: THEORY.md
   - 開発・保守: DEVELOPMENT.md
   - 計画と残る課題: ROADMAP.md
 markdown_extensions:
@@ -16,6 +16,8 @@ markdown_extensions:
       generic: true
   - toc:
       permalink: true
+extra_css:
+  - assets/theory.css
 extra_javascript:
   - assets/mathjax.js
   - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml.js

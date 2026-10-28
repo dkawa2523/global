@@ -13,20 +13,14 @@ coverage.json
 coverage.xml
 htmlcov/
 output/pdf/
+work/
+runs/
+figures/
+diagrams/
 tmp/pdfs/
 mutants/
 site/
-site_ja/
-examples/outputs/*
-examples/external/loki_o2_dc_glow_digitized/
-examples/external/loki_o2_dc_glow_*report.yaml
-examples/external/zdplaskin_examples_inventory.yaml
-examples/external/external_tools.local.yaml
-examples/external/external_tools.yaml
-tools/benchmarks/*_report.yaml
-tools/benchmarks/last_report*.yaml
 mkdocs-serve*.log
-mkdocs-ja-serve*.log
 
 .venv/
 .uv-cache/

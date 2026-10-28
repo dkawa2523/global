@@ -1,0 +1,52 @@
+schema_version: 4
+case:
+  name: analytic-decay
+  description: 一次反応 Ar_star → Ar の解析解との比較。速度25 s⁻¹、0.2秒。
+chemistry:
+  species:
+  - id: e
+    charge: -1
+    mass_amu: 0.00054858
+    state_tags:
+    - electron
+  - id: Ar
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+  - id: Ar_plus
+    charge: 1
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+  - id: Ar_star
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+  gas_reactions:
+  - id: decay
+    equation: Ar_star -> Ar
+    rate:
+      kind: first_order
+      rate_s_inv: 25.0
+reactor:
+  zones:
+    plasma:
+      volume_m3: 0.01
+      initial:
+        pressure_Pa: 1.0
+        gas_temperature_K: 300.0
+        mole_fractions:
+          Ar: 0.7
+          Ar_star: 0.3
+        seed_densities_m3:
+          Ar_plus: 1.0e12
+        mean_energy_eV: 3.0
+models:
+  electrons:
+    kind: energy_balance
+run:
+  duration_s: 0.2
+solver:
+  sample_interval_s: 0.002
+output:
+  csv: true

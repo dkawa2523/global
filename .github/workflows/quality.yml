@@ -97,8 +97,8 @@ jobs:
       - name: Check representative physics against minimum numerical versions
         run: >-
           .venv/bin/python -m pytest
-          tests/test_experimental_eedf.py tests/test_v3_approximate_two_term.py
-          tests/test_v3_build_e2e.py tests/test_v3_kinetics.py
+          tests/test_experimental_eedf.py tests/test_approximate_two_term.py
+          tests/test_build_e2e.py tests/test_kinetics.py
           tests/test_result_output.py tests/test_maxwell_rates.py
           tests/test_input.py tests/test_coefficient_csv.py tests/test_external_bindings.py
           tests/test_output_analysis.py
@@ -109,9 +109,9 @@ jobs:
           from pathlib import Path
           from tempfile import TemporaryDirectory
           from plasma_global import load_case, simulate
-          from plasma_global.examples import initialize_example
+          from plasma_global.examples import initialize_example, list_examples
           with TemporaryDirectory() as raw:
-              for name in ("argon_maxwellian", "argon_lxcat"):
+              for name in list_examples():
                   case = initialize_example(name, Path(raw) / name)
                   assert simulate(load_case(case)).status.success is True
           PY

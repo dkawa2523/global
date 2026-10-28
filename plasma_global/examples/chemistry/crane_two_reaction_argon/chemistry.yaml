@@ -1,0 +1,76 @@
+schema_version: 4
+species:
+- id: e
+  phase: gas
+  charge: -1
+  mass_amu: 0.00054858
+  elements: {}
+  state_tags:
+  - electron
+  surfaces: []
+  cv_over_kb: null
+  metadata:
+    display_name: e
+- id: Ar
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  state_tags:
+  - parent
+  - stable
+  surfaces: []
+  cv_over_kb: null
+  metadata:
+    display_name: Ar
+- id: Ar_plus
+  phase: gas
+  charge: 1
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  state_tags:
+  - ion
+  surfaces: []
+  cv_over_kb: null
+  metadata:
+    display_name: Ar+
+gas_reactions:
+- id: CRANE_AR_ION
+  gas_heating_eV: 0.0
+  zones:
+  - plasma
+  surfaces: []
+  metadata:
+    notes: CRANE TwoReactionArgon ionization rate at E/N=30 Td; converted from 2.1736169000623e-12
+      cm3/s.
+  equation: e + Ar -> 2 e + Ar_plus
+  rate: RM_CRANE_AR_ION
+- id: CRANE_ARPLUS_THREE_BODY_RECOMB
+  gas_heating_eV: 0.0
+  zones:
+  - plasma
+  surfaces: []
+  metadata:
+    notes: CRANE TwoReactionArgon three-body recombination; converted from 1.0e-25
+      cm6/s.
+  equation: e + Ar_plus + Ar -> 2 Ar
+  rate: RM_CRANE_ARPLUS_THREE_BODY_RECOMB
+boundary_reactions:
+- id: wall_Ar_plus_neutralization
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata: {}
+  equation: Ar_plus -> Ar
+surface_reactions: []
+rate_models:
+  RM_CRANE_AR_ION:
+    kind: constant
+    value: 2.1736169000623e-18
+  RM_CRANE_ARPLUS_THREE_BODY_RECOMB:
+    kind: constant
+    value: 1.0e-37
+cross_sections: []
+experimental: {}

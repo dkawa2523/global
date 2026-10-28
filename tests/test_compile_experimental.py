@@ -16,7 +16,7 @@ from plasma_global.input.compile_experimental import (
 
 ROOT = Path(__file__).parents[1]
 MINIMAL = ROOT / "tests" / "fixtures" / "minimal" / "case.yaml"
-SMOKE = ROOT / "plasma_global" / "assets" / "examples" / "cases" / "smoke.yaml"
+SMOKE = ROOT / "plasma_global" / "examples" / "cases" / "smoke.yaml"
 
 
 def _smoke_inputs() -> tuple[ResolvedCase, ChemistryData]:

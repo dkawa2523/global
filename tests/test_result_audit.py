@@ -170,7 +170,6 @@ def test_standard_classification_is_an_explicit_minimal_allow_list() -> None:
     crane_path = (
         Path(__file__).parents[1]
         / "plasma_global"
-        / "assets"
         / "examples"
         / "cases"
         / "crane_two_reaction_argon.yaml"
@@ -217,7 +216,6 @@ def test_file_provenance_covers_case_chemistry_curves_and_electron_table() -> No
     case_path = (
         Path(__file__).parents[1]
         / "plasma_global"
-        / "assets"
         / "examples"
         / "cases"
         / "zdplaskin_example2.yaml"

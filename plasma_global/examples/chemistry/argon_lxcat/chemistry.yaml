@@ -1,0 +1,1036 @@
+schema_version: 4
+species:
+- id: e
+  phase: gas
+  charge: -1
+  mass_amu: 0.00054858
+  elements: {}
+  state_tags:
+  - electron
+  surfaces: []
+  cv_over_kb: null
+  metadata:
+    display_name: e
+- id: Ar
+  phase: gas
+  charge: 0
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  state_tags:
+  - parent
+  - stable
+  surfaces: []
+  cv_over_kb: null
+  metadata:
+    display_name: Ar
+- id: Ar_plus
+  phase: gas
+  charge: 1
+  mass_amu: 39.948
+  elements:
+    Ar: 1.0
+  state_tags:
+  - ion
+  surfaces: []
+  cv_over_kb: null
+  metadata:
+    display_name: Ar+
+- id: wafer:*
+  phase: surface
+  charge: 0
+  mass_amu: 0.0
+  elements:
+    site: 1.0
+  state_tags:
+  - site
+  surfaces:
+  - wafer
+  cv_over_kb: null
+  metadata:
+    display_name: wafer:*
+- id: wall:*
+  phase: surface
+  charge: 0
+  mass_amu: 0.0
+  elements:
+    site: 1.0
+  state_tags:
+  - site
+  surfaces:
+  - grounded_wall
+  cv_over_kb: null
+  metadata:
+    display_name: wall:*
+- id: source:*
+  phase: surface
+  charge: 0
+  mass_amu: 0.0
+  elements:
+    site: 1.0
+  state_tags:
+  - site
+  surfaces:
+  - source_wall
+  cv_over_kb: null
+  metadata:
+    display_name: source:*
+gas_reactions:
+- id: G_AR_ION
+  energy_loss_eV: 15.76
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Ground-state argon ionization from the Zenodo/LXCat-derived BOLSIG+ data
+      file
+  equation: e + Ar -> Ar_plus + 2 e
+  rate: RM_E_AR_ION
+- id: G_AR_EXC_01
+  energy_loss_eV: 11.62
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_01
+- id: G_AR_EXC_02
+  energy_loss_eV: 11.83
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_02
+- id: G_AR_EXC_03
+  energy_loss_eV: 14.153
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_03
+- id: G_AR_EXC_04
+  energy_loss_eV: 14.3
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_04
+- id: G_AR_EXC_05
+  energy_loss_eV: 14.09
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_05
+- id: G_AR_EXC_06
+  energy_loss_eV: 14.255
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_06
+- id: G_AR_EXC_07
+  energy_loss_eV: 15.0
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_07
+- id: G_AR_EXC_08
+  energy_loss_eV: 11.55
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_08
+- id: G_AR_EXC_09
+  energy_loss_eV: 11.72
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_09
+- id: G_AR_EXC_10
+  energy_loss_eV: 12.91
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_10
+- id: G_AR_EXC_11
+  energy_loss_eV: 13.08
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_11
+- id: G_AR_EXC_12
+  energy_loss_eV: 13.09
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_12
+- id: G_AR_EXC_13
+  energy_loss_eV: 13.15
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_13
+- id: G_AR_EXC_14
+  energy_loss_eV: 13.17
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_14
+- id: G_AR_EXC_15
+  energy_loss_eV: 13.27
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_15
+- id: G_AR_EXC_16
+  energy_loss_eV: 13.3
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_16
+- id: G_AR_EXC_17
+  energy_loss_eV: 13.33
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_17
+- id: G_AR_EXC_18
+  energy_loss_eV: 13.48
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_18
+- id: G_AR_EXC_19
+  energy_loss_eV: 13.84
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_19
+- id: G_AR_EXC_20
+  energy_loss_eV: 13.84
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_20
+- id: G_AR_EXC_21
+  energy_loss_eV: 13.9
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_21
+- id: G_AR_EXC_22
+  energy_loss_eV: 13.98
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_22
+- id: G_AR_EXC_23
+  energy_loss_eV: 14.01
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_23
+- id: G_AR_EXC_24
+  energy_loss_eV: 14.06
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_24
+- id: G_AR_EXC_25
+  energy_loss_eV: 14.09
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_25
+- id: G_AR_EXC_26
+  energy_loss_eV: 14.21
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_26
+- id: G_AR_EXC_27
+  energy_loss_eV: 14.23
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_27
+- id: G_AR_EXC_28
+  energy_loss_eV: 14.24
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_28
+- id: G_AR_EXC_29
+  energy_loss_eV: 14.07
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_29
+- id: G_AR_EXC_30
+  energy_loss_eV: 14.241
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata:
+    notes: Argon excitation represented as an electron-energy-loss channel; no excited-state
+      density is evolved
+  equation: e + Ar -> Ar + e
+  rate: RM_E_AR_EXC_30
+boundary_reactions:
+- id: wall_Ar_plus_neutralization
+  gas_heating_eV: 0.0
+  zones: []
+  surfaces: []
+  metadata: {}
+  equation: Ar_plus -> Ar
+surface_reactions: []
+rate_models:
+  RM_E_AR_ION:
+    kind: electron_impact
+    cross_section: xs_ar_ionization_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_01:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_01_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_02:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_02_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_03:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_03_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_04:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_04_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_05:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_05_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_06:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_06_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_07:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_07_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_08:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_08_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_09:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_09_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_10:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_10_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_11:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_11_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_12:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_12_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_13:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_13_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_14:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_14_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_15:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_15_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_16:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_16_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_17:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_17_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_18:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_18_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_19:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_19_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_20:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_20_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_21:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_21_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_22:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_22_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_23:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_23_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_24:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_24_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_25:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_25_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_26:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_26_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_27:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_27_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_28:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_28_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_29:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_29_zenodo
+    branching_yield: 1.0
+  RM_E_AR_EXC_30:
+    kind: electron_impact
+    cross_section: xs_ar_excitation_30_zenodo
+    branching_yield: 1.0
+cross_sections:
+- id: xs_ar_momentum_zenodo
+  kind: momentum_transfer
+  target: Ar
+  threshold_eV: 1.36e-05
+  energy_loss_eV: 0.0
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: ELASTIC
+    original_process: E + Ar -> E + Ar((3p6)1S0), Momentum
+    original_comment: 'residual ELASTIC Momentum-transfer : Ar((3p6)1S0)  | based
+      on from ELASTIC (from TOTAL (Experimental average from Kurokawa (2011), Buckman))'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_ionization_zenodo
+  kind: ionization
+  target: Ar
+  threshold_eV: 15.76
+  energy_loss_eV: 15.76
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: IONIZATION
+    original_process: E + Ar -> E + Ar+, Total
+    original_comment: 'IONIZATION Total : Ar+  | based on RBEQ Fit to Rapp&Englander-Golden
+      (1965), Schram'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_01_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 11.62
+  energy_loss_eV: 11.62
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4s)[3/2]3P1?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4s)[3/2]3P1?)  | based on Fit
+      based on Khakoo 2004'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_02_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 11.83
+  energy_loss_eV: 11.83
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4s')[1/2]1P1?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4s'')[1/2]1P1?)  | based on Fit
+      based on Khakoo 2004'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_03_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.153
+  energy_loss_eV: 14.153
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[3/2]1?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[3/2]1?)  | based on Fit based
+      on *Chutjian 1981 and Chilton'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_04_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.3
+  energy_loss_eV: 14.3
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d')[3/2]1?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d'')[3/2]1?)  | based on Fit
+      based on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_05_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.09
+  energy_loss_eV: 14.09
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((5s)[3/2]P1?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((5s)[3/2]P1?)  | based on Fit based
+      on Stewart 2002'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_06_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.255
+  energy_loss_eV: 14.255
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((5s')[1/2]P1?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((5s'')[1/2]P1?)  | based on Fit
+      based on Stewart 2002'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_07_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 15.0
+  energy_loss_eV: 15.0
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*(nf), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*(nf)  | based on Electronic Complementary
+      optically allowed excitation from optical oscillator strengths above the 5s
+      states (from 4d and beyond) : ? f = 0.293'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_08_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 11.55
+  energy_loss_eV: 11.55
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4s)[3/2]3P2?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4s)[3/2]3P2?)  | based on Fit
+      based on Khakoo 2004'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_09_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 11.72
+  energy_loss_eV: 11.72
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4s')[1/2]3P0?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4s'')[1/2]3P0?)  | based on Fit
+      based on Khakoo 2004'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_10_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 12.91
+  energy_loss_eV: 12.91
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p)[1/2]1), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p)[1/2]1)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_11_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.08
+  energy_loss_eV: 13.08
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p)[5/2]3D3), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p)[5/2]3D3)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_12_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.09
+  energy_loss_eV: 13.09
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p)[5/2]2), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p)[5/2]2)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_13_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.15
+  energy_loss_eV: 13.15
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p)[3/2]1), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p)[3/2]1)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_14_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.17
+  energy_loss_eV: 13.17
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p)[3/2]2), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p)[3/2]2)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_15_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.27
+  energy_loss_eV: 13.27
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p)[1/2]0 + (4p')[3/2]1), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p)[1/2]0 + (4p'')[3/2]1)  | based
+      on Fit based on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_16_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.3
+  energy_loss_eV: 13.3
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p')[3/2]2), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p'')[3/2]2)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_17_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.33
+  energy_loss_eV: 13.33
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p')[1/2]1), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p'')[1/2]1)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_18_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.48
+  energy_loss_eV: 13.48
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((4p')[1/2]0), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((4p'')[1/2]0)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_19_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.84
+  energy_loss_eV: 13.84
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[1/2]3P0?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[1/2]3P0?)  | based on Fit
+      based on Chilton&Lin 1999'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_20_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.84
+  energy_loss_eV: 13.84
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[1/2]3P0?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[1/2]3P0?)  | based on Fit
+      based on *Chutjian 1981 Optically allowed cannot be distinguished from forbidden'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_21_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.9
+  energy_loss_eV: 13.9
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[3/2]2?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[3/2]2?)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_22_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 13.98
+  energy_loss_eV: 13.98
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[7/2]3F4?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[7/2]3F4?)  | based on Fit
+      based on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_23_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.01
+  energy_loss_eV: 14.01
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[7/2]3?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[7/2]3?)  | based on Fit based
+      on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_24_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.06
+  energy_loss_eV: 14.06
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[5/2]2?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[5/2]2?)  | based on Fit based
+      on Chilton&Lin 1999'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_25_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.09
+  energy_loss_eV: 14.09
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d)[5/2]3?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d)[5/2]3?)  | based on Fit based
+      on Chilton&Lin 1999'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_26_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.21
+  energy_loss_eV: 14.21
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d')[5/2]2?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d'')[5/2]2?)  | based on Fit
+      based on *Chutjian 1981'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_27_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.23
+  energy_loss_eV: 14.23
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d')[3/2]2?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d'')[3/2]2?)  | based on Fit
+      based on Chilton&Lin 1999'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_28_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.24
+  energy_loss_eV: 14.24
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((3d')[5/2]3?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((3d'')[5/2]3?)  | based on Fit
+      based on Chilton&Lin 1999'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_29_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.07
+  energy_loss_eV: 14.07
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((5s)[3/2]3P2?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((5s)[3/2]3P2?)  | based on Fit
+      based on Stewart 2002'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+- id: xs_ar_excitation_30_zenodo
+  kind: excitation
+  target: Ar
+  threshold_eV: 14.241
+  energy_loss_eV: 14.241
+  metadata:
+    source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
+    source_doi: 10.5281/zenodo.8192503
+    source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
+    license: CC-BY-4.0
+    original_kind: EXCITATION
+    original_process: E + Ar -> E + Ar*((5s')[1/2]3P0?), Electronic
+    original_comment: 'EXCITATION Electronic : Ar*((5s'')[1/2]3P0?)  | based on Fit
+      based on Stewart 2002'
+    updated: '2023-06-03'
+  file: cross_sections.csv
+experimental: {}

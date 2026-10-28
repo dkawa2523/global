@@ -122,10 +122,25 @@ def test_cli_audit_export_and_plot_use_canonical_syntax(tmp_path, monkeypatch) -
     assert calls["plot"][2]["series"] == ["density"]
 
 
-def test_cli_models_lists_schema_v3_discriminator_ids(capsys) -> None:
+def test_cli_models_lists_schema_v4_discriminator_ids(capsys) -> None:
     assert cli.main(["models", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["electrons"] == ["energy_balance", "local_field"]
     assert "experimental.icp" in payload["power"]
     assert "bohm" in payload["wall_transport"]
+
+
+def test_init_lists_installed_inputs_without_an_output_directory(
+    tmp_path, capsys
+) -> None:
+    assert cli.main(["init", "--list"]) == 0
+    assert "benchmarks/analytic-decay" in capsys.readouterr().out
+    assert cli.main(["init"]) == 2
+    assert "--output" in capsys.readouterr().err
+    target = tmp_path / "not-created"
+    assert cli.main(["init", "--list", "--output", str(target)]) == 2
+    assert cli.main(["init", "argon_maxwellian", "--list"]) == 2
+    assert cli.main(["init", "unknown-case", "--output", str(target)]) == 2
+    assert "unknown example" in capsys.readouterr().err
+    assert not target.exists()

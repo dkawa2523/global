@@ -11,7 +11,7 @@ from plasma_global import load_case, simulate
 from plasma_global.audit import audit_case
 
 ROOT = Path(__file__).parents[1]
-SMOKE_CASE = ROOT / "plasma_global" / "assets" / "examples" / "cases" / "smoke.yaml"
+SMOKE_CASE = ROOT / "plasma_global" / "examples" / "cases" / "smoke.yaml"
 
 
 @pytest.mark.nightly

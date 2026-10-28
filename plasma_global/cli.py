@@ -125,9 +125,20 @@ def _cmd_migrate_v3(args: argparse.Namespace) -> int:
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
-    from plasma_global.examples import initialize_example
+    from plasma_global.examples import initialize_example, list_examples
 
-    print(initialize_example(args.example, args.output))
+    if args.list:
+        if args.example is not None or args.output is not None:
+            raise ValueError("init --list does not take an example or --output")
+        for name, description in list_examples().items():
+            summary = " ".join(description.split()).split(". ", 1)[0].split("。", 1)[0]
+            print(f"{name}  {summary}")
+        return 0
+    if args.output is None:
+        raise ValueError(
+            "init requires --output; use init --list to see available cases"
+        )
+    print(initialize_example(args.example or "argon_maxwellian", args.output))
     return 0
 
 
@@ -256,8 +267,11 @@ def _parser() -> argparse.ArgumentParser:
     initialize = commands.add_parser(
         "init", help="Copy a working example with its input data"
     )
-    initialize.add_argument("example", nargs="?", default="argon_maxwellian")
-    initialize.add_argument("--output", type=Path, required=True)
+    initialize.add_argument("example", nargs="?")
+    initialize.add_argument(
+        "--list", action="store_true", help="List installed examples and benchmarks"
+    )
+    initialize.add_argument("--output", type=Path)
     initialize.set_defaults(handler=_cmd_init)
 
     migrate = commands.add_parser(

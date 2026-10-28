@@ -20,7 +20,6 @@ DEFAULT_RAW_DIR = ROOT / "benchmarks" / "raw" / "zdplaskin_example2_eovern"
 DEFAULT_OUTPUT = (
     ROOT
     / "plasma_global"
-    / "assets"
     / "examples"
     / "data"
     / "zdplaskin_example2"
