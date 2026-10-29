@@ -41,6 +41,7 @@ dev = [
   "radon>=6.0",
   "ruff>=0.5",
   "setuptools>=68",
+  "types-Markdown>=3.7",
   "types-PyYAML>=6.0",
   "vulture>=2.13",
   "wheel",

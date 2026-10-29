@@ -122,14 +122,41 @@ class TheoryRenderer:
     def display_math(self, node: Any) -> Any:
         expression = "".join(node.itertext())
         number = re.search(r"\\tag\{([^}]+)\}", expression)
-        path, width, height = self.math_image(expression, display=True)
-        scale = min(1.0, (self.width - 42) / width)
-        if scale < 0.9:
-            label = number[1] if number else expression
-            raise ValueError(
-                f"Equation {label} is too wide to read; split its definitions."
+        body = re.sub(r"\\tag\{[^}]+\}", "", expression.strip()[2:-2]).strip()
+        grouped = re.fullmatch(
+            r"\\begin\{gathered\}(.*?)\\end\{gathered\}", body, re.DOTALL
+        )
+        rows = re.split(r"\\\\(?:\[[^\]]+\])?", grouped[1]) if grouped else [body]
+        images = []
+        for row in rows:
+            path, width, height = self.math_image(
+                r"\[" + row.strip() + r"\]", display=True
             )
-        image = self.flow.Image(str(path), width=width * scale, height=height * scale)
+            scale = min(1.0, (self.width - 42) / width)
+            if scale < 0.9:
+                label = number[1] if number else body
+                raise ValueError(
+                    f"Equation {label} is too wide to read; split its definitions."
+                )
+            images.append(
+                self.flow.Image(str(path), width=width * scale, height=height * scale)
+            )
+        image = images[0]
+        if len(images) > 1:
+            image = self.flow.Table(
+                [[item] for item in images], colWidths=[self.width - 32]
+            )
+            image.setStyle(
+                self.flow.TableStyle(
+                    [
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                    ]
+                )
+            )
         table = self.flow.Table(
             [[image, f"({number[1]})" if number else ""]],
             colWidths=[self.width - 32, 32],
@@ -338,7 +365,7 @@ def render(source: Path, output: Path, font: Path, bold_font: Path) -> tuple[int
     markdown = importlib.import_module("markdown")
     html = markdown.markdown(
         source.read_text(encoding="utf-8"),
-        extensions=["tables", "fenced_code", "pymdownx.arithmatex"],
+        extensions=["tools.doc_math", "tables", "fenced_code", "pymdownx.arithmatex"],
         extension_configs={"pymdownx.arithmatex": {"generic": True}},
     )
     safe_xml = importlib.import_module("defusedxml.ElementTree")

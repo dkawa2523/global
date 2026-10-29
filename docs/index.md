@@ -1085,14 +1085,14 @@ case直下の `experimental` で使う拡張だけを有効化します。これ
 | 区分 | 変数 | 単位・既定値 | 意味 |
 |---|---|---|---|
 | chemistry.experimental | `state_variables` | 状態ID→設定 | 宣言する補助状態 |
-| state_variables.<id> | `scope` | `global` / `zone` / `surface`、必須 | 状態を全体で1つ持つか、zone・surfaceごとに持つか |
+| `state_variables.<id>` | `scope` | `global` / `zone` / `surface`、必須 | 状態を全体で1つ持つか、zone・surfaceごとに持つか |
 | 同上 | `initial` | 状態の単位、既定0 | 初期値 |
 | 同上 | `lower_bound` | 状態の単位、既定0 | 許容下限。制限なしはnull |
 | 同上 | `upper_bound` | 状態の単位、既定null | 許容上限。下限以上にする |
 | 同上 | `zones` | ID list、省略可 | zone scopeの対象。省略時は全zone |
 | 同上 | `surfaces` | ID list、省略可 | surface scopeの対象。省略時は全surface |
 | chemistry.experimental | `processes` | 過程ID→設定 | 状態の時間変化を与える項 |
-| processes.<id> | `kind` | `source` / `relaxation` / `ion_flux_source` | 一定源、平衡値への緩和、イオン束比例源 |
+| `processes.<id>` | `kind` | `source` / `relaxation` / `ion_flux_source` | 一定源、平衡値への緩和、イオン束比例源 |
 | 同上 | `target` | 状態ID、必須 | 時間変化を加える補助状態 |
 | 同上 | `zones` | ID list、省略可 | 過程を適用するzone。targetのscopeと一致させる |
 | 同上 | `surfaces` | ID list、省略可 | 過程を適用するsurface。targetのscopeと一致させる |
@@ -1111,7 +1111,7 @@ global scopeは領域listを指定しません。補助状態の出力名は `�
 
 port自体の変数は次の3項目です。装置に固定した回路係数と、時間で変える指令値を分けます。
 
-| 変数（power_ports.<port>以下） | 既定・必須性 | 意味 |
+| 変数（`power_ports.<port>`以下） | 既定・必須性 | 意味 |
 |---|---|---|
 | `zone_id` | 必須 | 電力を与えるzone。発電機の設置位置ではなく、収支へ加える容積を指定 |
 | `coupling_target` | 空文字列 | experimental CCPの接続surface ID。指定する場合は同じzoneの面。その他のモデルでは指定しない |
@@ -1653,7 +1653,7 @@ networks:
     format: svg
 ```
 
-| 変数（networks.<name>以下） | 選択肢・既定値 | 意味 |
+| 変数（`networks.<name>`以下） | 選択肢・既定値 | 意味 |
 |---|---|---|
 | `mode` | mechanism / events、既定mechanism | 反応参加関係の構造図か、保存反応量で重み付けした図か |
 | `measure` | rate / cumulative、既定cumulative | events図の重み。選択時刻の頻度s⁻¹、またはrun開始からの積分回数 |

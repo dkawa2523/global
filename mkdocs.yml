@@ -10,6 +10,7 @@ nav:
   - 開発・保守: DEVELOPMENT.md
   - 計画と残る課題: ROADMAP.md
 markdown_extensions:
+  - tools.doc_math
   - fenced_code
   - tables
   - pymdownx.arithmatex:

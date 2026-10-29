@@ -2,7 +2,7 @@
 
 **物理的背景、連成方程式、計算構成および数値検証**
 
-技術資料 / 2026年10月28日改訂 / Plasma Global Model 0.5.0
+技術資料 / 2026年10月29日改訂 / Plasma Global Model 0.5.0
 
 本稿は、入力schema v4・結果format v3に対応する数値・物理実装を解説する。
 数値検証の対象入力と実装は、保存した数値記録のファイル一覧・内容hashで特定する。
@@ -211,14 +211,14 @@ CLIの`run`はこれらを順に実行する入口である。
 
 | 記号 | 単位 | 定義 |
 |---|---|---|
-| $n_s,\ n_e$ | m⁻³ | 重粒子種sと電子の数密度 |
-| $V,\ A_b$ | m³, m² | 計算容積と境界面bの面積 |
-| $R_r,\ r_r$ | m⁻³ s⁻¹, m⁻² s⁻¹ | 気相・表面反応の進行速度 |
-| $k_r,\ \nu_{s,r}$ | 反応次数に依存, 1 | 速度係数と正味化学量論係数 |
-| $T_g,\ \theta_e$ | K, eV | 気体温度とエネルギー単位の等価電子温度 |
-| $\bar\varepsilon,\ W_e,\ U_g$ | eV, J m⁻³, J m⁻³ | 平均電子エネルギー、電子・気体内部エネルギー密度 |
-| $\Gamma,\ C,\ S$ | m⁻² s⁻¹, m³ s⁻¹, m³ s⁻¹ | 粒子束、内部移送係数、排気速度 |
-| $e,\ k_B,\ m_e,\ Z_s$ | C, J K⁻¹, kg, 1 | 素電荷の正値、Boltzmann定数、電子質量、電荷数 |
+| $`n_s,\ n_e`$ | m⁻³ | 重粒子種sと電子の数密度 |
+| $`V,\ A_b`$ | m³, m² | 計算容積と境界面bの面積 |
+| $`R_r,\ r_r`$ | m⁻³ s⁻¹, m⁻² s⁻¹ | 気相・表面反応の進行速度 |
+| $`k_r,\ \nu_{s,r}`$ | 反応次数に依存, 1 | 速度係数と正味化学量論係数 |
+| $`T_g,\ \theta_e`$ | K, eV | 気体温度とエネルギー単位の等価電子温度 |
+| $`\bar\varepsilon,\ W_e,\ U_g`$ | eV, J m⁻³, J m⁻³ | 平均電子エネルギー、電子・気体内部エネルギー密度 |
+| $`\Gamma,\ C,\ S`$ | m⁻² s⁻¹, m³ s⁻¹, m³ s⁻¹ | 粒子束、内部移送係数、排気速度 |
+| $`e,\ k_B,\ m_e,\ Z_s`$ | C, J K⁻¹, kg, 1 | 素電荷の正値、Boltzmann定数、電子質量、電荷数 |
 
 ## 3. 連続の式から体積平均方程式へ
 
@@ -227,28 +227,28 @@ CLIの`run`はこれらを順に実行する入口である。
 種sの局所的な連続の式は、粒子数の時間変化、輸送、反応の釣り合いである。
 粒子束をベクトルΓ、反応rの正味化学量論係数をνとする。
 
-$$
+```math
 \frac{\partial n_s}{\partial t}+\nabla\cdot\boldsymbol{\Gamma}_s=\sum_r\nu_{s,r}R_r. \tag{1}
-$$
+```
 
 固定容積Vの平均密度を次で定義する。
 
-$$
+```math
 \bar n_s=\frac{1}{V}\int_V n_s\,dV. \tag{2}
-$$
+```
 
 式(1)を積分し、発散定理を使うと次式を得る。法線は容積の外向きである。
 
-$$
+```math
 \frac{d\bar n_s}{dt}=\sum_r\nu_{s,r}\overline{R_r}-\frac{1}{V}\oint_{\partial V}\boldsymbol{\Gamma}_s\cdot\hat{\boldsymbol{n}}\,dA. \tag{3}
-$$
+```
 
 ここまでの平均操作は厳密である。globalモデルの近似は、平均反応速度と境界流束を
 少数の平均量から評価する段階で導入される。二体反応の例では、密度積の平均は次になる。
 
-$$
+```math
 \overline{n_a n_b}=\bar n_a\bar n_b+\overline{(n_a-\bar n_a)(n_b-\bar n_b)}. \tag{4}
-$$
+```
 
 平均密度の積で反応を計算するときは、右辺最後の空間相関を省いている。
 温度や電子分布に依存する速度係数にも空間相関があり得る。
@@ -259,9 +259,9 @@ $$
 
 以後、nは平均密度を表す。本実装の重粒子方程式を、機能ごとの寄与で書けば次になる。
 
-$$
+```math
 \frac{dn_s}{dt}=\sum_r\nu_{s,r}R_r+S_s^{\mathrm{wall}}+S_s^{\mathrm{surf}}+S_s^{\mathrm{flow}}. \tag{5}
-$$
+```
 
 右辺の単位はすべてm⁻³ s⁻¹である。
 気相反応は容積内の反応速度、壁・表面反応は面反応速度に面積／体積比を掛けた寄与、
@@ -275,11 +275,11 @@ $$
 反応物の係数をα、生成物をβとし、正味係数をν=β−αとする。
 質量作用則で表す気相反応の進行速度は次式である。電子は重粒子の積と分けて記す。
 
-$$
+```math
 R_r=k_r(\mathcal{C})n_e^{\alpha_{e,r}}\prod_s n_s^{\alpha_{s,r}}. \tag{6}
-$$
+```
 
-条件集合 $\mathcal{C}$ には電子平均エネルギー、気体温度、換算電場などが入る。
+条件集合 $`\mathcal{C}`$ には電子平均エネルギー、気体温度、換算電場などが入る。
 総反応次数をqとすると、kの単位はmの3(q−1)乗毎秒である。
 一方、Rの単位は反応次数にかかわらずm⁻³ s⁻¹であり、V倍すると毎秒の反応イベント頻度になる。
 特定種の生成速度は、さらにその種の正味係数νを掛けて求める。
@@ -291,22 +291,26 @@ $$
 速度式として、一定係数、一次速度、Arrhenius型、一変数表、電子衝突断面積・電子係数表を選べる。
 Arrhenius型では、振幅の基準温度を300 Kとする次式を使う。
 
-$$
+```math
 k(T_g)=A\left(\frac{T_g}{300\,\mathrm{K}}\right)^\beta\exp\left(-\frac{eE_a}{k_BT_g}\right). \tag{7}
-$$
+```
 
-活性化エネルギー $E_a$の入力単位はeVである。
+活性化エネルギー $`E_a`$の入力単位はeVである。
 係数を移植するときは、この温度規格化、反応次数、単位、第三体や圧力依存の扱いを揃える。
 入力表の欠落係数は、0や別の電子モデルで自動補完しない。
 
 ### 4.2 元素、電荷、表面サイトの保存
 
 種sに含まれる元素aの原子数をbとする。閉じた気相反応には、元素と電荷の保存条件がある。
-電子の正味生成係数を $\nu_{e,r}$と書く。
+電子の正味生成係数を $`\nu_{e,r}`$と書く。
 
-$$
-\sum_s b_{a,s}\nu_{s,r}=0,\qquad \sum_s Z_s\nu_{s,r}-\nu_{e,r}=0. \tag{8}
-$$
+```math
+\begin{gathered}
+\sum_s b_{a,s}\nu_{s,r}=0,\\[3pt]
+\sum_s Z_s\nu_{s,r}-\nu_{e,r}=0.
+\end{gathered}
+\tag{8}
+```
 
 一つの閉じた容積では、密度を体積倍した粒子数で保存量を評価する。
 壁・入口・排気を含む場合には、その交換先まで収支に含める。
@@ -318,9 +322,13 @@ $$
 標準構成では、電子密度を重粒子の正味電荷から準中性条件で求める。
 気体圧力は電子を除く全重粒子の理想気体圧力として計算する。
 
-$$
-n_e=\sum_s Z_s n_s,\qquad p=k_BT_g\sum_s n_s. \tag{9}
-$$
+```math
+\begin{gathered}
+n_e=\sum_s Z_s n_s,\\[3pt]
+p=k_BT_g\sum_s n_s.
+\end{gathered}
+\tag{9}
+```
 
 圧力の和にはイオンを含める。初期圧力・温度・モル分率を使う設定では、
 全重粒子密度から荷電種の初期密度を引き、残りを中性組成へ配分する。
@@ -343,17 +351,21 @@ Poisson方程式を解かないため、シース内の電位・電荷分布は�
 エネルギーをeVで表し、電子一個を選んだときの確率密度をFとする。
 本稿の分布関数は、密度を含む位相空間分布ではなく、次の規格化を満たすエネルギー確率密度である。
 
-$$
-\int_0^\infty F(\varepsilon)\,d\varepsilon=1,\qquad \bar\varepsilon=\int_0^\infty\varepsilon F(\varepsilon)\,d\varepsilon. \tag{10}
-$$
+```math
+\begin{gathered}
+\int_0^\infty F(\varepsilon)\,d\varepsilon=1,\\[3pt]
+\bar\varepsilon=\int_0^\infty\varepsilon F(\varepsilon)\,d\varepsilon.
+\end{gathered}
+\tag{10}
+```
 
-等価電子温度 $\theta_e$ は、Kelvin温度との関係を $\theta_e=k_BT_e/e$、平均エネルギーとの関係を $\theta_e=2\bar\varepsilon/3$ とする。
+等価電子温度 $`\theta_e`$ は、Kelvin温度との関係を $`\theta_e=k_BT_e/e`$、平均エネルギーとの関係を $`\theta_e=2\bar\varepsilon/3`$ とする。
 非Maxwellian分布に対してもこの平均値を出力するが、分布全体が温度一個で決まることは仮定しない。
 Maxwellianのエネルギー確率密度は次式である。
 
-$$
+```math
 F_M(\varepsilon;\theta_e)=\frac{2\sqrt{\varepsilon}}{\sqrt{\pi}\theta_e^{3/2}}\exp(-\varepsilon/\theta_e). \tag{11}
-$$
+```
 
 平均エネルギー3 eVは等価電子温度2 eVに対応する。
 一方、気体温度300 Kのエネルギー相当は約0.02585 eVである。
@@ -364,15 +376,15 @@ $$
 電子の速度と衝突断面積を、エネルギー分布にわたって平均すると速度係数を得る。
 重粒子の熱速度を電子速度に対して無視する近似では、次式になる。
 
-$$
+```math
 k_r=\int_0^\infty\sigma_r(\varepsilon)\sqrt{\frac{2e\varepsilon}{m_e}}F(\varepsilon)\,d\varepsilon. \tag{12}
-$$
+```
 
 Maxwellianを代入すれば、積分は次の形に整理できる。
 
-$$
+```math
 k_r(\theta_e)=\sqrt{\frac{8e}{\pi m_e}}\theta_e^{-3/2}\int\sigma_r(\varepsilon)\varepsilon e^{-\varepsilon/\theta_e}\,d\varepsilon. \tag{13}
-$$
+```
 
 本実装は、収録断面積をエネルギーの区分線形関数とみなし、各区間を解析的に積分する。
 途中に固定の速度係数表を作らないため、その表の補間誤差は加わらない。
@@ -380,15 +392,15 @@ $$
 
 一つの区間でσ=a+bεと書くと、必要な積分は次のモーメントで表せる。
 
-$$
+```math
 I_q(l,u)=\theta_e^{q+1}\left[\Gamma(q+1,l/\theta_e)-\Gamma(q+1,u/\theta_e)\right]. \tag{14}
-$$
+```
 
-区間の寄与は $aI_1+bI_2$となる。Γは上側不完全gamma関数である。
+区間の寄与は $`aI_1+bI_2`$となる。Γは上側不完全gamma関数である。
 実装では、狭い区間で近い原始関数を差し引く桁落ちを避けるため、
 区間始点を移したモーメントと`expm1`を使う。
 
-断面積の収録範囲外を外挿しない。終端エネルギーを $E_{\max}$とし、
+断面積の収録範囲外を外挿しない。終端エネルギーを $`E_{\max}`$とし、
 Maxwellianのエネルギー重み付き裾比が10⁻⁶以下になることを確認する。
 さらに、収録最大断面積を終端より上へ一定延長した仮定上の寄与が、
 収録域積分の10⁻³以下であることを要求する。
@@ -408,9 +420,9 @@ LXCatはこれらの基礎データを共有する基盤であり、個々のデ
 
 移動度μと換算移動度μNは異なる物理量として扱う。密度への換算は次式による。
 
-$$
+```math
 \mu(N)=\frac{(\mu N)_{\mathrm{table}}}{N}=\mu_{\mathrm{ref}}\frac{N_{\mathrm{ref}}}{N}. \tag{15}
-$$
+```
 
 絶対移動度の表には基準密度を明示する。表範囲外の既定動作はエラーであり、
 端値保持を明示しても、その範囲で係数が物理的に妥当だと確認されたことにはならない。
@@ -420,36 +432,36 @@ $$
 
 ### 6.1 電子エネルギーを密度として積分する
 
-energy-balance方式では、電子エネルギー密度 $W_e$を状態として積分する。
+energy-balance方式では、電子エネルギー密度 $`W_e`$を状態として積分する。
 電子数が変化しても、その時刻の密度から平均エネルギーを求め直せる。
 
-$$
+```math
 W_e=en_e\bar\varepsilon=\frac{3}{2}en_e\theta_e. \tag{16}
-$$
+```
 
 電子吸収電力、反応、壁面損失、弾性衝突、内部移送の寄与を合計する。
-反応エネルギー項を $Q_{\mathrm{chem}}$と書く。
+反応エネルギー項を $`Q_{\mathrm{chem}}`$と書く。
 
-$$
+```math
 \frac{dW_e}{dt}=\frac{P_e}{V}+Q_{\mathrm{chem}}-Q_{e,\mathrm{wall}}-Q_{eg}+S_e^E. \tag{17}
-$$
+```
 
-$$
+```math
 Q_{\mathrm{chem}}=e\sum_r\Delta\varepsilon_{e,r}R_r.
-$$
+```
 
 電子へのエネルギー移送を正とする。例えば電離で15.76 eV失う反応には、
 その損失に対応する負の移送量を与える。すべての項の単位はW m⁻³であり、
-吸収電力 $P_e$の単位Wとは体積の係数だけ異なる。
+吸収電力 $`P_e`$の単位Wとは体積の係数だけ異なる。
 温度自体を独立に積分しないため、電子数の変化による温度変化を別項として二重に加える必要はない。
 
 ### 6.2 電子と中性気体の弾性エネルギー交換
 
-中性種jの運動量移行速度係数を $k_{m,j}$とすると、本実装の交換項は次式である。
+中性種jの運動量移行速度係数を $`k_{m,j}`$とすると、本実装の交換項は次式である。
 
-$$
+```math
 Q_{eg}=3en_e\left(\theta_e-\frac{k_BT_g}{e}\right)\sum_j\frac{m_e}{m_j}n_jk_{m,j}. \tag{18}
-$$
+```
 
 電子が気体より高温ならQegは正であり、電子から引いた同じ値を気体へ加える。
 温度関係が逆になれば符号も反転する。これは電子と気体の内部交換である。
@@ -460,38 +472,46 @@ $$
 ### 6.3 気体温度固定と内部エネルギー方式
 
 既定の固定気体温度は、外部環境が温度を保つ近似に相当する。
-気体の加熱・冷却を解く場合は、各種の定積熱容量 $c_{v,s}$を与え、内部エネルギー密度を積分する。
+気体の加熱・冷却を解く場合は、各種の定積熱容量 $`c_{v,s}`$を与え、内部エネルギー密度を積分する。
 
-$$
-U_g=T_g\sum_s c_{v,s}n_s,\qquad T_g=\frac{U_g}{\sum_s c_{v,s}n_s}. \tag{19a}
-$$
+```math
+\begin{gathered}
+U_g=T_g\sum_s c_{v,s}n_s,\\[3pt]
+T_g=\frac{U_g}{\sum_s c_{v,s}n_s}.
+\end{gathered}
+\tag{19a}
+```
 
 気体へ与える電力、反応・表面からの指定加熱、式(18)、壁熱交換、粒子の流出入を含める。
-加熱・熱交換をまとめた体積項を $Q_g$、流れによる項を $S_g^{\mathrm{flow}}$、
-壁・表面との粒子交換に伴う項を $S_g^{\mathrm{part}}$ とすると、
+加熱・熱交換をまとめた体積項を $`Q_g`$、流れによる項を $`S_g^{\mathrm{flow}}`$、
+壁・表面との粒子交換に伴う項を $`S_g^{\mathrm{part}}`$ とすると、
 内部エネルギーの収支は次になる。
 
-$$
+```math
 \frac{dU_g}{dt}=Q_g+S_g^{\mathrm{flow}}+S_g^{\mathrm{part}}. \tag{19b}
-$$
+```
 
-$$
+```math
 Q_g=\frac{P_g}{V}+Q_{g,\mathrm{chem}}+Q_{g,\mathrm{surf}}+Q_{eg}+Q_{g,\mathrm{wall}}.
-$$
+```
 
-$Q_{g,\mathrm{chem}}$ と $Q_{g,\mathrm{surf}}$ は、各反応から気体へ渡ると指定した熱である。
-壁との熱交換は、周波数 $\nu_{\mathrm{th}}$で壁温に対応する内部エネルギーへ緩和する形で与える。
+$`Q_{g,\mathrm{chem}}`$ と $`Q_{g,\mathrm{surf}}`$ は、各反応から気体へ渡ると指定した熱である。
+壁との熱交換は、周波数 $`\nu_{\mathrm{th}}`$で壁温に対応する内部エネルギーへ緩和する形で与える。
 
-$$
+```math
 Q_{g,\mathrm{wall}}=-\nu_{\mathrm{th}}\left[U_g-T_w\sum_s c_{v,s}n_s\right]. \tag{20}
-$$
+```
 
 開いた固定容積を通る流れには、内部エネルギーに加えて流動仕事がある。
-エンタルピー密度 $H_g$と、入口から種sが持ち込むエネルギー流は次になる。
+エンタルピー密度 $`H_g`$と、入口から種sが持ち込むエネルギー流は次になる。
 
-$$
-H_g=U_g+p,\qquad \dot E_{\mathrm{in},s}=\dot N_s(c_{v,s}+k_B)T_{\mathrm{in}}. \tag{21}
-$$
+```math
+\begin{gathered}
+H_g=U_g+p,\\[3pt]
+\dot E_{\mathrm{in},s}=\dot N_s(c_{v,s}+k_B)T_{\mathrm{in}}.
+\end{gathered}
+\tag{21}
+```
 
 壁・表面との粒子交換には、現在温度での種の内部エネルギーを対応させる。
 熱容量や反応熱を省略した場合に、その値が材料名や種名から自動推定されることはない。
@@ -504,17 +524,21 @@ $$
 イオンの壁損失は、放電中の粒子寿命と電子エネルギー損失を結ぶ。
 冷イオン近似でのBohm速度と、境界面bへの入射束を次で表す。
 
-$$
-u_{B,i}=\sqrt{\frac{Z_ie\theta_e}{m_i}},\qquad \Gamma_{i,b}=h_{i,b}n_i u_{B,i}. \tag{22}
-$$
+```math
+\begin{gathered}
+u_{B,i}=\sqrt{\frac{Z_ie\theta_e}{m_i}},\\[3pt]
+\Gamma_{i,b}=h_{i,b}n_i u_{B,i}.
+\end{gathered}
+\tag{22}
+```
 
 hはシース端密度と容積平均密度の比である。
 数値を指定した場合、その値へ別の0.61係数を暗黙に掛けない。
 自動指定では、中性密度Nに対する次の近似を使う。
 
-$$
+```math
 h_i=\operatorname{clip}\left(\frac{0.86}{\sqrt{3+LN\sigma_{in}/2}},h_{\min},h_{\max}\right). \tag{23}
-$$
+```
 
 特性長Lを省略した場合、その境界面についてV/Aを使う。
 従って面積を変えると、収支のA/Vだけでなく、Lを介してhも変わる。
@@ -523,22 +547,26 @@ $$
 
 ### 7.2 壁面中性化とシースのエネルギー損失
 
-入射イオン一個あたりの分岐確率を $p_{b,j}$とすると、分岐jの面イベント速度は $p_{b,j}\Gamma_i$である。
+入射イオン一個あたりの分岐確率を $`p_{b,j}`$とすると、分岐jの面イベント速度は $`p_{b,j}\Gamma_i`$である。
 各入射種について確率和を1とし、戻る中性粒子などを境界反応式で定義する。
 この同じイベントから、入射損失と生成物の戻りを計算する。
 
 標準的な単一一価正イオンの構成では、電子の熱束とイオン電流が浮遊壁で釣り合う条件から、
 電子のシース障壁エネルギーを求める。
 
-$$
-\Gamma_{e,\mathrm{th}}=n_e\sqrt{\frac{e\theta_e}{2\pi m_e}},\qquad \varepsilon_{\mathrm{sh}}=\theta_e\ln\frac{\Gamma_{e,\mathrm{th}}}{\sum_i Z_i\Gamma_i}. \tag{24}
-$$
+```math
+\begin{gathered}
+\Gamma_{e,\mathrm{th}}=n_e\sqrt{\frac{e\theta_e}{2\pi m_e}},\\[3pt]
+\varepsilon_{\mathrm{sh}}=\theta_e\ln\frac{\Gamma_{e,\mathrm{th}}}{\sum_i Z_i\Gamma_i}.
+\end{gathered}
+\tag{24}
+```
 
 壁へ向かう電子エネルギーの損失は、実際のイオン入射束を使って評価する。
 
-$$
+```math
 Q_{e,\mathrm{wall}}=e\sum_b\frac{A_b}{V}\sum_i\Gamma_{i,b}(2Z_i\theta_e+\varepsilon_{\mathrm{sh},b}). \tag{25}
-$$
+```
 
 式(24)に非負解がなければ、その条件での評価を失敗とする。
 冷イオンBohm近似には、電子温度がイオン温度に対して十分高いという前提がある。
@@ -547,37 +575,45 @@ CCPの平均シース診断と、ここで使う壁エネルギー収支は別�
 
 ### 7.3 吸着、脱離、イオン支援反応
 
-表面化学を解く場合は、表面種の面密度をサイト密度 $N_{\mathrm{site}}$で割った被覆率 $\theta_j$を状態とする。
-一粒子の占有サイト数を $a_j$とすると、空サイト率と被覆率の収支は次になる。
+表面化学を解く場合は、表面種の面密度をサイト密度 $`N_{\mathrm{site}}`$で割った被覆率 $`\theta_j`$を状態とする。
+一粒子の占有サイト数を $`a_j`$とすると、空サイト率と被覆率の収支は次になる。
 
-$$
-\theta_*=1-\sum_j a_j\theta_j,\qquad \frac{d\theta_j}{dt}=\frac{1}{N_{\mathrm{site}}}\sum_r\nu^{\mathrm{surf}}_{j,r}r_r. \tag{26}
-$$
+```math
+\begin{gathered}
+\theta_*=1-\sum_j a_j\theta_j,\\[3pt]
+\frac{d\theta_j}{dt}=\frac{1}{N_{\mathrm{site}}}\sum_r\nu^{\mathrm{surf}}_{j,r}r_r.
+\end{gathered}
+\tag{26}
+```
 
 面反応速度rの単位はm⁻² s⁻¹であり、気相の密度変化へ接続するときにA/Vを掛ける。
 付着確率sを使う中性粒子の吸着は、熱入射束と被覆率因子gを用いて表す。
 
-$$
+```math
 r_{\mathrm{stick}}=s\frac{n_g}{4}\sqrt{\frac{8k_BT_g}{\pi m_g}}\,g(\boldsymbol{\theta}). \tag{27}
-$$
+```
 
 イオン支援反応は、入射束、エネルギー依存収率、被覆率因子の積で表す。
 
-$$
-r_{\mathrm{ion}}=\Gamma_iY_0\left(\frac{\varepsilon_i-E_{\mathrm{th}}}{E_{\mathrm{ref}}-E_{\mathrm{th}}}\right)^b g(\boldsymbol{\theta}),\quad \varepsilon_i>E_{\mathrm{th}}. \tag{28a}
-$$
+```math
+\begin{gathered}
+r_{\mathrm{ion}}=\Gamma_iY_0\left(\frac{\varepsilon_i-E_{\mathrm{th}}}{E_{\mathrm{ref}}-E_{\mathrm{th}}}\right)^b g(\boldsymbol{\theta}),\\[3pt]
+\varepsilon_i>E_{\mathrm{th}}.
+\end{gathered}
+\tag{28a}
+```
 
 閾値以下の収率は0とする。熱脱離とLangmuir-Hinshelwood型の表面反応には次の形を使う。
 
-$$
+```math
 r_{\mathrm{des}}=\nu_{\mathrm{des}}N_{\mathrm{site}}e^{-eE_a/(k_BT_s)}g(\boldsymbol{\theta}). \tag{28b}
-$$
+```
 
-$$
+```math
 r_{\mathrm{LH}}=A_{\mathrm{LH}}N_{\mathrm{site}}^2e^{-eE_a/(k_BT_s)}g(\boldsymbol{\theta}). \tag{28c}
-$$
+```
 
-$T_s$ は表面温度、$\nu_{\mathrm{des}}$ の単位はs⁻¹、$A_{\mathrm{LH}}$ の単位はm² s⁻¹である。
+$`T_s`$ は表面温度、$`\nu_{\mathrm{des}}`$ の単位はs⁻¹、$`A_{\mathrm{LH}}`$ の単位はm² s⁻¹である。
 gには反応物被覆率の質量作用因子と、明示した追加の被覆率因子が入る。
 本実装のLH型の密度規格化はサイト密度の二乗であり、この定義に合う係数を用意する。
 係数、面積、サイト密度、表面温度は使用する機構と装置条件から与える。
@@ -591,22 +627,30 @@ gには反応物被覆率の質量作用因子と、明示した追加の被覆�
 入口に指定するsccmは、基準状態101325 Pa・273.15 Kでの体積流量である。
 装置内の実体積流量とは異なり、粒子流へ換算して収支へ加える。
 
-$$
-\dot N_{\mathrm{in},s}=4.477962\times10^{17}Q_s,\qquad S_{\mathrm{in},s}=\frac{\dot N_{\mathrm{in},s}}{V}. \tag{29}
-$$
+```math
+\begin{gathered}
+\dot N_{\mathrm{in},s}=4.477962\times10^{17}Q_s,\\[3pt]
+S_{\mathrm{in},s}=\frac{\dot N_{\mathrm{in},s}}{V}.
+\end{gathered}
+\tag{29}
+```
 
-排気速度Sの損失項は $-Sn_s/V$となる。反応・温度変化を無視した目安では、排気の時間尺度はV/Sである。
+排気速度Sの損失項は $`-Sn_s/V`$となる。反応・温度変化を無視した目安では、排気の時間尺度はV/Sである。
 供給と排気による滞留は、反応生成物が再衝突や表面反応を受ける時間を変える。
 運転中の圧力は、これらの収支から得た密度と温度を使って計算する。
 
 ### 8.2 放電部と処理部を分ける場合
 
 異なる容積を接続する場合、初めて容積の添字a、bを導入する。
-本実装の方向付き移送は、上流aの密度に係数 $C_{ab}$を掛けて粒子流とする。
+本実装の方向付き移送は、上流aの密度に係数 $`C_{ab}`$を掛けて粒子流とする。
 
-$$
-\left.\frac{dn_{a,s}}{dt}\right|_{ab}=-\frac{C_{ab}}{V_a}n_{a,s},\qquad \left.\frac{dn_{b,s}}{dt}\right|_{ab}=+\frac{C_{ab}}{V_b}n_{a,s}. \tag{30}
-$$
+```math
+\begin{gathered}
+\left.\frac{dn_{a,s}}{dt}\right|_{ab}=-\frac{C_{ab}}{V_a}n_{a,s},\\[3pt]
+\left.\frac{dn_{b,s}}{dt}\right|_{ab}=+\frac{C_{ab}}{V_b}n_{a,s}.
+\end{gathered}
+\tag{30}
+```
 
 移動する粒子数は両側で同じである。電子・気体エネルギーを解く構成では、
 対応する電子エネルギー密度と重粒子エンタルピーも移送する。
@@ -623,7 +667,7 @@ $$
 ### 9.1 既知の吸収電力を与える
 
 最も直接的な構成は、測定・推定した吸収電力Pを与え、
-電子と気体へ向かう割合 $f_e$、$f_g$を指定する方法である。両者の和を1とする。
+電子と気体へ向かう割合 $`f_e`$、$`f_g`$を指定する方法である。両者の和を1とする。
 電源装置の設定値、整合器を通った電力、プラズマの吸収電力は区別して入力する。
 電子収支へ入るのは、電子が実際に受け取る電力である。
 
@@ -632,15 +676,25 @@ $$
 電子移動度から伝導率とプラズマのバルク抵抗を求め、直列抵抗Rbを含む回路を計算する。
 Lは電極間の有効長、Aは電流断面積である。
 
-$$
-\sigma_p=en_e\mu_e,\qquad R_p=\frac{L}{\sigma_p A},\qquad I=\frac{V_s}{R_b+R_p}. \tag{31}
-$$
+```math
+\begin{gathered}
+\sigma_p=en_e\mu_e,\\[3pt]
+R_p=\frac{L}{\sigma_p A},\\[3pt]
+I=\frac{V_s}{R_b+R_p}.
+\end{gathered}
+\tag{31}
+```
 
 電圧降下、電子への吸収電力、換算電場は次になる。
 
-$$
-V_p=IR_p,\qquad P_e=f_{\mathrm{abs}}I^2R_p,\qquad \frac{E}{N}=\frac{|V_p|}{LN}. \tag{32}
-$$
+```math
+\begin{gathered}
+V_p=IR_p,\\[3pt]
+P_e=f_{\mathrm{abs}}I^2R_p,\\[3pt]
+\frac{E}{N}=\frac{|V_p|}{LN}.
+\end{gathered}
+\tag{32}
+```
 
 移動度がE/Nに依存する局所電場方式では、回路と電子係数を連立して評価する。
 電子密度0は開回路極限となり、電流と吸収電力を0とする。
@@ -659,9 +713,14 @@ RF包絡モデルは、結合効率と有効抵抗から吸収電力を求める
 
 CCPモデルは、抵抗性バルクと無損失のシース容量を組み合わせた集中定数回路である。
 
-$$
-|Z|=\sqrt{R_p^2+X_s^2},\qquad X_s=\frac{1}{\omega C_p}+\frac{1}{\omega C_g},\qquad P_{\mathrm{abs}}=I_{\mathrm{rms}}^2R_p. \tag{33}
-$$
+```math
+\begin{gathered}
+|Z|=\sqrt{R_p^2+X_s^2},\\[3pt]
+X_s=\frac{1}{\omega C_p}+\frac{1}{\omega C_g},\\[3pt]
+P_{\mathrm{abs}}=I_{\mathrm{rms}}^2R_p.
+\end{gathered}
+\tag{33}
+```
 
 電圧と電流の実効値の積は皮相電力VAであり、電子収支に加える実電力とは異なる。
 シース厚さ、面積非対称からの自己バイアス、平均イオンエネルギーは簡略化した診断値である。
@@ -681,11 +740,15 @@ E/H指標は滑らかな経験式であり、電磁場からモード遷移を�
 可変次数1-5のBDF/NDF法と疎なJacobian構造を使う。[[5]](#ref-5)
 NDFを含む手法の背景はShampine・Reicheltに説明されている。[[6]](#ref-6)
 
-単位・桁が異なる状態を同じ許容差で扱うため、成分ごとの固定尺度 $s_j$で規格化する。
+単位・桁が異なる状態を同じ許容差で扱うため、成分ごとの固定尺度 $`s_j`$で規格化する。
 
-$$
-\hat y_j=\frac{y_j}{s_j},\qquad \frac{d\hat y_j}{dt}=\frac{f_j(t,\boldsymbol{y})}{s_j}. \tag{34}
-$$
+```math
+\begin{gathered}
+\hat y_j=\frac{y_j}{s_j},\\[3pt]
+\frac{d\hat y_j}{dt}=\frac{f_j(t,\boldsymbol{y})}{s_j}.
+\end{gathered}
+\tag{34}
+```
 
 既定の相対許容差は10⁻⁶、無次元状態への絶対許容差は10⁻¹⁴である。
 後者を、そのまま密度に対する10⁻¹⁴ m⁻³の指定と解釈しない。
@@ -711,9 +774,13 @@ Newton反復の試行点では、境界へ連続化した評価用状態を使�
 保存状態は、重粒子密度と選択したエネルギー・表面状態である。
 重粒子のモル分率と分圧は次で定義する。
 
-$$
-x_s=\frac{n_s}{\sum_j n_j},\qquad p_s=n_sk_BT_g. \tag{35}
-$$
+```math
+\begin{gathered}
+x_s=\frac{n_s}{\sum_j n_j},\\[3pt]
+p_s=n_sk_BT_g.
+\end{gathered}
+\tag{35}
+```
 
 分率の分母は、電子を除く全重粒子種であり、イオンと図に選ばない種も含む。
 選択種だけで100%に再規格化しないため、異なる図の値を同じ基準で比較できる。
@@ -728,15 +795,19 @@ $$
 
 反応rが容器全体で単位時間に何回進むかは、気相では体積、表面では面積を掛けて求める。
 
-$$
-\dot\Xi_r=VR_r\quad(\mathrm{gas}),\qquad \dot\Xi_r=Ar_r\quad(\mathrm{surface}). \tag{36}
-$$
+```math
+\begin{gathered}
+\dot\Xi_r=VR_r\quad(\mathrm{gas}),\\[3pt]
+\dot\Xi_r=Ar_r\quad(\mathrm{surface}).
+\end{gathered}
+\tag{36}
+```
 
 累積数は、保存点における反応頻度を区間別に台形積分して求める。
 
-$$
+```math
 \Xi_r(t_k)\simeq\sum_{j<k}\frac{t_{j+1}-t_j}{2}\left[\dot\Xi_r(t_j)+\dot\Xi_r(t_{j+1})\right]. \tag{37}
-$$
+```
 
 ここでΞは決定論的な連続量の推定であり、Monte Carloで発生した整数イベント数ではない。
 独立ODEとして積分した状態でもないため、保存間隔に対する収束を確認して使う。
@@ -794,9 +865,13 @@ Python実装と依存lockのhashを保持する。実行条件は配布するcas
 
 スカラーの相対差と、波形全体の規格化最大差を区別する。
 
-$$
-\delta_q=\frac{|q-q_{\mathrm{ref}}|}{|q_{\mathrm{ref}}|},\qquad E_q=\frac{\max_t|q(t)-q_{\mathrm{ref}}(t)|}{\max_t|q_{\mathrm{ref}}(t)|}. \tag{38}
-$$
+```math
+\begin{gathered}
+\delta_q=\frac{|q-q_{\mathrm{ref}}|}{|q_{\mathrm{ref}}|},\\[3pt]
+E_q=\frac{\max_t|q(t)-q_{\mathrm{ref}}(t)|}{\max_t|q_{\mathrm{ref}}(t)|}.
+\end{gathered}
+\tag{38}
+```
 
 Eは各時刻の相対差の最大とは異なる。参照解を細かくしただけの場合、その解自体の誤差がゼロになったと
 解釈しない。以下の表は表示桁を丸めるが、再計算用JSONは丸めない。
@@ -829,14 +904,19 @@ Eは各時刻の相対差の最大とは異なる。参照解を細かくした�
 ### 13.1 Maxwellian速度係数: 断面積積分を確認する
 
 **問題設定。** 電子衝突反応の係数は、断面積と電子分布を積分して得る。
-まず一定断面積σ₀=2×10⁻²⁰ m²を閾値 $E_0$ から $E_{\max}=200$ eVまで与え、
+まず一定断面積σ₀=2×10⁻²⁰ m²を閾値 $`E_0`$ から $`E_{\max}=200`$ eVまで与え、
 その外側の断面積を0とする人工的な問題を使う。式(13)を直接積分すると、次の解析式になる。
 
-$$
-k=\sigma_0\sqrt{\frac{8e\theta_e}{\pi m_e}}\left[(1+a)e^{-a}-(1+b)e^{-b}\right],\quad a=E_0/\theta_e,\quad b=E_{\max}/\theta_e. \tag{39}
-$$
+```math
+\begin{gathered}
+k=\sigma_0\sqrt{\frac{8e\theta_e}{\pi m_e}}\left[(1+a)e^{-a}-(1+b)e^{-b}\right],\\[3pt]
+a=E_0/\theta_e,\\[3pt]
+b=E_{\max}/\theta_e.
+\end{gathered}
+\tag{39}
+```
 
-ここで$\theta_e$はeVで表した等価電子温度で、平均エネルギーの2/3である。
+ここで$`\theta_e`$はeVで表した等価電子温度で、平均エネルギーの2/3である。
 閾値0／2 eVと平均エネルギー0.5、1、1.5、2、3、5、8、10 eVの組合せ16条件を比較する。
 次に、同梱Ar電離断面積の区分線形曲線をSciPyの `quad` で独立に数値積分し、
 平均エネルギー0.5、1、1.5、2、3、5、8 eVの7条件を比較する。断面積の出典はZenodo収録資産である。[[8]](#ref-8)
@@ -870,7 +950,7 @@ Ar⁺のseedは1×10¹² m⁻³で、準中性から電子密度を与える。�
 時定数は1/λ=0.04 sで、0〜0.2 s、すなわち5時定数を計算する。
 既定rtol=10⁻⁶、atol=10⁻¹⁴、保存間隔0.002 sで101点を保存する。
 
-**比較方法。** 各保存時刻のAr*密度を $n_*(0)\exp(-\lambda t)$ と比較する。
+**比較方法。** 各保存時刻のAr*密度を $`n_*(0)\exp(-\lambda t)`$ と比較する。
 誤差は各時刻で解析密度を分母にした相対差の最大である。
 式(38)の波形最大値で規格化するEとは分母が異なり、終端の低い密度における誤差も評価する。
 
@@ -881,7 +961,7 @@ Ar⁺のseedは1×10¹² m⁻³で、準中性から電子密度を与える。�
 
 | 比較量 | 結果 |
 |---|---:|
-| 解析解の終端比 $n_*(0.2)/n_*(0)$ | 6.73795×10⁻³ |
+| 解析解の終端比 $`n_*(0.2)/n_*(0)`$ | 6.73795×10⁻³ |
 | 各保存時刻の最大相対差 | 1.86×10⁻⁵ |
 | RHS評価回数／LU分解回数 | 122／14 |
 
@@ -907,11 +987,15 @@ edge係数C=0.02 m³/s、計算期間0.5 s、保存間隔0.005 s、既定rtol=10
 
 **比較方法。** 式(30)の解析解は次のとおりである。
 
-$$
-n_a(t)=n_{a0}e^{-Ct/V_a},\qquad n_b(t)=n_{b0}+\frac{V_a}{V_b}n_{a0}(1-e^{-Ct/V_a}). \tag{40}
-$$
+```math
+\begin{gathered}
+n_a(t)=n_{a0}e^{-Ct/V_a},\\[3pt]
+n_b(t)=n_{b0}+\frac{V_a}{V_b}n_{a0}(1-e^{-Ct/V_a}).
+\end{gathered}
+\tag{40}
+```
 
-各密度の時刻別相対差と、両区画の中性Ar粒子数 $N=V_a n_a+V_b n_b$ の初期値からの相対変化を別々に求める。
+各密度の時刻別相対差と、両区画の中性Ar粒子数 $`N=V_a n_a+V_b n_b`$ の初期値からの相対変化を別々に求める。
 下流へ加える粒子数は上流から取る数と同じでも、密度の増減幅は体積比で異なる。
 
 ![2容積の移送、密度誤差と体積積分した粒子保存](assets/theory-transport.png)
@@ -939,17 +1023,21 @@ $$
 |---|---:|
 | 初期Ar密度 [m⁻³] | 2.5×10²⁵ |
 | 初期Ar⁺密度＝電子密度 [m⁻³] | 1×10⁶ |
-| 電離係数$k_i$ [m³/s] | 2.1736169000623×10⁻¹⁸ |
-| 三体再結合係数$k_r$ [m⁶/s] | 1×10⁻³⁷ |
+| 電離係数$`k_i`$ [m³/s] | 2.1736169000623×10⁻¹⁸ |
+| 三体再結合係数$`k_r`$ [m⁶/s] | 1×10⁻³⁷ |
 | 終端時刻／保存点数 | 0.75 μs／200 |
 | rtol／atol | 10⁻⁸／10⁻¹⁴ |
 | 最大積分step幅 | 1 ns |
 
-準中性 $n_e=n_i$ のとき、イオンの収支は次であり、正の定常解は $n_i=k_i/k_r$ となる。
+準中性 $`n_e=n_i`$ のとき、イオンの収支は次であり、正の定常解は $`n_i=k_i/k_r`$ となる。
 
-$$
-\frac{dn_i}{dt}=n_{\mathrm{Ar}}n_i(k_i-k_r n_i),\qquad n_{i,\mathrm{eq}}=k_i/k_r. \tag{40a}
-$$
+```math
+\begin{gathered}
+\frac{dn_i}{dt}=n_{\mathrm{Ar}}n_i(k_i-k_r n_i),\\[3pt]
+n_{i,\mathrm{eq}}=k_i/k_r.
+\end{gathered}
+\tag{40a}
+```
 
 **比較方法と結果。** 本コードの終端密度を、cm基準からSIへ換算した保存済みCRANE終端値と比較する。
 本リポジトリが比較値として固定しているのは終端の記録であり、CRANEの全時間波形との誤差を評価したわけではない。
@@ -957,7 +1045,7 @@ $$
 ![CRANE比較用2反応Arの時間発展と終端値](assets/theory-crane.png)
 
 図6. 上段の曲線は本コードの時間発展、丸印はCRANEの保存終端値、点線は式(40a)の定常密度。
-下段は終端値を$k_i/k_r$で規格化して拡大した点比較で、縦軸は0始まりではない。
+下段は終端値を$`k_i/k_r`$で規格化して拡大した点比較で、縦軸は0始まりではない。
 終端値同士の一致と、無限時間の定常値への接近を混同しない。
 
 | 量 | 本コード | 保存済みCRANE出力 |
@@ -985,7 +1073,7 @@ Ar、Ar*、Ar⁺、Ar₂⁺の密度を積分し、電子密度は準中性、�
 | 電極間隔／電極半径 | 0.004 m／0.004 m |
 | 電源電圧／直列抵抗 | 1000 V／100 kΩ |
 | 壁輸送 | 指定損失頻度3230 s⁻¹ |
-| 初期荷電seed | Ar⁺、Ar₂⁺それぞれ1×10¹² m⁻³。従って初期$n_e$は2×10¹² m⁻³ |
+| 初期荷電seed | Ar⁺、Ar₂⁺それぞれ1×10¹² m⁻³。従って初期$`n_e`$は2×10¹² m⁻³ |
 | 終端・保存点数 | 0.7520833 ms・151点 |
 | rtol／atol、最大step幅 | 3×10⁻⁶／10⁻¹⁴、1 μs |
 
@@ -1042,7 +1130,7 @@ Ar、Ar*、Ar⁺、Ar₂⁺の密度を積分し、電子密度は準中性、�
 | 壁 | 浮遊Bohm、h-factor自動評価。入口・排気なし |
 | 保存 | 10 μs間隔、201点 |
 
-初期Ar密度は圧力から $p/(k_BT_g)-n_{i0}$ として求める。
+初期Ar密度は圧力から $`p/(k_BT_g)-n_{i0}`$ として求める。
 同梱 `argon_maxwellian` の直接密度指定とは微小に異なるため、入力ファイル名まで含めて条件を特定する。
 気相31反応は電離1個と励起によるエネルギー損失30個で、Ar*の蓄積は積分していない。
 
@@ -1098,11 +1186,11 @@ Ar、Ar*、Ar⁺、Ar₂⁺の密度を積分し、電子密度は準中性、�
 最細条件の電離数は7.46775×10¹²、壁イベント数は8.02556×10¹²である。
 この単一一価イオンの系では、両者の差がイオン粒子数の変化と整合するかも調べられる。
 
-$$
+```math
 \epsilon_C=\frac{|V[n_i(t_f)-n_i(0)]-(C_{\mathrm{ion}}-C_{\mathrm{wall}})|}{\max(C_{\mathrm{ion}},C_{\mathrm{wall}})}. \tag{40b}
-$$
+```
 
-最細条件にも$\epsilon_C$=7.59×10⁻⁵が残る。イベント数はODE状態に追加して厳密積分した量ではないため、
+最細条件にも$`\epsilon_C`$=7.59×10⁻⁵が残る。イベント数はODE状態に追加して厳密積分した量ではないため、
 状態密度の変化からその差を強制補正していない。
 
 **解釈。** 密度波形の許容差収束が良好でも、保存頻度を積分する量には別の誤差が残る。
@@ -1187,9 +1275,13 @@ Langmuir probeには電流電圧応答と電子分布の仮定が必要である
 誤差の原因には、数値誤差、入力・測定の不確かさ、反応機構の不足、closureのモデル化誤差がある。
 パラメータの確率分布に根拠がある場合には、例えば一次近似の共分散伝播を考えられる。
 
-$$
-\operatorname{Cov}(\boldsymbol{q})\simeq J_p\operatorname{Cov}(\boldsymbol{p})J_p^{\mathsf{T}},\qquad (J_p)_{ij}=\frac{\partial q_i}{\partial p_j}. \tag{41}
-$$
+```math
+\begin{gathered}
+\operatorname{Cov}(\boldsymbol{q})\simeq J_p\operatorname{Cov}(\boldsymbol{p})J_p^{\mathsf{T}},\\[3pt]
+(J_p)_{ij}=\frac{\partial q_i}{\partial p_j}.
+\end{gathered}
+\tag{41}
+```
 
 これは不確かさを評価するための一般的な考え方で、このパッケージに自動推定・校正機能として
 実装済みという意味ではない。非線形性や相関が大きければ、分布と観測を明示した別の評価が必要である。
@@ -1320,16 +1412,24 @@ Ar過渡問題では、ODE許容差に対する波形の収束と、保存間隔
 その形状パラメータを選ぶ探索用closureである。
 
 混合比で重み付けした運動量断面積をσₘ、非弾性損失断面積を
-$L_\sigma=\sum_r x_r\Delta\varepsilon_r\sigma_r$ とする。
+$`L_\sigma=\sum_r x_r\Delta\varepsilon_r\sigma_r`$ とする。
 エネルギーを1 eVで規格化したE、形状パラメータξ、規格化断面積M・損失Lに対して、実装の形状式は次である。
 
-$$
-\mathcal{D}_j=\frac{(\xi+0.02)\sqrt{E_j+0.03}}{1+0.35M_j},\qquad \mathcal{B}_j=0.8+0.6M_j+\frac{1.4L_j}{\max(\xi,10^{-8})}. \tag{A1}
-$$
+```math
+\begin{gathered}
+\mathcal{D}_j=\frac{(\xi+0.02)\sqrt{E_j+0.03}}{1+0.35M_j},\\[3pt]
+\mathcal{B}_j=0.8+0.6M_j+\frac{1.4L_j}{\max(\xi,10^{-8})}.
+\end{gathered}
+\tag{A1}
+```
 
-$$
-d_j=\operatorname{clip}(\mathcal{B}_j\Delta E_j/\max(\mathcal{D}_j,10^{-30}),10^{-10},90),\qquad \widetilde F_j=\frac{\exp(-\sum_{l<j}d_l)}{\sqrt{E_j+0.02}}. \tag{A2}
-$$
+```math
+\begin{gathered}
+d_j=\operatorname{clip}(\mathcal{B}_j\Delta E_j/\max(\mathcal{D}_j,10^{-30}),10^{-10},90),\\[3pt]
+\widetilde F_j=\frac{\exp(-\sum_{l<j}d_l)}{\sqrt{E_j+0.02}}.
+\end{gathered}
+\tag{A2}
+```
 
 Mはσₘを格子上の平均で、Lは損失断面積を正の値の平均で規格化する。
 ゼロ除算を避ける最小値を使い、台形積分でFを規格化する。
@@ -1337,18 +1437,23 @@ Mはσₘを格子上の平均で、Lは損失断面積を正の値の平均で�
 
 分布から運動量移行頻度、移動度、平均エネルギー、拡散係数の候補を求める。
 
-$$
-\nu_m=N\int\sigma_m vF\,d\varepsilon,\quad \mu=\frac{e}{m_e\nu_m},\quad D_e=\mu\frac{2\bar\varepsilon}{3}. \tag{A3}
-$$
+```math
+\begin{gathered}
+\nu_m=N\int\sigma_m vF\,d\varepsilon,\\[3pt]
+\mu=\frac{e}{m_e\nu_m},\\[3pt]
+D_e=\mu\frac{2\bar\varepsilon}{3}.
+\end{gathered}
+\tag{A3}
+```
 
 最後の式はエネルギーの数値をeVとしたEinstein型関係である。
 形状を決める電力釣り合いは次である。各項は電子1個あたりWである。
 
-$$
+```math
 e\mu E_{\mathrm{field}}^2 =eN\int L_\sigma vF\,d\varepsilon +eN\left(\int\sigma_m vF\,d\varepsilon\right)\varepsilon_{\mathrm{el}}. \tag{A4}
-$$
+```
 
-代理弾性損失 $\varepsilon_{\mathrm{el}}$ は既定0.03 eVであり、RHSの電子・気体交換式(18)とは別の近似である。
+代理弾性損失 $`\varepsilon_{\mathrm{el}}`$ は既定0.03 eVであり、RHSの電子・気体交換式(18)とは別の近似である。
 形状範囲0.02〜220に根が挟まることを要求し、対数残差5×10⁻⁴以下を目標に反復する。
 エネルギー格子最終区間の確率質量が1×10⁻³を超える解を拒否する。
 電源・係数の外側反復に使う1×10⁻⁶の判定と、分布生成内部の判定を混同しない。
@@ -1362,84 +1467,105 @@ $$
 
 ### B.1 RF包絡
 
-吸収電力指定では電源側電力を $P_d=P_a/\eta$ とし、$V_{\mathrm{rms}}=\sqrt{P_dR_{\mathrm{eff}}}$。
-電圧指定では $P_d=V_{\mathrm{rms}}^2/R_{\mathrm{eff}}$ と $P_a=\eta P_d$ を使う。
+吸収電力指定では電源側電力を $`P_d=P_a/\eta`$ とし、$`V_{\mathrm{rms}}=\sqrt{P_dR_{\mathrm{eff}}}`$。
+電圧指定では $`P_d=V_{\mathrm{rms}}^2/R_{\mathrm{eff}}`$ と $`P_a=\eta P_d`$ を使う。
 矩形包絡をg(t)とすると、換算電場と自己バイアスは次の形である。
 
-$$
-(E/N)_{\mathrm{Td}}=a_0g(t)+a_1\sqrt{P_a},\qquad V_{\mathrm{bias}}=-f_b\sqrt{2}V_{\mathrm{rms}}. \tag{B1}
-$$
+```math
+\begin{gathered}
+(E/N)_{\mathrm{Td}}=a_0g(t)+a_1\sqrt{P_a},\\[3pt]
+V_{\mathrm{bias}}=-f_b\sqrt{2}V_{\mathrm{rms}}.
+\end{gathered}
+\tag{B1}
+```
 
 バイアス項はbias役割の電源接続だけに適用する。電位もオフセットと電力平方根で構成する。
 これらの係数は校正入力であり、電磁場計算から決まらない。
 
 ### B.2 CCPの経験的バルクとシース
 
-バルク抵抗は有効長 $L_{\mathrm{eff}}=V/A_p$、$n_{16}=n_e/10^{16}$、$f_*=f/13.56\,\mathrm{MHz}$ に対し、
+バルク抵抗は有効長 $`L_{\mathrm{eff}}=V/A_p`$、$`n_{16}=n_e/10^{16}`$、$`f_*=f/13.56\,\mathrm{MHz}`$ に対し、
 数値をSIで与えて次の経験式を用いる。
 
-$$
+```math
 R_p=5\frac{\max(L_{\mathrm{eff}}/\mathrm{m},10^{-6})} {\sqrt{\max(n_{16},10^{-10})f_*}}\,\Omega. \tag{B2}
-$$
+```
 
-シース容量は $C_s=\epsilon_0A_s/d_s$、厚さはDebye長に電圧依存の係数を掛けて推定する。
+シース容量は $`C_s=\epsilon_0A_s/d_s`$、厚さはDebye長に電圧依存の係数を掛けて推定する。
 
-$$
+```math
 \lambda_D=\sqrt{\frac{\epsilon_0\max(\theta_e,0.03)}{e\max(n_e,10^6)}}. \tag{B3a}
-$$
+```
 
-$$
+```math
 d_s=\max\left(4\lambda_D\sqrt{1+\frac{\max(V,1)}{\max(\theta_e,0.1)}},5\times10^{-5}\right). \tag{B3b}
-$$
+```
 
 ここでnはm⁻³、θはeV、VはV、dはmというSI数値を使う。
 最小密度・最小温度・厚さはこの経験式を評価する正則化であり、独立に積分する粒子密度を修正しない。
 面積比の1.35乗から自己バイアスを推定し、イオンエネルギーの診断は
-$\varepsilon_i\simeq V_{s,p}/(1+N\sigma d_s)$、σ=5×10⁻²⁰ m²とする。
+$`\varepsilon_i\simeq V_{s,p}/(1+N\sigma d_s)`$、σ=5×10⁻²⁰ m²とする。
 これらはイオンエネルギー分布や無損失回路に含まれないシース実損失を解くものではない。
 
 ### B.3 ICPの連続的なモード指標
 
 密度因子d、モード指標m、滑らかなH側の重みhを次で作る。
 
-$$
-d=1-e^{-2.2n_e/10^{17}},\qquad m=d\sqrt{P_d/150}. \tag{B4a}
-$$
+```math
+\begin{gathered}
+d=1-e^{-2.2n_e/10^{17}},\\[3pt]
+m=d\sqrt{P_d/150}.
+\end{gathered}
+\tag{B4a}
+```
 
-$$
-x=\operatorname{clip}((m-0.45)/0.20,0,1),\qquad h=x^2(3-2x). \tag{B4b}
-$$
+```math
+\begin{gathered}
+x=\operatorname{clip}((m-0.45)/0.20,0,1),\\[3pt]
+h=x^2(3-2x).
+\end{gathered}
+\tag{B4b}
+```
 
 圧力因子aと周波数因子b、積u、結合効率は次である。圧力pは中性密度から計算するPa値である。
 
-$$
+```math
 a=0.65+0.20\tanh\left(\frac{\max(p/10,10^{-3})-0.3}{0.6}\right). \tag{B5a}
-$$
+```
 
-$$
+```math
 b=0.85+0.08\log_{10}(1+\max(f_*,0.1)). \tag{B5b}
-$$
+```
 
-$$
-u=dab,\qquad \eta_E=0.18+0.37u,\qquad \eta_H=0.40+0.48u. \tag{B6a}
-$$
+```math
+\begin{gathered}
+u=dab,\\[3pt]
+\eta_E=0.18+0.37u,\\[3pt]
+\eta_H=0.40+0.48u.
+\end{gathered}
+\tag{B6a}
+```
 
-$$
+```math
 \eta=\operatorname{clip}(d[\eta_E+h(\eta_H-\eta_E)],0,0.95). \tag{B6b}
-$$
+```
 
 `mode_H` はhであり、測定に基づくH-mode認定ではない。
 換算電場は、ゼロ電力・ゼロ密度で消える活性係数に
-$25+30\sqrt{\theta_e}+0.01P_a$ を掛けた経験値である。
+$`25+30\sqrt{\theta_e}+0.01P_a`$ を掛けた経験値である。
 係数中の150はW、密度の基準はm⁻³である。装置ごとの電磁場・整合回路・吸収分布は解いていない。
 
 ### B.4 膜厚と壁への蓄積
 
-面イベント速度r、蓄積収率y、膜の層収率ℓ、単層厚さ $d_0$ から、蓄積粒子数Bと厚さδを計算する。
+面イベント速度r、蓄積収率y、膜の層収率ℓ、単層厚さ $`d_0`$ から、蓄積粒子数Bと厚さδを計算する。
 
-$$
-\frac{dB}{dt}=Ayr,\qquad \frac{d\delta}{dt}=d_0\frac{\ell r}{N_{\mathrm{site}}}. \tag{B7}
-$$
+```math
+\begin{gathered}
+\frac{dB}{dt}=Ayr,\\[3pt]
+\frac{d\delta}{dt}=d_0\frac{\ell r}{N_{\mathrm{site}}}.
+\end{gathered}
+\tag{B7}
+```
 
 これは宣言したイベントの積算で、材料の組織、面内均一性、応力、熱伝導を予測する式ではない。
 汎用extension状態も宣言した項をODEへ追加する仕組みであり、状態名だけから物理を推定しない。
