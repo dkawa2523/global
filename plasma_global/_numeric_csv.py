@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Container, Mapping
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
+
+from plasma_global._input_sources import InputSourceStore
 
 
 def _validate_header(source: Path, header: list[str]) -> None:
@@ -54,11 +57,14 @@ def read_numeric_csv(
     *,
     columns: Mapping[str, str] | None = None,
     allowed: Container[str] | None = None,
+    sources: InputSourceStore | None = None,
+    role: str = "numeric_table",
 ) -> dict[str, np.ndarray]:
     source = Path(path)
     rows: list[list[float]] = []
     try:
-        with source.open(encoding="utf-8-sig", newline="") as stream:
+        store = sources if sources is not None else InputSourceStore()
+        with StringIO(store.read_text(source, role), newline="") as stream:
             reader = csv.reader(stream, strict=True)
             empty: list[str] = []
             header = next(reader, empty)

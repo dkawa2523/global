@@ -4,13 +4,14 @@ import numpy as np
 
 from plasma_global.models.gas_energy import (
     HeavyEnergyClosure,
+    HeavyParticleThermodynamics,
     elastic_electron_heating_J_m3_s,
 )
 
 
 def test_heavy_energy_temperature_roundtrip_and_wall_relaxation() -> None:
     closure = HeavyEnergyClosure(
-        cv_over_kb=np.array([1.5, 2.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([1.5, 2.5])),
         wall_temperature_K=np.array([300.0]),
         wall_relaxation_s_inv=np.array([10.0]),
     )
@@ -38,3 +39,16 @@ def test_elastic_transfer_has_equal_sign_of_temperature_difference() -> None:
     )
     assert heating > 0.0
     assert cooling < 0.0
+
+
+def test_mixture_eos_enthalpy_includes_species_pressure_work() -> None:
+    eos = HeavyParticleThermodynamics(np.array([1.5, 2.5]))
+    density = np.array([[2.0, 3.0]])
+    internal_energy = eos.energy_J_m3(density, np.array([400.0]))
+    np.testing.assert_allclose(internal_energy, [4200.0 * 1.380649e-23])
+    np.testing.assert_allclose(
+        eos.enthalpy_J_m3(density, internal_energy), [6200.0 * 1.380649e-23]
+    )
+    np.testing.assert_allclose(
+        eos.species_enthalpy_J(400.0), np.array([1000.0, 1400.0]) * 1.380649e-23
+    )

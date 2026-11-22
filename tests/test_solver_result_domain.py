@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 import pytest
+from _model_fixtures import constant_field_port, constant_mean_energy_table
 
 import plasma_global.core.solver as solver_module
 from plasma_global.chemistry.data import (
@@ -13,28 +14,24 @@ from plasma_global.chemistry.data import (
     ReactionData,
     SpeciesData,
 )
-from plasma_global.core._solver_domain import (
-    _accepted_state_for_result,
-    canonicalize_result_state,
-)
+from plasma_global.core._solver_domain import canonicalize_result_state
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
 from plasma_global.core.solver import solve_compiled_model
 from plasma_global.errors import IntegrationError, ModelConfigurationError
-from plasma_global.experimental.accumulators import (
-    DrivenSource,
-    GenericState,
-    GenericStateAccumulator,
-    LinearRelaxation,
-)
+from plasma_global.experimental.accumulators import SurfaceEventRate
 from plasma_global.experimental.runtime import ExperimentalRuntimeAccumulator
 from plasma_global.models.electrons import (
     ElectronEnergyClosure,
     LocalFieldClosure,
-    TabulatedMeanEnergy,
 )
-from plasma_global.models.gas_energy import BOLTZMANN_J_K, HeavyEnergyClosure
+from plasma_global.models.gas_energy import (
+    BOLTZMANN_J_K,
+    HeavyEnergyClosure,
+    HeavyParticleThermodynamics,
+)
 from plasma_global.models.kinetics import TabulatedElectronKinetics
+from plasma_global.models.power import PowerCoordinator
 from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
 from plasma_global.models.walls import BoundaryReaction, WallBoundary
 from plasma_global.output import read_result_h5, write_result_h5
@@ -42,52 +39,39 @@ from plasma_global.postprocess import derive_observables
 
 
 def test_transient_bound_violation_fails_for_every_output_sampling_mode() -> None:
-    chemistry = _inert_chemistry(("A", "ion"), (0.0, 1.0))
-    speed = 0.61 * np.sqrt(1.602176634e-19 * 2.0 / chemistry.masses_kg[1])
-    generic = GenericStateAccumulator(
-        states=(
-            GenericState(
-                "marker",
-                owners=("wall",),
-                initial=0.0,
-                lower_bound=0.0,
-                upper_bound=1.0,
-            ),
-        ),
-        processes=(
-            DrivenSource("marker", "ion_flux_m2_s", 20.0 / (1.0e15 * speed)),
-            LinearRelaxation("marker", equilibrium=0.0, time_constant_s=0.2),
-        ),
+    model = _inventory_result_model()
+    initial = _inventory_result_initial()
+    # Adsorption demands inventory before its later return. Endpoints alone
+    # would miss the negative stock while the intermediate coverage is high.
+    reference_model = replace(model, extension_accumulator=None, domain_atol=0.0)
+    reference = solve_compiled_model(
+        reference_model,
+        initial,
+        SolverSettings(rtol=1.0e-7, atol=1.0e-12, save_at_s=(0.0, 0.5, 10.0)),
     )
-    model = CompiledGlobalModel(
-        chemistry=chemistry,
-        zones=(Zone("z", 1.0),),
-        segments=(
-            RecipeSegment("afterglow", 0.0, 10.0, reduced_field_Td_by_zone={"z": 1.0}),
-        ),
-        electron_closure=LocalFieldClosure(TabulatedMeanEnergy((1.0, 2.0), (3.0, 3.0))),
-        wall_boundaries=(
-            WallBoundary(
-                zone_id="z",
-                area_m2=1.0e-3,
-                bohm_factor=0.61,
-                surface_id="wall",
-                reactions=(BoundaryReaction("neutralize", "ion", {"A": 1.0}),),
-            ),
-        ),
-        extension_accumulator=ExperimentalRuntimeAccumulator(generic=generic),
-    )
-    initial = InitialState(densities_m3_by_zone={"z": {"A": 1.0e20, "ion": 1.0e15}})
+    stock = 1.0e18 - 1.0e19 * reference.series("coverage[wall,Ads]")
+    assert stock[1] < 0.0 < stock[-1]
     messages = []
+    reached_times = []
     for sampling in ({}, {"save_at_s": (0.0, 10.0)}, {"sample_interval_s": 0.5}):
-        with pytest.raises(IntegrationError, match="above upper_bound") as failure:
+        with pytest.raises(
+            IntegrationError, match=r"below -10\*domain_atol"
+        ) as failure:
             solve_compiled_model(
                 model,
                 initial,
                 SolverSettings(rtol=1.0e-7, atol=1.0e-12, **sampling),
             )
         messages.append(str(failure.value))
+        partial = failure.value.partial_result
+        assert partial is not None
+        assert partial.status.success is False
+        assert partial.time_s[0] == model.segments[0].start_s
+        assert partial.time_s[-1] < partial.metadata["failure_time_s"]
+        assert np.all(partial.state >= 0.0)
+        reached_times.append(partial.time_s[-1])
     assert len(set(messages)) == 1
+    assert len(set(reached_times)) == 1
 
 
 @dataclass(frozen=True)
@@ -100,7 +84,7 @@ class _InertChemistry:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[object, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
 
@@ -123,7 +107,7 @@ def _inert_chemistry(
         reactant_orders=np.zeros((0, count)),
         electron_orders=np.zeros(0),
         rate_evaluators=(),
-        energy_loss_eV=np.zeros(0),
+        electron_energy_transfer_eV=np.zeros(0),
         gas_heating_eV=np.zeros(0),
         reaction_zones=(),
     )
@@ -239,7 +223,7 @@ def test_nonfinite_electron_mean_energy_is_not_reported_as_success() -> None:
     state = _electron_row(model, 1.0)
     state[model.layout.density_slices["z"].start + 1] = np.nextafter(0.0, 1.0)
 
-    with pytest.raises(IntegrationError, match="mean energy is not finite"):
+    with pytest.raises(IntegrationError, match=r"mean energy.*finite"):
         canonicalize_result_state(
             model,
             state[None, :],
@@ -283,12 +267,12 @@ def _heavy_model() -> CompiledGlobalModel:
     return CompiledGlobalModel(
         chemistry=_inert_chemistry(("A",), (0.0,)),
         zones=(Zone("z", 1.0),),
-        segments=(
-            RecipeSegment("heavy", 0.0, 1.0, reduced_field_Td_by_zone={"z": 1.0}),
-        ),
-        electron_closure=LocalFieldClosure(TabulatedMeanEnergy((1.0, 2.0), (3.0, 3.0))),
+        segments=(RecipeSegment("heavy", 0.0, 1.0),),
+        electron_closure=LocalFieldClosure(),
+        electron_kinetics_by_zone={"z": constant_mean_energy_table(3.0)},
+        power_coordinator=PowerCoordinator((constant_field_port("z", 1.0),), ("z",)),
         heavy_energy_closure=HeavyEnergyClosure(
-            cv_over_kb=np.array([1.5]),
+            thermodynamics=HeavyParticleThermodynamics(np.array([1.5])),
             wall_temperature_K=np.array([300.0]),
             wall_relaxation_s_inv=np.zeros(1),
         ),
@@ -339,117 +323,90 @@ def test_finite_gas_temperature_remains_valid_at_very_low_density() -> None:
     assert np.all(np.isfinite(evaluation.derivative))
 
 
-def test_result_snaps_only_tolerance_scale_positive_lower_bound_undershoot() -> None:
-    accepted, zeroed_count = _accepted_state_for_result(
-        np.array([[4.5, -0.5]]),
-        np.array([0.1, 0.1]),
-        lower_bounds=np.array([5.0, 0.0]),
-    )
-
-    np.testing.assert_array_equal(accepted, np.array([[5.0, 0.0]]))
-    assert zeroed_count == 1
-
-    with pytest.raises(IntegrationError, match="below lower_bound"):
-        _accepted_state_for_result(
-            np.array([[3.99]]),
-            np.array([0.1]),
-            lower_bounds=np.array([5.0]),
-        )
-
-
-def _bounded_extension_model() -> CompiledGlobalModel:
-    segment = RecipeSegment("bounded-extension", 0.0, 1.0)
-    generic = GenericStateAccumulator(
-        states=(
-            GenericState(
-                "marker",
-                owners=("global",),
-                initial=4.0,
-                lower_bound=1.0,
-                upper_bound=5.0,
+def _inventory_result_model() -> CompiledGlobalModel:
+    base_surface = _surface_result_model(("wall",)).surface_model
+    assert base_surface is not None
+    chemistry = replace(
+        base_surface.chemistry,
+        species=(
+            *base_surface.chemistry.species,
+            SpeciesData("B", "gas", 0, 36.0, {"X": 1.0}),
+        ),
+        surface_reactions=(
+            *base_surface.chemistry.surface_reactions,
+            ReactionData(
+                "release", {"Ads": 1.0}, {"B": 1.0, "site": 1.0}, "release", None
             ),
         ),
-        processes=(LinearRelaxation("marker", equilibrium=0.0, time_constant_s=1.0),),
+        rate_models={
+            **base_surface.chemistry.rate_models,
+            "release": RateModelData(
+                "release", "desorption", {"frequency_s_inv": 1.0, "activation_eV": 0.0}
+            ),
+        },
+    )
+    surface = CompiledSurfaceModel(
+        chemistry=chemistry,
+        gas_species_ids=("A", "B", "ion"),
+        gas_masses_kg=np.full(3, 6.0e-26),
+        zone_ids=("z",),
+        zone_volumes_m3=np.array([1.0]),
+        surfaces=(SurfaceGeometry("wall", "z", 1.0, 1.0e19, 300.0),),
+    )
+    inventory = ExperimentalRuntimeAccumulator(
+        initial_inventory_by_surface={"wall": {"A": 1.0e18}},
+        surface_event_templates=tuple(
+            SurfaceEventRate(
+                reaction_id=reaction,
+                zone_id="z",
+                surface_id="wall",
+                area_m2=1.0,
+                site_density_m2=1.0e19,
+                inventory_particles_per_event={"A": coefficient},
+            )
+            for reaction, coefficient in (("stick", -1.0), ("release", 1.0))
+        ),
     )
     return CompiledGlobalModel(
-        chemistry=_inert_chemistry(("A", "ion"), (0.0, 1.0)),
-        zones=(Zone("z", 1.0),),
-        segments=(segment,),
+        chemistry=_inert_chemistry(("A", "B", "ion"), (0.0, 0.0, 1.0)),
+        zones=(Zone("z", 1.0, 400.0),),
+        segments=(RecipeSegment("inventory", 0.0, 10.0),),
         electron_closure=ElectronEnergyClosure(),
-        extension_accumulator=ExperimentalRuntimeAccumulator(generic=generic),
+        surface_model=surface,
+        extension_accumulator=inventory,
     )
 
 
-def test_extension_upper_bound_is_compiled_and_continues_solver_trials() -> None:
-    model = _bounded_extension_model()
-    extension_index = model.layout.extension_slice.start
-    assert model.state_upper_bounds[extension_index] == 5.0
-    assert not model.state_upper_bounds.flags.writeable
-
-    initial = model.initial_state(
-        InitialState(
-            densities_m3_by_zone={"z": {"A": 1.0, "ion": 1.0}},
-            mean_energy_eV_by_zone={"z": 3.0},
-        )
+def _inventory_result_initial() -> InitialState:
+    return InitialState(
+        densities_m3_by_zone={"z": {"A": 1.0e19, "B": 0.0, "ion": 1.0e15}},
+        mean_energy_eV_by_zone={"z": 3.0},
     )
-    trial = initial.copy()
-    trial[extension_index] = 6.0
+
+
+def test_inventory_solver_trial_continuation_preserves_the_integrator_state() -> None:
+    model = _inventory_result_model()
+    trial = model.initial_state(_inventory_result_initial())
+    inventory_index = model.layout.extension_slice.start
+    trial[inventory_index] = -1.0e18
+    valid = trial.copy()
+    valid[inventory_index] = 0.0
     scaled_rhs = solver_module._ScaledSegmentRHS(
         model.bind_segment(model.segments[0], domain_atol=np.zeros(model.layout.size)),
         np.ones(model.layout.size),
-        model.state_lower_bounds,
-        model.state_upper_bounds,
     )
 
-    derivative = scaled_rhs(0.0, trial)
-
-    assert derivative[extension_index] == pytest.approx(-5.0)
-    assert trial[extension_index] == 6.0
+    np.testing.assert_array_equal(scaled_rhs(0.0, trial), scaled_rhs(0.0, valid))
+    assert trial[inventory_index] == -1.0e18
 
 
-def test_result_snaps_only_tolerance_scale_upper_bound_overshoot() -> None:
-    model = _bounded_extension_model()
-    extension_index = model.layout.extension_slice.start
-    state = model.initial_state(
-        InitialState(
-            densities_m3_by_zone={"z": {"A": 1.0, "ion": 1.0}},
-            mean_energy_eV_by_zone={"z": 3.0},
-        )
-    )
-    tolerance = np.full(model.layout.size, 0.1)
-    state[extension_index] = 5.5
+def test_initial_inventory_state_must_be_nonnegative() -> None:
+    model = _inventory_result_model()
+    state = model.initial_state(_inventory_result_initial())
+    state[model.layout.extension_slice.start] = -1.0
 
-    accepted, _, _ = canonicalize_result_state(
-        model, state[None, :], tolerance, np.array([1.0])
-    )
-
-    assert accepted[0, extension_index] == 5.0
-    model.evaluate(1.0, accepted[0], model.segments[0])
-
-    state[extension_index] = 6.01
-    with pytest.raises(
-        IntegrationError,
-        match=r"upper_bound\+10\*domain_atol.*bounded-extension",
-    ):
-        canonicalize_result_state(model, state[None, :], tolerance, np.array([1.0]))
-
-
-def test_initial_extension_state_must_respect_its_upper_bound() -> None:
-    model = _bounded_extension_model()
-    state = model.initial_state(
-        InitialState(
-            densities_m3_by_zone={"z": {"A": 1.0, "ion": 1.0}},
-            mean_energy_eV_by_zone={"z": 3.0},
-        )
-    )
-    state[model.layout.extension_slice.start] = 5.1
-
-    with pytest.raises(ModelConfigurationError, match="compiled upper bound"):
-        solve_compiled_model(
-            model,
-            state,
-            SolverSettings(save_at_s=(0.0, 1.0)),
-        )
+    with pytest.raises(ModelConfigurationError, match="must be nonnegative"):
+        solve_compiled_model(model, state, SolverSettings(save_at_s=(0.0, 10.0)))
 
 
 def _surface_result_model(surface_ids: tuple[str, ...]) -> CompiledGlobalModel:
@@ -549,3 +506,38 @@ def test_surface_result_checks_each_site_simplex() -> None:
     state[wall_b] = 1.01
     with pytest.raises(IntegrationError, match=r"surface.*negative algebraic"):
         canonicalize_result_state(model, state[None, :], tolerance, np.array([1.0]))
+
+
+def test_failed_boundary_preserves_the_last_left_limit() -> None:
+    segments = (
+        RecipeSegment(
+            "on", 0.0, 0.5, prescribed_electron_density_m3_by_zone={"z": 1.0e14}
+        ),
+        RecipeSegment(
+            "cold", 0.5, 1.0, prescribed_electron_density_m3_by_zone={"z": 0.0}
+        ),
+    )
+    model = _electron_model(segments)
+    initial = InitialState(
+        densities_m3_by_zone={"z": {"A": 1.0e18, "ion": 1.0e14}},
+        mean_energy_eV_by_zone={"z": 3.0},
+    )
+    with pytest.raises(IntegrationError, match="cold") as failure:
+        solve_compiled_model(model, initial, SolverSettings(save_at_s=(0.0, 1.0)))
+    partial = failure.value.partial_result
+    assert partial is not None
+    np.testing.assert_array_equal(partial.time_s, [0.0, 0.5])
+    assert partial.metadata["failure_segment_id"] == "cold"
+    assert partial.solver_stats["segments_completed"] == 1
+    observable = derive_observables(
+        model, partial.time_s, partial.state, ("mean_energy_eV[z]",)
+    )
+    np.testing.assert_allclose(observable["mean_energy_eV[z]"], [3.0, 3.0])
+
+
+def test_invalid_initial_coupled_state_is_a_configuration_error() -> None:
+    model = _electron_model((RecipeSegment("initial", 0.0, 1.0),))
+    with pytest.raises(ModelConfigurationError, match="zero density"):
+        solve_compiled_model(
+            model, _electron_row(model, 1.0), SolverSettings(save_at_s=(0.0, 1.0))
+        )

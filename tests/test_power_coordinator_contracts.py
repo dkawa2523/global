@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
+from _model_fixtures import constant_field_port
 
 from plasma_global.errors import CaseValidationError, ModelDomainError
 from plasma_global.models.external_table import (
@@ -15,15 +17,32 @@ from plasma_global.models.kinetics import TabulatedElectronKinetics
 from plasma_global.models.power import (
     CompiledPowerCommand,
     ExternalTablePowerPort,
+    PowerContribution,
     PowerCoordinator,
     PowerCouplingResult,
     PowerPortResult,
     PowerState,
+    PowerTopology,
     PrescribedPowerPort,
 )
 
 
-class _MismatchedPort:
+class _TestPort:
+    observable_units: ClassVar[dict[str, str]] = {}
+    off_observables: ClassVar[dict[str, float]] = {}
+
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id,
+            self.zone_id,
+            (self.zone_id,),
+            (),
+            (self.zone_id,) if self.produces_reduced_field else (),
+        )
+
+
+class _MismatchedPort(_TestPort):
     @property
     def port_id(self) -> str:
         return "declared"
@@ -47,10 +66,12 @@ class _MismatchedPort:
         command: CompiledPowerCommand | None,
     ) -> PowerPortResult:
         del time_s, state, command
-        return PowerPortResult("returned", self.zone_id, electron_power_W=1.0)
+        return PowerPortResult(
+            "returned", self.zone_id, (PowerContribution(self.zone_id, 1.0),)
+        )
 
 
-class _UndeclaredFieldPort:
+class _UndeclaredFieldPort(_TestPort):
     def __init__(self, port_id: str) -> None:
         self._port_id = port_id
 
@@ -80,12 +101,11 @@ class _UndeclaredFieldPort:
         return PowerPortResult(
             self.port_id,
             self.zone_id,
-            electron_power_W=0.0,
             reduced_field_Td=10.0,
         )
 
 
-class _SettlingPowerPort:
+class _SettlingPowerPort(_TestPort):
     def __init__(self) -> None:
         self.calls = 0
 
@@ -117,7 +137,7 @@ class _SettlingPowerPort:
         return PowerPortResult(
             self.port_id,
             self.zone_id,
-            electron_power_W=power_W,
+            contributions=(PowerContribution(self.zone_id, power_W),),
             reduced_field_Td=10.0,
         )
 
@@ -145,13 +165,13 @@ def test_coordinator_rejects_a_port_result_with_mismatched_identity() -> None:
         _evaluate(coordinator)
 
 
-def test_coordinator_rejects_multiple_fields_returned_by_undeclared_ports() -> None:
+def test_coordinator_rejects_fields_returned_outside_declared_topology() -> None:
     coordinator = PowerCoordinator(
         (_UndeclaredFieldPort("first"), _UndeclaredFieldPort("second")),
         ("plasma",),
     )
 
-    with pytest.raises(CaseValidationError, match="multiple E/N-producing"):
+    with pytest.raises(ModelDomainError, match="field outside its topology"):
         _evaluate(coordinator)
 
 
@@ -177,7 +197,7 @@ def test_coupling_waits_until_electron_power_also_converges() -> None:
 
 
 @dataclass
-class _IncrementingFieldPort:
+class _IncrementingFieldPort(_TestPort):
     port_id: str = "field"
     zone_id: str = "plasma"
     time_dependent: bool = False
@@ -193,7 +213,6 @@ class _IncrementingFieldPort:
         return PowerPortResult(
             self.port_id,
             self.zone_id,
-            electron_power_W=0.0,
             reduced_field_Td=mobility + 1.0e-6,
         )
 
@@ -226,7 +245,7 @@ def test_local_field_off_uses_explicit_zero_field_kinetics() -> None:
     table = TabulatedElectronKinetics(
         source=Path("positive-field-only.csv"),
         lookup="local_field",
-        bounds="clip",
+        bounds="hold",
         axis=np.array([1.0, 2.0]),
         mean_energy_eV=np.array([1.0, 2.0]),
         mobility_m2_V_s=np.array([1.0, 2.0]),
@@ -314,7 +333,7 @@ def test_external_table_default_override_and_off_use_command_field_capability(
     table = TabulatedElectronKinetics(
         source=Path("positive-field-only.csv"),
         lookup="local_field",
-        bounds="clip",
+        bounds="hold",
         axis=np.array([1.0, 10.0]),
         mean_energy_eV=np.array([1.0, 2.0]),
         mobility_m2_V_s=np.array([1.0, 1.0]),
@@ -340,13 +359,14 @@ def test_external_table_default_override_and_off_use_command_field_capability(
     assert result.iterations_by_zone["plasma"] == 1
 
     power_only_off = CompiledPowerCommand(kind="off", reduced_field_capability=False)
-    prescribed = coordinator.evaluate(
+    field_source = constant_field_port("plasma", 7.0)
+    independent_field = PowerCoordinator((port, field_source), ("plasma",))
+    prescribed = independent_field.evaluate(
         time_s=0.0,
         commands={"external": power_only_off},
         electron_density_m3_by_zone={"plasma": 1.0e15},
         neutral_density_m3_by_zone={"plasma": 1.0e20},
         mean_energy_eV_by_zone={"plasma": None},
-        prescribed_reduced_field_Td_by_zone={"plasma": 7.0},
         kinetics_by_zone={"plasma": table},
     )
     assert prescribed.reduced_field_Td_by_zone["plasma"] == 7.0
@@ -363,7 +383,7 @@ def test_reduced_field_capability_only_annotates_off_commands() -> None:
 
 
 def test_coordinator_returns_only_public_power_value_types() -> None:
-    port = PrescribedPowerPort("source", "plasma", default_power_W=3.0)
+    port = PrescribedPowerPort("source", "plasma", absorbed_power_W=3.0)
     coordinator = PowerCoordinator((port,), ("plasma",))
 
     result = _evaluate(coordinator)
@@ -371,3 +391,8 @@ def test_coordinator_returns_only_public_power_value_types() -> None:
     assert isinstance(result, PowerCouplingResult)
     assert isinstance(result.power_state_by_zone["plasma"], PowerState)
     assert isinstance(result.port_results["source"], PowerPortResult)
+
+
+def test_power_topology_does_not_claim_an_unsupported_cross_zone_field() -> None:
+    with pytest.raises(CaseValidationError, match="source zone"):
+        PowerTopology("source", "plasma", field_zone_ids=("process",))

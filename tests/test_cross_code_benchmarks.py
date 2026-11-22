@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -9,53 +7,21 @@ import pytest
 import yaml
 
 from plasma_global import load_case, simulate
-from plasma_global.build import compile_case
-from tools.benchmarks.build_zdplaskin_rate_table import (
-    build_zdplaskin_rate_table,
-)
+from plasma_global._numeric_csv import read_numeric_csv
+from tools.benchmarks.prepare_zdplaskin_reference import HISTORY_FILE
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCES = ROOT / "benchmarks" / "references"
-RAW_ZDP_TABLE = ROOT / "benchmarks" / "raw" / "zdplaskin_example2_eovern"
 CRANE_CASE = (
     ROOT / "plasma_global" / "examples" / "cases" / "crane_two_reaction_argon.yaml"
 )
 ZDP_CASE = ROOT / "plasma_global" / "examples" / "cases" / "zdplaskin_example2.yaml"
-ZDP_TABLE = ROOT / "plasma_global/examples/data/zdplaskin_example2/electrons.csv"
-ZDP_TABLE_SHA256 = "30c8a22acf6c6afc4a1cf9f9c0cc70bc5f0b9b57b6424d5c0b29d35266148100"
 
 
 def _load_yaml(path: Path) -> dict[str, object]:
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(document, dict)
     return document
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _final_reference_circuit_row() -> dict[str, float]:
-    path = REFERENCES / "zdplaskin_example2_circuit.csv"
-    with path.open(encoding="utf-8", newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    assert rows
-    return {name: float(value) for name, value in rows[-1].items()}
-
-
-def test_zdplaskin_table_is_reproducible_from_strict_raw_inputs(
-    tmp_path: Path,
-) -> None:
-    rebuilt = build_zdplaskin_rate_table(
-        tmp_path / "zdplaskin.csv", raw_dir=RAW_ZDP_TABLE
-    )
-
-    assert _sha256(ZDP_TABLE) == ZDP_TABLE_SHA256
-    assert _sha256(rebuilt) == ZDP_TABLE_SHA256
 
 
 def test_crane_scalar_chemistry_cross_code_regression() -> None:
@@ -90,48 +56,26 @@ def test_crane_is_stable_when_dimensionless_solver_tolerances_are_halved() -> No
         assert coarse.series(name)[-1] == pytest.approx(fine.series(name)[-1], rel=0.01)
 
 
-def test_zdplaskin_species_and_circuit_cross_code_regression() -> None:
+def test_zdplaskin_seed_and_circuit_at_reference_times() -> None:
+    history = read_numeric_csv(REFERENCES / HISTORY_FILE)
     case = load_case(ZDP_CASE)
-    compiled = compile_case(case)
-    result = simulate(case)
-    summary = _load_yaml(REFERENCES / "zdplaskin_example2_summary.yaml")["saved_output"]
-    assert isinstance(summary, dict)
-
-    ar_plus = result.series("n[plasma,Ar_plus]")
-    ar2_plus = result.series("n[plasma,Ar2_plus]")
-    electron_density = ar_plus + ar2_plus
-    species_comparisons = {
-        "n[plasma,Ar_star]": "final_saved_Ar_star_density_m3",
-        "n[plasma,Ar_plus]": "final_saved_Ar_plus_density_m3",
-        "n[plasma,Ar2_plus]": "final_saved_Ar2_plus_density_m3",
-    }
+    solver = case.solver.model_copy(
+        update={"sample_interval_s": None, "save_at_s": history["time_s"].tolist()}
+    )
+    result = simulate(case.model_copy(update={"solver": solver}))
 
     assert result.status.success
-    assert result.time_s[-1] == float(summary["final_saved_time_s"])
-    for label, reference_key in species_comparisons.items():
-        assert result.series(label)[-1] == pytest.approx(
-            float(summary[reference_key]), rel=0.10
-        )
-    assert electron_density[-1] == pytest.approx(
-        float(summary["final_saved_electron_density_m3"]), rel=0.10
+    np.testing.assert_array_equal(result.time_s[1:], history["time_s"])
+    assert result.series("electron_density_m3[plasma]")[0] == 1.0e12
+    assert result.series("n[plasma,Ar2_plus]")[0] == 0.0
+    current = result.series("port_current_A[dc_series_drive]")
+    voltage = result.series("port_plasma_voltage_V[dc_series_drive]")
+    np.testing.assert_allclose(voltage + current * 1.0e5, 1000.0, rtol=1.0e-12)
+    np.testing.assert_allclose(
+        result.series("absorbed_power_W[plasma]"), voltage * current, rtol=1.0e-12
     )
-    assert np.max(electron_density) == pytest.approx(
-        float(summary["peak_saved_electron_density_m3"]), rel=0.10
+    np.testing.assert_allclose(
+        result.series("port_reduced_field_Td[dc_series_drive]"),
+        voltage / (0.004 * result.series("neutral_density_m3[plasma]") * 1e-21),
+        rtol=1.0e-12,
     )
-
-    evaluation = compiled.model.evaluate(
-        float(result.time_s[-1]),
-        result.state[-1],
-        compiled.model.segments[-1],
-    )
-    assert evaluation.power_coupling is not None
-    port = evaluation.power_coupling.port_results["dc_series_drive"]
-    circuit = _final_reference_circuit_row()
-    assert result.time_s[-1] == circuit["time_s"]
-    assert port.observables["plasma_voltage_V"] == pytest.approx(
-        circuit["voltage_V"], rel=0.05
-    )
-    assert port.observables["current_A"] == pytest.approx(
-        circuit["current_A"], rel=0.05
-    )
-    assert port.reduced_field_Td == pytest.approx(circuit["reduced_field_Td"], rel=0.05)

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, ClassVar, Literal
 
-import numpy as np
+if TYPE_CHECKING:
+    from plasma_global.models.kinetics import ElectronKineticsResult
 
 from plasma_global.errors import (
-    ModelConfigurationError,
     QuasineutralityError,
     StateDomainError,
 )
@@ -24,26 +24,6 @@ class ElectronState:
     temperature_eV: float
     energy_density_J_m3: float
     reduced_field_Td: float | None
-
-
-class ElectronClosure(Protocol):
-    @property
-    def evolves_energy(self) -> bool: ...
-
-    @property
-    def mode(self) -> str: ...
-
-    @property
-    def mean_energy_from_field(self) -> FieldMeanEnergy | None: ...
-
-    def evaluate(
-        self,
-        *,
-        net_heavy_charge_density_m3: float,
-        energy_density_J_m3: float | None,
-        reduced_field_Td: float | None,
-        electron_density_m3: float | None = None,
-    ) -> ElectronState: ...
 
 
 def quasineutral_electron_density(net_heavy_charge_density_m3: float) -> float:
@@ -80,9 +60,36 @@ def resolved_electron_density(
 class ElectronEnergyClosure:
     """Evolve electron energy density and derive both mean energy and Te."""
 
-    mode: str = "electron_energy"
-    evolves_energy: bool = True
-    mean_energy_from_field: None = None
+    mode: ClassVar[Literal["electron_energy"]] = "electron_energy"
+    evolves_energy: ClassVar[bool] = True
+
+    def canonical_energy_density(
+        self,
+        *,
+        net_heavy_charge_density_m3: float,
+        energy_density_J_m3: float,
+        energy_atol_J_m3: float,
+        electron_density_m3: float | None = None,
+    ) -> float:
+        """Validate accepted energy and map only a tolerance-scale cold residue."""
+
+        density = resolved_electron_density(
+            net_heavy_charge_density_m3, electron_density_m3
+        )
+        energy = float(energy_density_J_m3)
+        if density == 0.0 and energy > 0.0:
+            if energy > 10.0 * energy_atol_J_m3:
+                raise StateDomainError(
+                    "cold electron energy at zero density exceeds 10*domain_atol"
+                )
+            energy = 0.0
+        self.evaluate(
+            net_heavy_charge_density_m3=net_heavy_charge_density_m3,
+            energy_density_J_m3=energy,
+            reduced_field_Td=None,
+            electron_density_m3=density,
+        )
+        return energy
 
     def evaluate(
         self,
@@ -126,93 +133,37 @@ class ElectronEnergyClosure:
         )
 
 
-class FieldMeanEnergy(Protocol):
-    def __call__(self, reduced_field_Td: float) -> float: ...
-
-
-@dataclass(frozen=True)
-class TabulatedMeanEnergy:
-    """Strict, non-extrapolating E/N-to-mean-energy interpolation."""
-
-    reduced_field_Td: tuple[float, ...]
-    mean_energy_eV: tuple[float, ...]
-
-    def __post_init__(self) -> None:
-        fields = np.asarray(self.reduced_field_Td, dtype=float)
-        energies = np.asarray(self.mean_energy_eV, dtype=float)
-        if (
-            fields.ndim != 1
-            or energies.ndim != 1
-            or fields.size < 2
-            or fields.shape != energies.shape
-        ):
-            raise ModelConfigurationError(
-                "Local-field table needs equal one-dimensional axes with at least "
-                "two points"
-            )
-        if not np.all(np.isfinite(fields)) or not np.all(np.isfinite(energies)):
-            raise ModelConfigurationError("Local-field table values must be finite")
-        if np.any(np.diff(fields) <= 0.0):
-            raise ModelConfigurationError(
-                "Reduced-field table axis must be strictly increasing"
-            )
-        if np.any(fields < 0.0) or np.any(energies < 0.0):
-            raise ModelConfigurationError(
-                "Reduced field and mean energy must be non-negative"
-            )
-
-    def __call__(self, reduced_field_Td: float) -> float:
-        field = float(reduced_field_Td)
-        lower = self.reduced_field_Td[0]
-        upper = self.reduced_field_Td[-1]
-        if not math.isfinite(field) or field < lower or field > upper:
-            raise StateDomainError(
-                f"Reduced field {field!r} Td is outside table bounds [{lower}, {upper}]"
-            )
-        return float(np.interp(field, self.reduced_field_Td, self.mean_energy_eV))
-
-
 @dataclass(frozen=True)
 class LocalFieldClosure:
-    """Algebraic local-field closure; it never adds electron energy to the ODE."""
+    """Use the coefficient table's electron state without evolving its energy."""
 
-    mean_energy_from_field: FieldMeanEnergy
-    mode: str = "local_field"
-    evolves_energy: bool = False
+    mode: ClassVar[Literal["local_field"]] = "local_field"
+    evolves_energy: ClassVar[bool] = False
 
     def evaluate(
         self,
         *,
-        net_heavy_charge_density_m3: float,
-        energy_density_J_m3: float | None,
+        electron_density_m3: float,
         reduced_field_Td: float | None,
-        electron_density_m3: float | None = None,
+        kinetics: ElectronKineticsResult,
     ) -> ElectronState:
-        if energy_density_J_m3 is not None:
-            raise StateDomainError(
-                "local_field closure must not receive an electron-energy state"
-            )
-        density = resolved_electron_density(
-            net_heavy_charge_density_m3, electron_density_m3
-        )
-        if reduced_field_Td is None:
-            raise StateDomainError(
-                "local_field closure requires reduced_field_Td for every zone and "
-                "segment"
-            )
-        field = float(reduced_field_Td)
-        mean_energy = float(self.mean_energy_from_field(field))
-        if not math.isfinite(mean_energy) or mean_energy < 0.0:
-            raise StateDomainError(
-                "Local-field mean-energy model returned an invalid value"
-            )
+        """Convert the table's algebraic electron state with no energy ODE."""
+
+        density = resolved_electron_density(0.0, electron_density_m3)
         return ElectronState(
             density_m3=density,
-            mean_energy_eV=mean_energy,
-            temperature_eV=(2.0 / 3.0) * mean_energy,
-            energy_density_J_m3=density * ELEMENTARY_CHARGE_C * mean_energy,
-            reduced_field_Td=field,
+            mean_energy_eV=kinetics.mean_energy_eV,
+            temperature_eV=kinetics.electron_temperature_eV,
+            energy_density_J_m3=density * ELEMENTARY_CHARGE_C * kinetics.mean_energy_eV,
+            reduced_field_Td=(
+                reduced_field_Td
+                if reduced_field_Td is not None
+                else kinetics.effective_field_Td
+            ),
         )
+
+
+ElectronClosure = ElectronEnergyClosure | LocalFieldClosure
 
 
 __all__ = [
@@ -220,9 +171,7 @@ __all__ = [
     "ElectronClosure",
     "ElectronEnergyClosure",
     "ElectronState",
-    "FieldMeanEnergy",
     "LocalFieldClosure",
-    "TabulatedMeanEnergy",
     "quasineutral_electron_density",
     "resolved_electron_density",
 ]

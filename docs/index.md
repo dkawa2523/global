@@ -1,11 +1,11 @@
 # モデリングマニュアル兼統合仕様書
 
-対象は **Plasma Global Model 0.5.0／入力schema v4／結果HDF5 format v3** です。
+対象は **Plasma Global Model 0.5.0／入力schema v5／結果HDF5 format v4** です。
 本書に利用者向けの仕様と操作をまとめ、実装済みの機能と今後の拡張を区別します。
 
 初回は第2〜4節を順に読み、同梱例の実行、結果の確認、自分の条件への変更まで進めてください。
 第5〜14節は設定・出力を調べるためのリファレンスです。すべての変数を設定する必要はなく、
-利用する物理機能の表を参照します。第15〜17節では結果の評価、問題への対応、旧版からの移行を扱います。
+利用する物理機能の表を参照します。第15〜17節では結果の評価、問題への対応、現行形式の互換方針を扱います。
 
 globalモデルを初めて扱う場合は、[低圧プラズマの体積平均モデル](THEORY.md)で技術的背景、機能構成、保存則からの導出、方程式、近似、
 実測したベンチマーク結果を確認できます。本書は操作と設定、理論文書は方程式と検証を担当します。
@@ -25,7 +25,7 @@ globalモデルを初めて扱う場合は、[低圧プラズマの体積平均�
 | HDF5の採用理由・保存項目・具体的なデータを知りたい | [14. 結果の保存と読込](#results)、[実データの例](#result-example) |
 | 結果の妥当性を判断したい | [15. 検証と解釈](#validation)、[16. 困ったとき](#troubleshooting) |
 | コマンドの引数・終了コードを調べたい | [操作一覧](#commands) |
-| 古い入力を移行したい | [17. 互換性と移行](#migration) |
+| 対応する入力・結果形式を確認したい | [17. 形式と互換方針](#migration) |
 
 内部構造と保守手順は[開発・保守](DEVELOPMENT.md)、未実装の内容と次の作業は
 [計画と残る課題](ROADMAP.md)へ分けます。
@@ -144,7 +144,7 @@ plasma-global run work/argon/case.yaml --output runs/argon-001
 `init` は必要なcase、反応機構、数値CSVを新しいディレクトリへコピーします。
 `validate` は入力とモデルの組み立てを確認し、時間積分はしません。
 `outputs` はそのモデルで利用可能な系列名、単位、保存対象かどうかを表示します。
-電源固有量の一部は初期状態で評価して列挙するため、停止中などに同じ量が定義できるかは別途確認します。
+電源固有量は全運転区間の指令から判定し、停止中に定義できない量を要求すると計算前に該当区間を示します。
 `run` が計算し、`result.h5` と人が読む `summary.yaml` を保存します。
 この基本例は `output.csv: true` なので、解析用 `result.csv` と列名・単位の `series.yaml` も生成します。
 出力先は毎回新しい名前にします。既存の結果は上書きしません。
@@ -160,8 +160,8 @@ plasma-global run work/argon/case.yaml --output runs/argon-001
 |---|---|
 | `summary.yaml` | 完了したか、どの時刻まで計算したか、構成の警告、指定した最終値 |
 | `result.h5` | 全状態・保存した派生量・実効入力・来歴を含む再解析用の正本 |
-| `result.csv` | 表計算ソフト等へ渡す数値。各行が1保存時刻 |
-| `series.yaml` | CSVの列名と単位。CSVだけでは終了状態と入力来歴を復元できない |
+| `csv/result.csv` | 表計算ソフト等へ渡す数値。各行が1保存時刻 |
+| `csv/series.yaml` | CSVの列名と単位。CSVだけでは終了状態と入力来歴を復元できない |
 
 ファイルがあるだけで完了と判断せず、終了状態と終端時刻を確認します。
 結果HDF5からの再描画やCSV化ではODEを再計算しません。一方、保存しなかった派生量は
@@ -194,7 +194,8 @@ plasma-global run work/analysis/case.yaml --output runs/analysis-001
 `dot -V` で起動を確認してください。導入方法は
 [Graphviz公式ガイド](https://graphviz.readthedocs.io/en/stable/manual.html#installation)を参照します。
 `format: dot` はPython側のgraphvizだけで出力できます。時系列図にはMatplotlibを使います。
-CLIは要求された描画依存を積分前に確認します。
+数値結果は描画より先に保存します。描画依存が不足した場合も `result.h5` と `summary.yaml` を保持し、
+CLIは終了コード3、`artifacts.yaml` は対象の生成失敗と理由を返します。依存を導入した後に保存結果から描画を再実行できます。
 
 上の描画依存を導入した後は、最初の計算の保存結果からも図を作れます。角括弧・コンマを含む系列名は引用符で囲みます。
 
@@ -212,7 +213,7 @@ plasma-global plot runs/argon-001/result.h5 "electron_density_m3[plasma]" "elect
 plasma-global init --list
 ```
 
-インストール済みの24ケースを、名前と用途の説明で一覧表示します。
+インストール済みのケースを、名前と用途の説明で一覧表示します。
 入力の正本はリポジトリの `plasma_global/examples/` に一か所だけ置き、同じファイルをwheelに同梱します。
 `cases/` にcase YAML、`chemistry/` に共有機構と断面積CSV、`data/` に電子係数CSVがあります。
 利用者は `init` で選んだcaseとその依存ファイルだけを取り出します。
@@ -221,14 +222,21 @@ plasma-global init --list
 |---|---|---|
 | `argon_maxwellian` | 単一zone、実断面積、吸収電力、afterglow | 標準構成から始める基本例 |
 | `argon_analysis` | 上と同じ物理、probe・CSV・組成図・反応図 | 出力設定の具体例 |
-| `argon_lxcat` | 2 zone、輸送、近似EEDF、ICP／CCP | experimentalな区画・結合モデルの例 |
+| `argon_lxcat` | 2 zone、輸送、独立Swarm係数CSV、ICP／CCP | 固定組成のDC電子係数を用いるexperimentalな区画・結合モデルの例 |
 | `crane_two_reaction_argon` | 簡単な反応機構と別コード出力の比較 | 化学反応の回帰比較 |
-| `zdplaskin_example2` | 電子係数CSV、local-field、DC直列回路 | 別コード由来の回帰比較 |
+| `zdplaskin_example2` | 断面積から生成した電子係数CSV、local-field、DC直列回路 | 同時刻の別コード比較 |
+| `swarm_argon_dc` | SwarmのAr励起係数・フラックス移動度、DC直列回路と停止 | 外部係数の接続と、その条件での反応率・電流の確認 |
 | `rf_envelope_calibration` | RF簡略モデルの校正設定 | 校正手順の例 |
+| `gas_heating_flow` | 流入・排気・壁熱交換・気体加熱 | 解析解のある温度応答 |
+| `surface_inventory` | 吸着・脱離・膜厚・壁蓄積 | 気相・吸着・堆積粒子数の対応と保存 |
+| `prescribed_density` | 外部指定の電子密度と係数CSV | 合成入力の接続例。測定比較ではない |
 | `smoke` | 複数の実験的拡張を短時間実行 | 接続確認用。装置の開始例には基本Arを使う |
 
-数値検証用の17ケースは、[第15節の検証ケース](#benchmark-cases)へまとめています。
-まず用途別の7例から選び、数値誤差を調べる段階で検証ケースを使ってください。
+数値検証と測定比較に使うケースは、[第15節の検証ケース](#benchmark-cases)へまとめています。
+
+自分の目的からモデルを探す場合は `plasma-global models` で区分と用途を確認し、
+例えば `plasma-global models power experimental.icp` で入力、適用条件、関連例を参照します。
+選んだcaseの保存量と定義できない量は `plasma-global outputs CASE` で計算前に確認できます。
 
 ### リポジトリ内で参照する場所
 
@@ -237,7 +245,7 @@ plasma-global init --list
 | `docs/index.md` | このマニュアル。操作と入力・出力仕様の正本 |
 | `docs/THEORY.md` | 背景、方程式、近似、数値検証と参考文献 |
 | `plasma_global/examples/` | 同梱YAML／CSVの正本。編集用にはinitで取り出す |
-| `benchmarks/references/`、`benchmarks/raw/` | 保存参照と係数の再生成元。通常runで別途置く入力ではない |
+| `benchmarks/references/` | 保存参照・測定図の読取値・係数生成の来歴 |
 | `tools/`、`tests/` | 保守・検証用。通常利用の開始点はCLI／公開API |
 | `pyproject.toml`、`uv.lock` | パッケージ版・依存の定義と開発用の固定環境 |
 
@@ -257,7 +265,7 @@ Ar⁺ seed 1.0×10¹⁴ m⁻³、初期平均電子エネルギー3 eVの例で�
 この過渡例の2 msでの値は電子密度がおよそ4.42×10¹³ m⁻³、電子温度が0.0125 eVです。
 これは低温afterglowの終端値です。高電力の定常値や装置で測った値として使いません。
 
-この図は上の `init argon_analysis` → `run` で生成する `plots/plasma.png` です。
+この図は上の `init argon_analysis` → `run` で生成する `plots/plasma/figures/plasma.png` です。
 [第13節](#figures)では同じ計算の組成図・反応図と、別のDC回路例を説明します。
 本書へ収録した図は0.5.0の実計算出力です。
 外観差や計算環境による微小差を許容し、画像の一致を物理的な合否条件にしません。
@@ -278,7 +286,7 @@ Ar⁺ seed 1.0×10¹⁴ m⁻³、初期平均電子エネルギー3 eVの例で�
 |---|---|---|---|
 | 吸収電力から平均組成・電子エネルギーを求める | `energy_balance`、Maxwellian係数、`prescribed_power` | 反応機構、V・A、p・T・組成、電子への電力分配 | `argon_maxwellian`。同梱機構はAr用 |
 | 通電・停止・パルスの過渡応答を調べる | 上の構成に `run.steps` または `waveform` を追加 | 通電・停止時間、周期・duty、保存間隔 | `argon_analysis`。低温afterglowでは壁近似の適用条件も確認 |
-| 電圧・直列抵抗からDC電流と化学を求める | `local_field`、E/N軸の係数CSV、`dc_series` | 電圧、抵抗、電極間隔・面積、移動度の生成条件 | `zdplaskin_example2`。100 Torrの保存参照との回帰であり、低圧装置全般の実証ではない |
+| 電圧・直列抵抗からDC電流と化学を求める | `local_field`、E/N軸の係数CSV、`dc_series` | 電圧、抵抗、電極間隔・面積、移動度の生成条件 | `zdplaskin_example2`。100 Torrの参照波形と、固定組成の電子係数で計算した結果を比較 |
 | 放電部から処理部への平均的な移送を調べる | 必要なzoneを方向付きedgeで接続 | 各体積、流量・排気、移送係数、電源接続先 | `argon_lxcat`。区画モデルの例であり、位置ごとの流体解ではない |
 | RF・ICP・CCPの簡略結合を調べる | 対応する `experimental.*` 電源モデル | 電力・RMS電圧・周波数、校正係数、CCPの接続面 | `rf_envelope_calibration`、`argon_lxcat`。電磁場・整合回路の詳細は解かない |
 | 吸着・脱離・表面反応を組成と結合する | 表面種・反応と `surface_kinetics: {kind: mass_action}` | site密度、占有数、初期被覆率、壁温・入射条件 | `smoke` は接続確認用デモ。対象材料・反応ガスの係数は別途準備する |
@@ -405,7 +413,7 @@ pumps:
 |---|---|
 | 電圧・直列抵抗・電極寸法 | `reactor.power_ports.dc_series_drive.model` の `source_voltage_V`、`ballast_resistance_ohm`、`gap_m`、`electrode_area_m2` |
 | 係数の計算条件 | `models.electrons.coefficients.file` と `provenance`。E/Nの軸、反応係数、移動度、混合比・密度条件をそろえる |
-| 解析する量 | `output.observables` へ `port_plasma_voltage_V[dc_series_drive]` と `port_current_A[dc_series_drive]` を追加。E/Nと種密度も比較 |
+| 解析する量 | 同梱ケースは `port_plasma_voltage_V[dc_series_drive]` と `port_current_A[dc_series_drive]` を保存。E/Nと種密度も比較 |
 
 この表は保存参照から再構成した係数であり、任意の圧力・組成・E/Nへ適用する汎用物性表ではありません。
 対象条件の係数を用意する手順は[外部データの準備](#prepare-data)、列と単位は[電子係数表](#electron-table-settings)を参照します。
@@ -474,7 +482,9 @@ CLIのplotは一つのHDF5を対象とします。複数runの重ね描きは[Py
 
 ## 5. 入力全体の仕様
 
-通常実行で受け付ける入力は `schema_version: 4` です。
+通常実行で受け付ける入力は `schema_version: 5` です。
+YAMLとPython辞書は同じ宣言です。構造IDには角括弧・カンマ・前後空白・NUL・改行を使いません。
+Unicodeや化学名のcolon・star・plusは使えます。系列名の角括弧やCSVの元列名は構造IDと別です。
 
 <a id="variable-reference"></a>
 
@@ -495,13 +505,13 @@ CLIのplotは一つのHDF5を対象とします。複数runの重ね描きは[Py
 | `run` | 計算期間と運転履歴 | 過渡応答、切替時刻、波形の位相 | [9節](#operation) |
 | `solver` | 誤差制御と結果の保存時刻 | 数値誤差、保存点数、イベント積分の精度 | [10節](#numerics) |
 | `output` | 保存する派生量・probe・図 | 解析に残す情報。物理状態の次元は変えない | [11〜13節](#outputs) |
-| `experimental` | 膜厚・壁蓄積・汎用状態の有効化 | 宣言した追加状態の積算 | [拡張状態](#experimental-settings) |
+| `experimental` | 膜厚・壁蓄積の有効化 | 宣言した反応イベントの積算 | [蓄積状態](#experimental-settings) |
 
 ### case YAMLのルート項目
 
 | ルート項目 | 必須 | 内容 |
 |---|---|---|
-| `schema_version` | ○ | 整数4 |
+| `schema_version` | ○ | 整数5 |
 | `case` | ○ | `name` と任意の `description` |
 | `chemistry` | ○ | 化学機構の直接定義、または `{file: chemistry.yaml}` |
 | `reactor` | ○ | zone、surface、edge、入口、ポンプ、電源 |
@@ -589,8 +599,8 @@ reactor直下の変数は次のとおりです。各IDの中へ入れる変数�
 | `initial.pressure_Pa` | Pa、正数 | 必須 | 初期heavy gas圧力。運転中に一定に保つ制御値ではない |
 | `initial.gas_temperature_K` | K、正数 | 必須 | 初期気体温度。固定温度モデルでは以後もこの値を使う |
 | `initial.densities_m3` | 種ID→m⁻³ | 未指定 | 電子を除く気相種の初期密度を直接指定。未記入のheavy種は0 |
-| `initial.mole_fractions` | 中性種ID→比率 | 未指定 | 初期中性組成。総和1とし、圧力・温度とseed密度から各密度を決める |
-| `initial.seed_densities_m3` | 荷電heavy種ID→m⁻³ | `{}` | 分率方式で追加する初期荷電粒子。正イオンseedを明示し、電子は電子密度モデルで決める |
+| `initial.mole_fractions` | 中性種ID→比率 | 未指定 | 初期中性組成。総和1とし、圧力・温度とseed密度から各密度を決める。省略した中性種の初期値は0 |
+| `initial.seed_densities_m3` | 荷電heavy種ID→m⁻³ | `{}` | 分率方式で追加する初期荷電粒子。正イオンseedを明示する。省略した荷電heavy種の初期値は0。電子は電子密度モデルで決める |
 | `initial.mean_energy_eV` | eV、正数 | 電子energy収支では必須 | 電子1個あたりの平均運動エネルギー。等価電子温度の3/2倍。local-fieldでは指定しない |
 
 装置要素はIDをkeyにしたmappingです。同じIDをlist内で再記入しません。
@@ -632,7 +642,7 @@ reactor:
 | `area_m2` | m²、正数 | 必須 | そのzoneに露出する有効面積。同じ実面積を複数surfaceへ重複計上しない |
 | `temperature_K` | K、正数 | 必須 | 壁・基板温度。表面反応、気体との熱交換に使う |
 | `wall_transport` | mapping | 必須 | イオン等の壁輸送方式と係数。[壁の設定表](#wall-settings)を参照 |
-| `ion_impact_energy_eV` | eV、非負 | `0` | 正の値はその面のsheath energy指定に使う。0は通常のclosureへ委ねる指定で、衝突energyが常に0になる意味ではない |
+| `ion_impact_energy_eV` | eV、非負 | `0` | 壁面に割り当てるシース加速エネルギー。Bohm輸送で0の場合は入射電流から求める |
 | `site_density_m2` | m⁻²、非負 | `0` | 単位面積あたりの表面site数。表面反応・膜厚を使う面では正の値を与える |
 | `initial_coverages` | 表面種ID→無次元値 | `{}` | 表面種の面密度をsite密度で割った初期状態。`elements.site` で重み付けした占有率の和を1以下にする。空siteは書かない |
 
@@ -687,7 +697,7 @@ dn_target,s/dt = +(C/V_target) n_source,s
 `species` と各反応listはCSVのpath文字列にもできます。例えば `species: species.csv` とします。
 `rate_models` はmappingまたはそれを持つYAMLのpath、`cross_sections` はlistまたはそれを持つYAMLのpathです。
 少数の種・反応は直接YAMLで定義し、複数caseで同じ機構を使う場合に共有ファイルへ分離します。
-化学機構内の `schema_version` は省略時4、`experimental` は[拡張状態](#experimental-settings)の宣言です。
+化学機構内の `schema_version` は省略時4です。膜・壁蓄積はcaseの[拡張状態](#experimental-settings)で選びます。
 
 ### 化学種の変数
 
@@ -711,7 +721,7 @@ dn_target,s/dt = +(C/V_target) n_source,s
 
 ### 反応の変数
 
-`gas_reactions[]` は体積反応、`boundary_reactions[]` は壁へ到達したイオンの中性化、
+`gas_reactions[]` は体積反応、`boundary_reactions[]` は壁へ到達したイオンの中性化・吸収、
 `surface_reactions[]` は吸着・脱離等の表面過程です。速度の単位は、それぞれの測度が体積か面積かで異なります。
 
 | 変数 | 型・単位 | 必須・既定値 | 意味・用途 |
@@ -720,14 +730,13 @@ dn_target,s/dt = +(C/V_target) n_source,s
 | `equation` | 反応式文字列 | 必須 | `e + Ar -> 2 e + Ar_plus` のように化学量論を記す。反応物の係数は通常そのまま反応次数になる |
 | `rate` | mappingまたは速度式ID | 気相・表面で必要 | 速度式の直接定義、または `rate_models` の参照。boundaryには記入しない |
 | `electron_energy_transfer_eV` | eV/event、符号付き | 条件による | 電子へのエネルギー移送。負が電子冷却、正が電子加熱。table専用の電子反応では0を含め明示 |
-| `energy_loss_eV` | eV/event、非負 | 条件による | 電子損失を正で記す別表現。上のsigned値とは併記しない |
-| `gas_heating_eV` | eV/event | `0` | 気体への反応熱。正が加熱。気相反応では非負、boundaryでは0。表面YAMLは符号付き値を受け付けるが、反応CSVは非負に制限される |
+| `gas_heating_eV` | eV/event | `0` | 気体への反応熱。気相反応では非負、boundaryでは0。表面反応ではYAML・CSVともに符号付きで、正が加熱、負が冷却 |
 | `zones` | zone ID list | `[]` | 活動するzoneを限定。空listは該当する全zone |
 | `surfaces` | surface ID list | `[]` | boundary・surface反応の適用面を限定。空listは該当する全surface |
 | `metadata` | mapping | `{}` | 文献・反応の解釈・適用範囲などの注記 |
 
-boundaryの公開入力は、正イオン1個を唯一の反応物とし、中性気相種を生成物に指定します。
-例えば `Ar_plus -> Ar` です。壁への到達頻度はsurfaceの壁輸送モデルが求めます。
+boundaryの公開入力は、正イオン1個を唯一の反応物とします。例えば `Ar_plus -> Ar` は中性Arの気相への戻り、
+`Ar_plus -> 0` は壁への吸収を指定します。壁への到達頻度はsurfaceの壁輸送モデルが求めます。
 現行YAMLは独立な分岐確率変数を持たず、選択された経路を確率1として扱います。
 同じ面・入射イオンに複数の競合経路を追加して、任意確率で分岐させる設定にはなっていません。
 
@@ -743,7 +752,6 @@ gas_reactions:
 ```
 
 `electron_energy_transfer_eV` は電子への加熱が正、冷却が負です。
-損失を正で書く `energy_loss_eV` も使えますが、両方を併記しません。
 table専用反応の移送は0の場合も明示します。`gas_heating_eV` は気体への加熱です。
 無作用なenergy指定、未知の種・速度式、元素・電荷・siteの不整合を検査します。
 壁との電荷交換を含むboundaryは、気相の閉じた反応とは異なる境界として扱います。
@@ -765,7 +773,7 @@ table専用反応の移送は0の場合も明示します。`gas_heating_eV` は
 | `sticking` | `value`、任意の `coverage`。中性入射の付着 |
 | `ion_assisted` | `yield`, `threshold_eV`, `reference_energy_eV`, `exponent`、任意の `coverage` |
 | `desorption` | `frequency_s_inv`, `activation_eV`。脱離 |
-| `langmuir_hinshelwood` | `A_m2_s_inv`, `activation_eV`。表面反応 |
+| `langmuir_hinshelwood` | `A_m2_s`, `activation_eV`。表面反応 |
 | `experimental.electron_temperature_power_law` | `A`, `reference_temperature_K`, `exponent`。電子温度の経験式 |
 
 #### 気相速度式の各係数
@@ -806,7 +814,7 @@ table専用反応の移送は0の場合も明示します。`gas_heating_eV` は
 | ion_assisted | `exponent` | 非負、必須 | `[(E_i−threshold)/(reference−threshold)]` に掛かる指数 |
 | desorption | `frequency_s_inv` | s⁻¹、必須 | 熱脱離の前指数頻度 |
 | desorption | `activation_eV` | eV、非負、必須 | 壁温に対する脱離の活性化エネルギー |
-| langmuir_hinshelwood | `A_m2_s_inv` | m²/s、必須 | site密度の2乗、被覆率の積、Arrhenius因子に掛ける係数。変数名だけから速度の単位を判断しない |
+| langmuir_hinshelwood | `A_m2_s` | m²/s、必須 | site密度の2乗、被覆率の積、Arrhenius因子に掛ける係数。変数名だけから速度の単位を判断しない |
 | langmuir_hinshelwood | `activation_eV` | eV、非負、必須 | 壁温に対する活性化エネルギー |
 | sticking / ion_assisted | `coverage` | mapping、省略可 | 被覆状態による追加倍率。省略時は倍率1 |
 | coverage | `kind` | `constant` / `site_blocking` / `species_power` | 1、空site被覆率のべき乗、指定種被覆率のべき乗を選ぶ |
@@ -814,7 +822,14 @@ table専用反応の移送は0の場合も明示します。`gas_heating_eV` は
 | coverage: species_power | `species` | 表面種ID、必須 | べき乗する被覆率の種 |
 | coverage: site_blocking / species_power | `exponent` | 無次元、非負、必須 | 被覆率に掛かる指数 |
 
-`A_m2_s_inv` は現行の変数名です。実装は `r = A N_site² × Arrhenius因子 × 被覆率因子` で、
+`ion_assisted` は入射イオンを触媒とする表面反応です。気相イオンは反応式の両辺に係数1で残します。
+イオンの捕獲・中性化は壁輸送が担当するため、イオンを消費して吸着相へ取り込む反応は計算前に拒否します。
+
+`ion_assisted` は、入射イオンを反応式の両辺へ同じ係数1で置く触媒形だけを扱います。
+入射イオンの消費・中性化はwall transportとboundary反応が担当します。
+イオンを吸着相へ捕獲する反応は、同じ入射を中性還流と捕獲先へ重複計上しないため、計算前に拒否します。
+
+`A_m2_s` の単位はm²/sです。実装は `r = A N_site² × Arrhenius因子 × 被覆率因子` で、
 面反応速度rをm⁻² s⁻¹にするためAの単位はm²/sです。気相二体係数のm³/sや、r自体の単位とは異なります。
 
 `tabulated_1d` のCSVは厳密に `x,value` です。軸は `gas_temperature_K`、`mean_energy_eV`、
@@ -833,8 +848,7 @@ clipは端値保持で、電子・電源CSVの `hold` と同じ名称には統�
 | `target` | 気相種ID | 必須 | 衝突相手。運動量移送では弾性エネルギー交換の対象にもなる |
 | `threshold_eV` | eV、非負 | 必須 | 電離・励起・解離では反応開始エネルギー。平均電子エネルギーと直接比較して反応を切る値ではない |
 | `file` | CSV path | 必須 | 断面積曲線の数値データ |
-| `electron_energy_transfer_eV` | eV/event | いずれか一方が必須 | 電子への符号付きエネルギー移送 |
-| `energy_loss_eV` | eV/event、非負 | いずれか一方が必須 | 電子損失を正で与える別表現。運動量断面積では0を明示 |
+| `electron_energy_transfer_eV` | eV/event | 必須 | 電子への符号付きエネルギー移送。運動量断面積では0を明示 |
 | `metadata` | mapping | `{}` | 測定・計算元、出典、適用範囲等 |
 
 1 curveは `energy_eV,sigma_m2`、複数curveの共通CSVは `channel_id,energy_eV,sigma_m2` です。
@@ -853,11 +867,11 @@ envelopeの寄与比1×10⁻³を検査します。後者は収録不足を見�
 | CSVの種類 | 必須列 | 任意列・複数値の記法 |
 |---|---|---|
 | species | `id,phase,charge,mass_amu,elements` | `state_tags,surfaces,cv_over_kb,display_name,notes,provenance`。元素は `Ar:1;O:2`、タグ・面IDは `a\|b` 形式 |
-| gas / surface反応 | `id,equation,rate_model` | `energy_loss_eV,electron_energy_transfer_eV,gas_heating_eV,zones,surfaces,notes,provenance`。領域IDは `a\|b` 形式 |
-| boundary反応 | `id,equation` | `energy_loss_eV,electron_energy_transfer_eV,gas_heating_eV,zones,surfaces,notes,provenance`。エネルギー欄は非ゼロ値を指定しない。rate_model列は置かない |
+| gas / surface反応 | `id,equation,rate_model` | `electron_energy_transfer_eV,gas_heating_eV,zones,surfaces,notes,provenance`。領域IDは `a\|b` 形式 |
+| boundary反応 | `id,equation` | `electron_energy_transfer_eV,gas_heating_eV,zones,surfaces,notes,provenance`。エネルギー欄は非ゼロ値を指定しない。rate_model列は置かない |
 
 CSVの `rate_model` はYAMLの共有 `rate_models` のIDです。YAMLでは直接の `rate` 定義を推奨します。
-反応CSVの `gas_heating_eV` も非負です。電子の加熱・冷却を表すsigned値とは区別します。
+反応CSVの `gas_heating_eV` はYAMLと同じく、気相は非負、表面は符号付き、boundaryは0です。
 表面反応の負の反応熱を含むYAMLをCSVへ移す場合、現行CSV読込の値域と一致しません。表面の負値は気体への冷却項になります。
 電子係数と電源のCSVは、化学種・反応CSVとは別の列仕様を持ちます。[8節](#electron-table-settings)と[9節](#power-table-settings)を参照してください。
 
@@ -891,7 +905,7 @@ header重複、行形状、有限値を検査し、sort・欠損補完・外挿�
 | 変数 | 選択肢・既定値 | 決める内容 |
 |---|---|---|
 | `models.electrons.kind` | `energy_balance` / `local_field`、必須 | 電子energy密度を積分するか、E/Nから電子状態を求めるか |
-| `models.electrons.coefficients` | energy_balanceではMaxwellianが既定 | 断面積から係数を計算するか、外部CSV・近似EEDFを使うか |
+| `models.electrons.coefficients` | energy_balanceではMaxwellianが既定 | Maxwellianの断面積積分か、独立に生成した電子係数CSVを使うか |
 | `models.electron_density.kind` | `quasineutral` が既定 | 電子密度を荷電重粒子から決めるか、外部プロファイルで与えるか |
 | `models.gas_energy.kind` | `fixed` が既定、または `evolved` | 気体温度を固定するか、気体内部energyを積分するか |
 | `models.surface_kinetics` | 未指定、または `{kind: mass_action}` | 表面被覆率と表面反応を有効化。空mappingで代用しない |
@@ -902,7 +916,7 @@ CSVを選ぶ場合は `kind` を足さず、下記の `file` を用います。
 | `models.electrons.kind` | 計算するもの | 係数 |
 |---|---|---|
 | `energy_balance` | 電子energy密度を積分し、平均energyを求める | 既定のMaxwellian、またはmean-energy軸CSV |
-| `local_field` | 電源／回路のE/Nから電子状態を代数的に求める | E/N軸CSV、または `experimental.approximate_two_term` |
+| `local_field` | 電源／回路のE/Nから電子状態を代数的に求める | E/N軸の外部電子係数CSV |
 
 ```yaml
 models:
@@ -957,32 +971,29 @@ energy-balanceのDCでは表にμがない場合に固定 `electron_mobility_m2_
 
 軸は有限・一意・厳密昇順、係数は有限・非負で、補間はlinearです。
 `coefficients.bounds` は既定 `error`、明示した `hold` だけが端値を保持します。
-holdは適用範囲が物理的に拡大したことを意味しません。
+DC回路で `hold` を使うと、範囲外では端点の移動度を使って回路を解き、実際の電圧から求めたE/Nを保存します。
+端点を使う範囲は係数の生成条件に照らして判断します。
 
-電子表は生成時の混合組成に依存します。近似two-termの準備表は初期中性組成比に固定され、
-反応に伴う組成変化へ追従して再生成しません。同じ初期組成のzoneでは表を共有します。
-既定の準備gridはenergy 10⁻³〜160 eV・360点、E/N 1〜100 Td・48点です。
-power-balanceと最終energy binの確率質量1×10⁻³以下を検査しますが、検証済みBoltzmann solverの
-代替とは扱いません。大きく組成が変わる場合は別途比較が必要です。
+電子係数はSwarm等で独立に生成し、CSVの生成条件と出典を `provenance` に記録します。
+Globalは運転中の組成や気体温度に合わせて表を再生成しません。対象範囲の係数を用意し、
+固定組成・固定温度の近似が観測量に与える影響を確認します。 [係数の生成と受け渡し](DEVELOPMENT.md#external-models)
 
-### 近似EEDFの変数
+`argon_lxcat` と `rf_envelope_calibration` は、同梱の `data/swarm_argon_rf/electrons.csv` を読みます。
+表はAr 100%、350 K、8 Pa、DC無磁場のSwarm two-term計算から独立に生成し、
+1〜200 Tdの82点、電離1・励起30・運動量移行1の係数を収録しています。
+両zoneへ同じ表を使い、処理部の気体温度との違いにも自動追従しません。
+RF／ICP／CCPへDCの局所電場係数を適用する近似であり、RF電子分布や装置を検証した表ではありません。
+`argon_maxwellian` は引き続きMaxwellianの断面積積分を使います。
 
-近似EEDFは `local_field` の係数に `kind: experimental.approximate_two_term` を選びます。
-以下は `models.electrons.coefficients` 内の変数です。
-
-| 変数 | 単位・既定値 | 意味と変更時の確認 |
-|---|---|---|
-| `kind` | `experimental.approximate_two_term` | この近似係数生成を明示的に選択 |
-| `energy_grid.min_eV` | eV、`1.0e-3` | 電子energy gridの下端。正数 |
-| `energy_grid.max_eV` | eV、`160` | 上端。下端より大きくし、分布のtailを収録 |
-| `energy_grid.n` | 整数、`360` | energy grid点数。32以上 |
-| `reduced_field_grid.min_Td` | Td、`1` | 準備するE/N表の下端。正数 |
-| `reduced_field_grid.max_Td` | Td、`100` | E/N表の上端。下端より大きくする |
-| `reduced_field_grid.n` | 整数、`48` | E/N点数。2以上。運転中の範囲を覆うようにする |
-| `max_shape_iterations` | 正整数、`48` | 分布形状を求める反復回数の上限 |
-| `cache.max_entries` | 正整数、`12` | 初期中性組成別の準備表の保持数。組成変化への追従計算を有効にする設定ではない |
+このSwarm表には0 Td行がありません。0 Tdでは明示した停止境界近似として平均energy・反応係数を0にし、
+移動度は1 Tdの換算移動度を現在の中性密度で割った値を使います。0と1 Tdの間を暗黙補間せず、
+正のE/Nが1 Td未満なら既定の `bounds: error` で停止します。
+0 Td行を持つ別の表を与えた場合は、停止時にもその行の平均energyと係数を使います。
 
 ### 気体温度と外部指定電子密度
+
+`gas_heating_flow`は一定比熱の熱・流通を、`prescribed_density`は合成した電子密度CSVを小さい入力で示します。
+外部指定密度では電子密度をCSVが供給するため、正イオンseedを必須としません。電荷残差で準中性との差を確認します。
 
 気体温度の既定は固定です。`models.gas_energy: {kind: evolved}` はexperimental構成で、
 全heavy gas speciesの `cv_over_kb` が必要です。温度そのものではなく
@@ -1022,7 +1033,7 @@ CSVの `file` を使います。補間は `linear`／`previous`、範囲は `bou
 
 | 適用するkind | 変数 | 単位・必須性・既定値 | 意味 |
 |---|---|---|---|
-| 全方式 | `kind` | 下表の4方式から選択、必須 | その面への壁輸送の近似 |
+| 全方式 | `kind` | `bohm` / `prescribed_frequency` / `ambipolar` / `off`、必須 | その面への壁輸送の近似 |
 | bohm | `h_factor` | 0より大きく1以下、またはauto。既定1 | 端密度／体積平均密度の比。autoは衝突性から毎回評価 |
 | bohm | `characteristic_length_m` | m、省略時V/A | auto hの特性長。数値hを直接指定した場合は使わない |
 | bohm | `ion_neutral_cross_section_m2` | m²、既定`1.0e-18` | auto hに使うイオン・中性衝突断面積 |
@@ -1030,24 +1041,23 @@ CSVの `file` を使います。補間は `linear`／`previous`、範囲は `bou
 | bohm | `max_h_factor` | 0より大きく1以下、既定1 | auto hの上限。下限以上にする |
 | prescribed_frequency | `frequency_s_inv` | s⁻¹、非負、必須 | その面による体積密度の損失頻度。表面束との換算にはV/Aを使う |
 | ambipolar | `diffusion_coefficient_m2_s` | m²/s、正数、必須 | 壁拡散損失に使う両極性拡散係数 |
-| ambipolar | `diffusion_length_m` | m、正数、省略可 | 拡散長。省略時はその面のV/A。損失頻度はD/Λ² |
+| ambipolar | `diffusion_length_m` | m、正数、必須 | この境界に割り当てた拡散長Λ。体積密度の損失頻度はD/Λ² |
+| ambipolar | `electron_temperature_reference_eV` | eV、正数、省略可 | 指定時は入力のDを基準電子温度での値とし、現在の電子温度と基準温度の比を掛ける。省略時はDを一定にする |
 | off | 追加変数なし | — | その面の壁輸送を0にする。表面反応モデルの有効・無効とは別 |
-
-| `wall_transport.kind` | 意味 |
-|---|---|
-| `bohm` | 正イオンのBohm入射束 |
-| `prescribed_frequency` | 指定した損失周波数 |
-| `ambipolar` | 指定した拡散係数と拡散長による壁輸送 |
-| `off` | その面の壁輸送を無効化 |
 
 Bohm入射束は `Γ_i = h_i n_i sqrt(e T_e/m_i)`、zoneでの損失は `Γ_i A/V` です。
 数値 `h_factor` はedge／bulk密度比を直接表し、隠れた0.61係数は掛けません。
 `auto` は `0.86/sqrt(3 + L n_neutral σ_in/2)` をmin／max内へ収め、各物理評価で更新します。
 特性長Lを省略した場合はそのsurfaceのV/Aを使います。
 
+両極性拡散の拡散長は、採用した形状と境界条件から求めた値を明示します。
+区画全体の拡散損失を一つの拡散長で表す場合は、全壁を代表する一つのsurfaceに割り当てます。
+複数面に割り当てると各面の損失頻度が加算されます。壁面積は体積あたりの損失を面平均束に換算するために使います。 [円筒容器の計算例](THEORY.md#argon-afterglow-benchmark)
+
 同じイオン束を壁への粒子損失、boundary生成物の分岐、表面反応、電子壁損失へ渡します。
 活動する入射イオンごとに[boundary反応](#chemistry)を明示し、生成物を元素名から推測しません。
-明示sheath energyがなければ、Bohm入射束と電子熱束の電流収支からfloating sheathを求めます。
+Bohm輸送で `ion_impact_energy_eV: 0` のときは、イオン入射束と電子熱束の電流収支から浮遊シースを求めます。
+損失頻度指定と両極性拡散では、`ion_impact_energy_eV` の値をそのまま使います。
 この標準域は単一一価正イオンです。多価イオンや成立しない電流収支を黙って0 eVへ置換しません。
 sheath energyは `T_e ln[Γ_e,thermal / Σ_i(z_i Γ_i)]`、電子熱束は
 `Γ_e,thermal = n_e sqrt(e T_e/(2πm_e))` です。電子壁損失は入射イオン1個あたり
@@ -1058,14 +1068,17 @@ site密度、必要な `initial_coverages` を設定します。被覆率は占�
 モデルを無効のまま初期被覆率を指定するとエラーになります。機構に表面反応を含めても
 モデルを選ばなければ積分されず、警告を出します。
 
-film・wall inventory・汎用拡張状態は `experimental` で明示的に有効化します。
+film・wall inventoryは `experimental` で明示的に有効化します。
 反応イベントの収率から計算する蓄積量で、宣言のない膜成長や蓄積を自動推定しません。
 
 <a id="experimental-settings"></a>
 
-### 膜厚・壁蓄積・汎用状態の変数
+### 膜厚・壁蓄積の変数
 
-case直下の `experimental` で使う拡張だけを有効化します。これらは宣言した反応の積算や補助状態で、
+`surface_inventory`は吸着・脱離、膜厚、堆積粒子数を1領域1表面で区別する小例です。
+膜の粒子在庫とsite被覆率を別に追い、気相と表面を含めた原子数を確認できます。
+
+case直下の `experimental` で使う蓄積モデルだけを有効化します。これらは宣言した表面反応の積算で、
 入力名から未知の成膜機構・材料物性・新しい気相反応を推定する機能ではありません。
 
 | 区分 | 変数 | 単位・既定値 | 意味 |
@@ -1078,30 +1091,9 @@ case直下の `experimental` で使う拡張だけを有効化します。これ
 | events[] | `reaction_id` | 反応ID、必須 | 蓄積変化の原因となる表面反応 |
 | events[] | `surface_id` | surface ID、必須 | その反応を計上する面 |
 | events[] | `inventory_particles_per_event` | 蓄積名→粒子数/event、必須 | 反応1回あたりの増減。正が蓄積、負が消費。ゼロ収率は書かない |
-| experimental | `extensions` | 未指定、または`{}` | 化学機構の汎用補助状態・過程を有効化 |
 
-汎用状態の定義場所は `chemistry.experimental` です。物理量の単位は状態ごとに定め、`output.units` にも記録します。
-
-| 区分 | 変数 | 単位・既定値 | 意味 |
-|---|---|---|---|
-| chemistry.experimental | `state_variables` | 状態ID→設定 | 宣言する補助状態 |
-| `state_variables.<id>` | `scope` | `global` / `zone` / `surface`、必須 | 状態を全体で1つ持つか、zone・surfaceごとに持つか |
-| 同上 | `initial` | 状態の単位、既定0 | 初期値 |
-| 同上 | `lower_bound` | 状態の単位、既定0 | 許容下限。制限なしはnull |
-| 同上 | `upper_bound` | 状態の単位、既定null | 許容上限。下限以上にする |
-| 同上 | `zones` | ID list、省略可 | zone scopeの対象。省略時は全zone |
-| 同上 | `surfaces` | ID list、省略可 | surface scopeの対象。省略時は全surface |
-| chemistry.experimental | `processes` | 過程ID→設定 | 状態の時間変化を与える項 |
-| `processes.<id>` | `kind` | `source` / `relaxation` / `ion_flux_source` | 一定源、平衡値への緩和、イオン束比例源 |
-| 同上 | `target` | 状態ID、必須 | 時間変化を加える補助状態 |
-| 同上 | `zones` | ID list、省略可 | 過程を適用するzone。targetのscopeと一致させる |
-| 同上 | `surfaces` | ID list、省略可 | 過程を適用するsurface。targetのscopeと一致させる |
-| source | `value` | 状態単位/s、必須 | 一定の時間微分 |
-| relaxation | `equilibrium` | 状態単位、既定0 | 緩和先の値 |
-| relaxation | `tau_s` | s、正数、必須 | 緩和時定数。微分は `(equilibrium−state)/tau_s` |
-| ion_flux_source | `coefficient` | 状態単位·m²、必須 | 表面イオン束に掛ける係数。targetはsurface scopeを使う |
-
-global scopeは領域listを指定しません。補助状態の出力名は `状態ID[owner]` で、全体のownerは `global` です。
+膜と壁蓄積は表面イベントの収率から評価します。蓄積状態は気相・表面反応へ反作用しません。
+材料の組成や反応を変える場合は、その依存関係を持つ化学種・表面モデルとして収支へ接続します。
 
 <a id="operation"></a>
 
@@ -1109,12 +1101,11 @@ global scopeは領域listを指定しません。補助状態の出力名は `�
 
 電源は `reactor.power_ports.<id>.model` で宣言し、一定値もここへ置けます。
 
-port自体の変数は次の3項目です。装置に固定した回路係数と、時間で変える指令値を分けます。
+port自体の変数は次の2項目です。装置に固定した回路係数と、時間で変える指令値を分けます。
 
 | 変数（`power_ports.<port>`以下） | 既定・必須性 | 意味 |
 |---|---|---|
 | `zone_id` | 必須 | 電力を与えるzone。発電機の設置位置ではなく、収支へ加える容積を指定 |
-| `coupling_target` | 空文字列 | experimental CCPの接続surface ID。指定する場合は同じzoneの面。その他のモデルでは指定しない |
 | `model` | 必須 | 以下のkindごとの電源・回路設定 |
 
 | `model.kind` | 中心設定 |
@@ -1123,8 +1114,8 @@ port自体の変数は次の3項目です。装置に固定した回路係数と
 | `dc_series` | `source_voltage_V`, `ballast_resistance_ohm`, `gap_m`, `electrode_area_m2` |
 | `external_table` | `file`, 任意の `columns`, 補間・範囲・scale |
 | `experimental.rf_envelope` | control、周波数、吸収電力またはRMS電圧、校正係数 |
-| `experimental.ccp` | control、周波数、吸収電力またはRMS電圧、同じzoneのsurfaceへの `coupling_target` |
-| `experimental.icp` | `delivered_power_W` と周波数 |
+| `experimental.ccp` | control、周波数、吸収電力またはRMS電圧、明示した実効gap・両電極面積・代表イオン |
+| `experimental.icp` | `delivered_power_W` と周波数、任意の下流領域・分配率 |
 
 ### 吸収電力指定とDC直列回路の変数
 
@@ -1141,7 +1132,7 @@ port自体の変数は次の3項目です。装置に固定した回路係数と
 | dc_series | `gap_m` | m、正数、必須 | 電場を求める電極間隔 |
 | dc_series | `electrode_area_m2` | m²、正数、必須 | 電流と電子伝導度の換算に用いる断面積。壁損失面積とは別 |
 | dc_series | `power_absorption_fraction` | 0〜1、既定1 | プラズマ電力のうち電子加熱へ与える比率 |
-| dc_series | `electron_mobility_m2_V_s` | m²/(V·s)、非負、未指定 | 固定移動度を用いる場合の値。表が必要なlocal-fieldでは表の移動度を使い、重複指定しない |
+| dc_series | `electron_mobility_m2_V_s` | m²/(V·s)、正数、未指定 | 固定移動度を用いる場合の値。表が必要なlocal-fieldでは表の移動度を使い、重複指定しない |
 
 DCでは、初期密度・電子移動度から電流が変わり、プラズマ電圧とE/Nが変わって反応係数へ戻ります。
 電源電圧を、そのままプラズマ電圧や換算電場として入力し直す必要はありません。
@@ -1162,14 +1153,22 @@ DCでは、初期密度・電子移動度から電流が変わり、プラズマ
 | rf_envelope | `base_reduced_field_Td` | Td、非負、既定0 | 通電中のE/Nの基礎値 |
 | rf_envelope | `reduced_field_per_sqrt_W_Td` | Td/√W、非負、既定0 | √吸収電力に比例するE/Nの係数 |
 | rf_envelope | `self_bias_fraction` | 無次元、非負、既定0.35 | bias時の `−fraction × √2 × V_rms` の係数 |
-| rf_envelope | `plasma_potential_offset_V` | V、既定0 | プラズマ電位の基礎値。実行時には非負の値を使う |
+| rf_envelope | `plasma_potential_offset_V` | V、非負、既定0 | プラズマ電位の基礎値。実行時には非負の値を使う |
 | rf_envelope | `plasma_potential_per_sqrt_W` | V/√W、非負、既定0 | √吸収電力に対するプラズマ電位の係数 |
 | ccp | `frequency_Hz` | Hz、正数、既定2.0e6 | 簡略bulk・sheath等価回路の駆動周波数 |
+| ccp | `electrode_gap_m` | m、正数、必須 | E/Nへ換算する実効電極間隔 |
+| ccp | `powered_area_m2` | m²、正数、必須 | 等価回路のpowered側実効面積 |
+| ccp | `grounded_area_m2` | m²、正数、必須 | 等価回路のgrounded側実効面積 |
+| ccp | `dominant_ion` | 正イオンの種ID、必須 | 診断推定に使う質量を機構から取得 |
+| icp | `downstream_zone_id` | zone ID、省略可 | 一方向に電子加熱を与える追加領域 |
+| icp | `downstream_fraction` | 0〜1、既定0 | 総吸収電力のうち下流へ付与する比率。非ゼロには電子energy収支が必要 |
 | icp | `frequency_Hz` | Hz、正数、既定13.56e6 | 経験的結合式で使う周波数 |
 | icp | `delivered_power_W` | W、非負、未指定 | 結合前の供給側電力。電子への吸収量は結合式で決める |
 
 表のrf_envelope、ccp、icpは、それぞれkind名の `experimental.` を省略した表示です。
 RF envelopeの電場・電位係数は校正量で、周波数と装置寸法だけから自動的に決まる物性値ではありません。
+電力換算に使う `effective_impedance_ohm` は、供給実電力Pに対するV_rms²/Pです。
+位相を測っていないV_rms/I_rmsとは区別します。係数断片の生成と測定点の確認は[RF校正](DEVELOPMENT.md#rf)を参照します。
 
 ### runと各stepの変数
 
@@ -1253,7 +1252,7 @@ stepごとに位相を始めます。`run.start_time_s` の既定は0で、`dura
 | `power_scale` | 非負、既定1 | 電力列に掛ける倍率。任意の単位名を解釈する機能ではない |
 | `voltage_scale` | 非負、既定1 | 電圧列に掛ける倍率 |
 | `current_scale` | 非負、既定1 | 電流列に掛ける倍率 |
-| `gap_m` | m、正数、省略可 | 電圧から電場・E/Nを求める場合の距離 |
+| `gap_m` | m、正数、省略可 | プラズマ部の電圧降下からE/Nを求める距離。この指定があるときCSVの電圧はプラズマ部に掛かる電圧として扱う |
 | `total_density_m3` | m⁻³、正数、省略可 | 電圧からE/Nへ換算する場合の密度。装置の初期圧力設定とは別 |
 | `plasma_potential_V` | V、既定0 | 外部電源モデルで与えるプラズマ電位 |
 
@@ -1267,10 +1266,30 @@ CSV電源のstep指令では `file`、`columns`、補間・範囲・scale、gap�
 |---|---|
 | `electron_power_W` | 電子分。gas_power_Wは別に加える |
 | `absorbed_power_W` | 電子＋気体の総吸収量。gas分を引いた量が電子分 |
-| `voltage_V` ＋ `current_A` | 各列を補間・scale適用して積を取り、gas分を引く |
+| `voltage_V` または `plasma_voltage_V` と `current_A` | 同じ負荷の電圧・流入電流を与える。各列を補間・scale適用して積を取り、gas分を引く |
 
-直接power列があればそれを使い、併記V／Iから電力を再定義しません。
-`reduced_field_Td` があれば電子状態の入力として使えます。時刻は既定でrun開始＋ `time_offset_s`、
+直接power列があればそれを使い、併記V／Iは観測量として保存できます。
+`plasma_voltage_V` はプラズマ部、`voltage_V` は外部表の測定点の電圧です。
+`gap_m` を指定した場合はどちらの列も `port_plasma_voltage_V[<port>]` として出力します。
+`gap_m` を省いた場合は列の量名を出力名に使います。電圧2列の併記、`gap_m` と明示的な
+`reduced_field_Td` の併用は入力エラーです。
+
+例えば、プラズマ部を表す抵抗を回路側で負荷として計算し、負荷での電力を吸収電力として与える場合は次のように対応付けます。
+CSVの時刻は昇順で一意にし、電流は負荷へ流入する向きで与えます。
+
+```yaml
+reactor:
+  power_ports:
+    load:
+      zone_id: plasma
+      model:
+        kind: external_table
+        file: circuit.csv
+        columns: {time_s: time_s, plasma_voltage_V: load_voltage_V, current_A: load_current_A}
+```
+
+負荷に素子損失や蓄積を含む場合は、吸収分を評価した `electron_power_W` と `gas_power_W` を用意します。
+電場を独立に与える場合は `reduced_field_Td` 列を使えます。時刻は既定でrun開始＋ `time_offset_s`、
 必要なら `time_reference: step_start` を選べます。補間は `linear`／`previous`、範囲は `error`／`hold`。
 errorでは運転期間を表が覆う必要があります。holdは端値を継続します。
 
@@ -1328,16 +1347,16 @@ Newtonの試行点は物理領域へ連続化したviewで評価しますが、�
 
 | 変数（output以下） | 型・既定値 | 意味・用途 |
 |---|---|---|
+| `profile` | basic / minimal、basic | basicは定義可能な基本10量を標準保存。minimalはODE状態と明示選択量のみ |
 | `quantities` | 量名list、`[]` | 下表のzone共通量を簡潔に選択。完全な系列名は書かない |
 | `zones` | zone ID list、`[]` | quantitiesの対象。空listは全zone。単独指定はしない |
-| `observables` | 系列名list、`[]` | 反応・壁・電源を含む派生量を完全名で選ぶ。quantitiesとは併用しない |
+| `observables` | 系列名list、`[]` | 反応・壁・電源を含む派生量を選ぶ。quantitiesと併用でき、重複はまとめる |
 | `summary_series` | 系列名list、`[]` | summaryへ最終値を載せる系列。必要な派生量も保存対象へ加える |
 | `reaction_rates` | bool、false | 活動する全気相・boundary・surface反応の速度、イベント頻度、累積数を保存 |
 | `probes` | 名前→設定、`{}` | 名前付きの観測対象と量。[12節](#probes) |
 | `plots` | 名前→設定、`{}` | 時系列・組成図。[13節](#figures) |
 | `networks` | 名前→設定、`{}` | Graphvizの反応図。[13節](#figures) |
 | `csv` | bool、false | HDF5・summaryに加え、数値CSVとseries.yamlを出す。HDF5を停止する指定ではない |
-| `units` | 拡張系列名→単位文字列、`{}` | 単位を持たない汎用拡張状態の単位を宣言。既知量の単位換算には使わない |
 
 以下の `<zone>`、`<surface>`、`<species>`、`<reaction>`、`<port>` は実際のIDへ置き換えます。
 `plasma`、`wall`、`Ar_plus` は同梱例のIDで、パッケージに固定された名称ではありません。
@@ -1352,7 +1371,6 @@ Newtonの試行点は物理領域へ連続化したviewで評価しますが、�
 | `coverage[<surface>,<species>]` | 1 | surface kinetics有効時の独立な吸着種の状態。空siteは派生量 |
 | `film[<surface>]` | m | film拡張が有効な面の膜厚 |
 | `inventory[<surface>,<name>]` | 粒子数、1 | wall_inventory拡張の蓄積数。面積あたりではない |
-| `<state_id>[<owner>]` | output.unitsで宣言 | 汎用拡張状態。ownerはglobal、zoneまたはsurfaceのID |
 
 ### zoneの派生量
 
@@ -1393,9 +1411,19 @@ quantitiesで選べるのは、次表のうちspeciesを引数に取らない10�
 | `transport_heavy_power_W_m3` | 移送・排気に伴う重粒子エンタルピーの正味流入 |
 | `inlet_heavy_power_W_m3` | 入口温度と流量に対応する流入エンタルピー |
 | `wall_heavy_power_W_m3` | 壁と気体との熱交換。正が気体への加熱 |
+| `wall_species_power_W_m3` | boundary反応による気相粒子数・組成の変化が運ぶ内部energy。気体温度と各種の比熱を用い、正が気体への流入 |
+| `surface_species_power_W_m3` | 吸着・脱離等のsurface反応による気相粒子数・組成の変化が運ぶ内部energy。正が気体への流入。表面反応熱とは別 |
 
-これらの項だけを足して電子・気体の保存則を確認する場合は、有効にしたclosureと流入出の定義を先に確認します。
+`gas_energy: {kind: evolved}` では、`gas_internal_energy` の時間微分は
+`gas_power`、`gas_reaction_heating`、`surface_reaction_heating`、`wall_heavy_power`、
+`elastic_heating`、`wall_species_power`、`surface_species_power`、`transport_heavy_power`
+の8項の和です（各量名の末尾 `_W_m3` は省略）。`inlet_heavy_power` は
+`transport_heavy_power` に含まれる入口寄与なので、さらに足すと重複します。
+保存結果の各項を時間積分して内部energyの差と比べる場合は、保存間隔による積分誤差も確認します。
 固定気体温度モデルでは、気体の内部energyは時間積分していません。
+local-fieldでは電子energyのODEを持たず、E/Nと係数表から電子状態を決めます。
+その場合の電子電力は電源モデルの診断量で、電子energy収支の成立を示す量ではありません。
+ICPの非ゼロ下流加熱は電子energy収支を持つ `energy_balance` で使います。
 
 ### 壁・表面・反応イベント
 
@@ -1424,21 +1452,18 @@ quantitiesで選べるのは、次表のうちspeciesを引数に取らない10�
 
 | 量名 | 単位 | 意味 |
 |---|---|---|
-| `electron_power_W` | W | そのportが電子へ与える電力 |
+| `electron_power_W` | W | そのportが接続元zoneの電子へ与える電力。ICPでは分配後の元zone分（下流先も同zoneなら合算） |
 | `gas_power_W` | W | そのportが気体へ直接与える電力 |
-| `absorbed_power_W` | W | その電源モデルで定義したプラズマ吸収実電力 |
-| `source_voltage_V` | V | DC等の電源端電圧 |
+| `absorbed_power_W` | W | その電源モデルで定義したプラズマ吸収実電力。ICPでは下流分を含む総吸収 |
+| `source_voltage_V` | V | DC直列回路の電源端電圧 |
 | `plasma_voltage_V` | V | プラズマ部分の電圧降下 |
+| `voltage_V` | V | 外部表の測定点を基準とする電圧 |
 | `voltage_rms_V` | V | RF等のRMS電圧 |
 | `current_A` | A | DCまたは外部表で与えた電流 |
-| `current_rms_A` | A | 電源モデルが返すRMS電流 |
-| `dc_self_bias_V` | V | モデルが返す直流自己バイアス |
 | `delivered_power_W` | W | 結合前の供給側電力 |
-| `source_power_W` | W | モデルが供給側電力として返す量 |
 | `commanded_power_W` | W | モデルが入力指令として返す電力 |
 | `apparent_power_VA` | VA | RMS電圧×RMS電流の皮相電力。吸収実電力とは別 |
 | `reduced_field_Td` | Td | そのportが与えるE/N |
-| `ion_energy_eV` | eV | 電源モデルによるイオンenergyの推定値 |
 | `plasma_potential_V` | V | 電源モデルによるプラズマ電位 |
 | `self_bias_V` | V | RF・CCP等の自己バイアス推定 |
 | `frequency_Hz` | Hz | RF等の駆動周波数 |
@@ -1449,12 +1474,17 @@ quantitiesで選べるのは、次表のうちspeciesを引数に取らない10�
 | `downstream_power_W` | W | モデルが下流側への分配として返す電力 |
 | `reflected_power_W` | W | 反射電力のモデル値 |
 | `coupling_efficiency` | 1 | 結合効率のモデル値。測定済み効率を意味しない |
+| `mode_index` | 1 | ICPの密度・供給電力から求める経験的な遷移指標。停止中は未定義 |
+| `mode_H` | 1 | ICPのH側結合への連続的な混合比（0〜1）。実測によるmode認定ではなく、停止中は未定義 |
 | `bulk_resistance_ohm` | Ω | bulkの有効抵抗 |
 | `sheath_reactance_ohm` | Ω | sheathのリアクタンス |
 | `powered_sheath_thickness_m` | m | powered側sheath厚さの近似値 |
 | `grounded_sheath_thickness_m` | m | 接地側sheath厚さの近似値 |
-| `powered_ion_energy_eV` | eV | powered側のイオンenergy推定 |
-| `grounded_ion_energy_eV` | eV | 接地側のイオンenergy推定 |
+| `powered_sheath_voltage_V` | V | powered側sheath電圧の近似値 |
+| `grounded_sheath_voltage_V` | V | 接地側sheath電圧の近似値 |
+| `ion_flux_m2_s` | m⁻² s⁻¹ | CCPの代表イオンによる入射束の診断値 |
+| `estimated_mean_ion_energy_eV` | eV | CCPの代表イオンによる平均入射energy推定 |
+| `pressure_Pa` | Pa | 電源モデルの診断に使った接続元zoneの気体圧力 |
 
 例えば `port_plasma_voltage_V[dc_series_drive]` は電源IDを引数に取ります。
 zone名を角括弧に入れた `reduced_field_Td[plasma]` と引数の意味を混同しないようにします。
@@ -1472,7 +1502,7 @@ output:
 
 quantitiesは電子密度・温度・平均energy、気体温度、吸収電力、E/N、電荷残差、圧力、中性密度、
 heavy密度を選べます。zonesを省略すると全zoneです。zonesだけの無作用な指定は拒否します。
-精密な選択には `observables` に完全名を指定しますが、quantitiesとは併用しません。
+精密な選択には `observables` に完全名を指定します。`quantities` と併用でき、重複した系列は一つへまとめます。
 `summary_series` で終端の要約へ載せる系列も指定できます。未知名や重複を拒否し、未計算量を0で埋めません。
 
 `reaction_rates: true` で活動する全気相・表面・boundary反応の速度、頻度、累積数を保存します。
@@ -1480,8 +1510,8 @@ heavy密度を選べます。zonesを省略すると全zoneです。zonesだけ�
 boundary頻度には実際の分岐確率を含みます。
 
 図やprobeが必要とする派生量は自動保存します。多数の反応・保存点を選ぶとメモリと容量が増えます。
-任意の拡張状態には `output.units` で単位を明示できます。既知量の単位変更や単位換算は行いません。
-旧結果が明示的に `unspecified` とした単位は、現在のカタログから推定し直しません。
+状態量と派生量の単位は物理モデルと出力カタログが定め、HDF5に系列ごとに保存します。
+保存結果の読込では記録済みの単位を使い、不明な単位を現在のモデルから補完しません。
 
 <a id="probes"></a>
 
@@ -1533,9 +1563,10 @@ speciesは既定で対象量に対応する全種を選びます。被覆率とs
 保存名は `probe[bulk,number_density_m3,Ar]` 等です。元系列、単位、対象の解釈をHDF5・series.yaml・summaryへ
 記録します。probeは実測器を模擬する機能ではなく、同じzone内の2座標を別値として計算できません。
 
-電源固有量のカタログは初期評価から取得します。運転途中でその量が未定義になる場合はエラーです。
-全停止のoff指令等で値が未定義になる組合せを、黙って0埋めしません。
-必要なら継続して定義される共通の電力量を選びます。
+電源固有量のカタログは全運転区間の設定から決まります。外部表を途中で替えて必要列が消える場合や、
+CCPのsheath厚さやICPの結合効率を停止区間も含めて要求した場合は、計算前に系列名と区間を示します。
+RF電圧や供給電力はモデルの停止指令でゼロ、RFキャリア周波数は設定値です。
+切替時刻は通電側の左側値を保存し、停止区間での値は次の保存点から確認できます。
 
 <a id="figures"></a>
 
@@ -1596,7 +1627,8 @@ plasma-global plot runs/analysis-001/result.h5 "n[plasma,Ar_plus]" --output figu
 
 #### 実際の組成図を読む
 
-次の2図は `argon_analysis` の `plots/densities.png` と `plots/fractions.png` です。
+次の2図は `argon_analysis` の `plots/densities/figures/densities.png` と
+`plots/fractions/figures/fractions.png` です。
 反応機構にはArの電離と励起損失が含まれますが、この例では励起状態の密度を独立に積分しません。
 励起Arの寿命や組成を調べる場合は、例えば `Ar_star` をspeciesとして定義し、生成・消滅反応も追加します。
 
@@ -1628,11 +1660,11 @@ plots:
     time_unit: ms
 ```
 
-![ZDPlaskin由来DC回路例のプラズマ電圧、電流、換算電場。横軸はms](assets/dc-circuit.png)
+![ZDPlasKin由来DC回路例のプラズマ電圧、電流、換算電場。横軸はms](assets/dc-circuit.png)
 
 3つのpanelは上から電圧V、電流A、換算電場Tdです。単位を混ぜて1本の縦軸へ載せません。
-電源端は1000 Vでも、最終プラズマ電圧は約33.0028 Vです。残りの電圧は直列抵抗で降下します。
-最終電流は約0.00966997 A、E/Nは約2.56326 Td、比較終端は0.7520833 msです。
+電源端1000 Vのうち、計算終端でプラズマ間隙に約58.50 V、直列抵抗に約941.50 Vが掛かります。
+最終電流は約0.00941503 A、E/Nは約4.54333 Td、比較終端は0.7520833 msです。
 保存間隔で取りこぼした速い過渡やpeakを、この図の保存点だけから厳密に決めることはできません。
 
 ### Graphvizの反応機構・イベント図
@@ -1695,12 +1727,13 @@ time、measure、thresholdはイベント図で使います。構造図で無作
 追加していません。全粒子・電荷収支の図として解釈せず、正味生成速度・壁束・輸送条件と合わせて考察します。
 
 ```bash
-plasma-global network runs/analysis-001/result.h5 --output diagrams/recreated
-plasma-global network runs/analysis-001/result.h5 --output diagrams/ions --mode events --species Ar_plus
+plasma-global network runs/analysis-001/result.h5 --name mechanism --output diagrams/recreated
+plasma-global network runs/analysis-001/result.h5 --name events --output diagrams/ions --species Ar_plus
 ```
 
-mode等を省略すると保存設定を使います。formatだけの指定は保存設定の形式を変更します。
-意味を選ぶ引数を渡す場合はその指定から新しい設定を作るため、必要なdomainや閾値も明示します。
+保存設定が複数ある場合は `--name` で対象を選びます。一つだけなら省略できます。
+明示した引数だけを選択した保存設定へ上書きし、省略したdomain・閾値等はその設定を引き継ぎます。
+保存設定がない場合は既定の設定に明示した引数を適用します。
 未保存のイベント系列を要求するとエラーです。元caseを再実行して既存結果へ継ぎ足しません。
 
 <a id="results"></a>
@@ -1727,16 +1760,21 @@ mode等を省略すると保存設定を使います。formatだけの指定は�
 数値精度は保存形式だけでは決まりません。CSVも十分な桁数で保存すれば元のfloat64値を復元できます。
 本コードでHDF5を使う主な理由は、計算結果と解釈に必要な情報を一緒に保持することです。
 
+入力はschema v5、保存・読込するHDF5はformat v4です。形式番号と単位を検査し、非対応形式は読込時に説明します。
 HDF5とsummaryは毎回保存します。CSV・図はoutputの要求に応じた追加出力です。
 
 | 出力 | 内容 |
 |---|---|
 | `result.h5` | 全状態、時刻、選択派生量、終了状態、単位、完全なmetadata |
-| `summary.yaml` | 終了状態、機能分類、solver統計、指定系列とprobeの終端値 |
-| `result.csv` | `output.csv: true` の場合の数値表 |
-| `series.yaml` | run内CSVの列・単位・probeの元系列・平均の範囲・積分法 |
+| `summary.yaml` | 終了状態、モデルの適用条件・省略、solver統計、指定系列とprobeの終端値 |
+| `csv/result.csv` | `output.csv: true` の場合の数値表 |
+| `csv/series.yaml` | run内CSVの列・単位・probeの元系列・平均の範囲・積分法 |
 | `plots/` | 設定した時系列・組成図 |
 | `networks/` | 設定した反応図、DOT、JSON |
+| `artifacts.yaml` | CSV・図・反応図の生成成否。計算の終了状態とは別 |
+
+manifest自体の書込に失敗した場合は `artifacts.yaml` は公開されません。数値結果を保持し、
+Pythonの `ResultPaths.artifacts` またはCLIのエラーと終了コード3で失敗を報告します。
 
 ### HDF5の項目・型・配列の並び
 
@@ -1746,7 +1784,7 @@ HDF5とsummaryは毎回保存します。CSV・図はoutputの要求に応じた
 | HDF5 path・属性 | 型・shape | 意味と具体例 |
 |---|---|---|
 | root属性 `format` | 文字列 | `plasma_global_result`。この結果形式の識別名 |
-| root属性 `format_version` | 整数 | 現行は3。case YAMLのschema_version=4とは別の版番号 |
+| root属性 `format_version` | 整数 | 現行は4。case YAMLのschema_version=5、化学機構schema_version=4とは別の版番号 |
 | root属性 `state_layout` | 文字列 | `time-major` |
 | `/time_s` | float64、`(N_t,)` | 絶対保存時刻。単位属性 `unit: s` |
 | `/state/values` | float64、`(N_t,N_s)` | 全ODE状態。Ar解析例は `(201,3)` |
@@ -1772,9 +1810,11 @@ HDF5とsummaryは毎回保存します。CSV・図はoutputの要求に応じた
 |---|---|
 | `effective_case_yaml` | 具体化済みの公開case YAML。採用した条件を確認する。元のコメント・記述順序まで保存するものではない |
 | `model_ids` | 電子・電源・壁・気体・表面等で使ったモデルの識別名 |
-| `assessment` | standard / experimentalの構成分類と、適用条件・データ不足等の指摘 |
+| `assessment` | モデル固有の適用条件と、データ不足・無効な物理項等の指摘 |
 | `provenance` | 読み込んだ入力ファイルのchecksum、package source・依存lockのhash、依存version、係数出典 |
 | `series_units` | 状態・派生量・probeの単位対応 |
+| `series_catalog` | 量・単位・対象領域・成分、計算可能性、区間別の定義可否、実保存の有無 |
+| `default_output_omissions` | basicで省略した未定義量と理由。数値0とは区別 |
 | `model_geometry` | zone体積、surface面積、種のphase等。粒子数への換算や反応図に使う |
 | `reaction_network` | 反応のdomain、領域、反応物・生成物、対応する速度・頻度・累積系列名 |
 | `probes` | probe名、元系列、対象領域、平均の解釈、単位 |
@@ -1790,6 +1830,13 @@ HDF5とsummaryは毎回保存します。CSV・図はoutputの要求に応じた
 | `domain_atol` | 物理領域の判定に使う許容幅。solver.atolとは役割が異なる |
 | `maxwellian_integration` | 断面積積分・tail評価の方式と設定。Maxwellian係数を使う構成で確認 |
 
+`series_catalog` の `region_kind` は量を評価・規格化する所在です。
+`surface_reaction_heating_W_m3[plasma]` や `surface_species_power_W_m3[plasma]` は
+表面に由来する気体への体積あたりの寄与なので `zone` です。
+一方、表面反応率・表面イベント数・被覆率・膜厚は `surface`、壁蓄積の粒子数は
+`inventory`、電源固有の量は `power_port` として保存します。
+`region` を `model_geometry` のzone・surface、または実効caseのpower portへ対応付けて読みます。
+
 ### summary.yamlとseries.yamlの項目
 
 summaryは結果の入口として人が読み、series.yamlはCSVの列を解釈するときに使います。
@@ -1799,10 +1846,11 @@ summaryは結果の入口として人が読み、series.yamlはCSVの列を解�
 |---|---|
 | summary: `format`, `format_version` | 保存形式と版番号 |
 | summary: `status.success`, `status.code`, `status.message` | 積分の終了状態と理由。定常到達や実験一致を意味しない |
-| summary: `time.count`, `time.start_s`, `time.end_s` | 保存点数と保存区間。失敗時は要求終端まで到達したかも確認 |
+| summary: `time.count`, `time.start_s`, `time.end_s` | 保存点数と実保存区間 |
+| summary: `time.requested_end_s`, `time.reached_end_s`, `time.failure_time_s` | 要求終点、最後の有効な到達点、違反検出時刻。途中結果と成功を区別 |
 | summary: `model_ids` | 使用したモデル群 |
 | summary: `final` | summary_seriesに指定した系列の最後の保存値 |
-| summary: `assessment` | 機能構成の分類と指摘 |
+| summary: `assessment` | モデルの適用条件と省略等の指摘 |
 | summary: `solver` | nfev、njev、nlu、完了区間数等 |
 | summary: `probes` | 各probeの終端値・単位・元系列・観測対象。probe使用時に存在 |
 | series: `columns` | CSV列名、元系列名、単位、probe定義の対応 |
@@ -1816,7 +1864,7 @@ Ar解析例のsummaryから、終了状態・時間・終端値を抜粋する�
 
 ```yaml
 format: plasma_global_result
-format_version: 3
+format_version: 4
 status:
   success: true
   code: completed
@@ -1825,6 +1873,9 @@ time:
   count: 201
   start_s: 0.0
   end_s: 0.002
+  requested_end_s: 0.002
+  reached_end_s: 0.002
+  failure_time_s: null
 final:
   electron_density_m3[plasma]: 44157699141019.65
   electron_temperature_eV[plasma]: 0.012507085588331865
@@ -1842,9 +1893,10 @@ metadataには実効case、入力checksum、package sourceの内容hash、projec
 zone体積・surface面積、反応topology、probe対応、単位、出力要求、切替時刻の解釈を保存します。
 hashから元ファイルを復元できません。再実行には対応する入力資産とsource／wheelも残します。
 
-全出力が完成してから新しいrunディレクトリへ公開します。図の生成に失敗したrunを半端に公開せず、
-既存のrun・CSV・図ディレクトリを上書きしません。数値だけを先に保存するPython利用には
-`write_result_h5` もあります。
+新しいrunディレクトリへ `result.h5` と `summary.yaml` を先に公開し、CSV・図・反応図を依頼ごとに生成します。
+生成物の成否と保存先は `artifacts.yaml` とPythonの戻り値で確認できます。図の生成に失敗しても数値結果は保持し、
+成功した生成物も利用できます。既存のrun・CSV・図ディレクトリは上書きしません。
+HDF5だけを保存するPython利用には `write_result_h5` もあります。
 
 ### APIで計算して読む
 
@@ -1866,8 +1918,9 @@ ion_density_m3 = saved.state[:, ion_index]
 electron_temperature_eV = saved.observables["electron_temperature_eV[plasma]"]
 ```
 
-root APIは `load_case`、`simulate`、`write_result` の3操作です。
-simulateは参照CSV等を読み、組み立てと計算を行いますが、結果ファイルは作成しません。
+公開宣言`CaseSpec`はYAMLとPythonで共通です。`case_from_mapping(data, base_directory=...)`で辞書から作り、
+`compile_case(case)`で入力・係数・条件を固定した`PreparedCase`を得ます。`simulate`は宣言または準備済みケースを受け、ファイルは作成しません。
+準備済みケースの実行では入力ファイルを再読込しません。`case.to_dict()`と`to_yaml(relative_to=...)`は公開語彙だけを返します。
 保存結果の解析・描画では元caseを再コンパイルせず、現在の環境で来歴を付け直しません。
 
 #### 保存済みHDF5を読む
@@ -1920,7 +1973,7 @@ dataset名の角括弧・カンマは名前の一部です。状態の列番号�
 
 ### 実データの内容と読み方
 
-`argon_analysis` の保存結果は201時刻、状態配列 `(201,3)`、派生量112系列です。
+`argon_analysis` の保存結果は201時刻、状態配列 `(201,3)`、派生量117系列です。
 状態の3列は順に `n[plasma,Ar]`、`n[plasma,Ar_plus]`、`electron_energy[plasma]` です。
 この列数はこのcaseの値です。反応種・closure・表面状態を変えれば変わります。
 
@@ -1974,7 +2027,7 @@ plasma-global export runs/argon-001/result.h5 --csv runs/argon-export-001/result
 
 `status.success` は成功 `True`、失敗 `False`、不明 `None` の3値です。
 単独CSVの再読込では計算終了状態・来歴は復元できず不明です。有限な数値が並ぶことを成功へ読み替えません。
-CSVを交換用、HDF5を完全な記録として使います。CLIはrun成功時に0、失敗結果は1、入力・実行例外は2を返します。
+CSVを交換用、HDF5を完全な記録として使います。CLIは正常0、積分失敗1、入力・数値保存失敗2、数値保存後の成果物生成失敗3を返します。
 
 <a id="commands"></a>
 
@@ -1987,15 +2040,15 @@ CLIの引数で指定する相対pathは現在の作業ディレクトリ基準�
 | コマンド | 動作・引数の使い方 | 時間積分 |
 |---|---|---|
 | `init [EXAMPLE] --output DIR` | 例題と参照データを取り出す。EXAMPLE省略時はargon_maxwellian。`init --list` は一覧のみ | なし |
-| `models [--json]` | 受け付けるモデルIDの一覧。物理的な適用範囲は本書の機能説明で確認 | なし |
+| `models [CATEGORY] [KIND] [--json]` | 全区分の用途、設定、適用条件、使える例を確認。Pythonのlist_modelsと共通 | なし |
 | `validate CASE` | 入力・外部データ・参照・モデルの組み立てを確認 | なし |
-| `outputs CASE [--json]` | 初期モデルで利用できる系列、単位、保存対象を列挙 | なし |
+| `outputs CASE [--json]` | 全区間の系列・単位・定義可否・保存対象と選択誤りを列挙 | なし |
 | `run CASE --output DIR` | 計算し、HDF5・summary・設定したCSV／図を保存 | あり |
-| `audit CASE` | 計算した終了状態・構成評価・来歴をYAMLで標準出力へ報告。run一式は保存しない | あり |
+| `inspect RESULT` | 保存系列・単位・領域・設定・来歴を確認 | なし |
+| `audit RESULT` | 保存数値の健全性、指定系列の非負性、`--conservation SERIES=TOL`で明示した残差を検査 | なし |
 | `export RESULT --csv FILE` | 保存HDF5から数値CSVのみを出力。series.yamlは単独exportでは生成しない | なし |
 | `plot RESULT [SERIES ...] [--output DIR]` | 保存系列を描画。`--format`、`--dpi` を指定可。出力先省略時は結果の隣のplots | なし |
-| `network RESULT --output DIR` | 保存された反応構造・イベントを描画。`--mode`、`--measure`、`--time-s`、`--domains`、`--zones`、`--surfaces`、`--species`、`--min-fraction`、`--format` は[反応図設定](#figures)に対応 | なし |
-| `migrate-v3 SOURCE --output DIR` | 旧v3入力を新しいv4 bundleへ変換。[移行](#migration)を参照 | なし |
+| `network RESULT --output DIR` | 保存された反応構造・イベントを描画。`--name`で保存設定を選び、`--mode`、`--measure`、`--time-s`、`--domains`、`--zones`、`--surfaces`、`--species`、`--min-fraction`、`--format` は[反応図設定](#figures)に対応 | なし |
 
 plotの系列を省略すると、保存された描画設定があればそれを使い、なければ描画対象を自動選択します。
 networkの選択を省略した場合の設定再利用と既定値は[第13節](#figures)を参照してください。
@@ -2005,9 +2058,12 @@ networkの選択を省略した場合の設定再利用と既定値は[第13節]
 |---|---|
 | `0` | 指定操作が完了。runでは積分成功、auditではその報告の合格 |
 | `1` | runの積分失敗、またはauditの不合格。保存された場合はsummaryの理由と到達時刻を確認 |
-| `2` | 引数・入力・読込・実行例外。標準エラー出力の `ERROR:` 等を確認。結果の公開まで完了したとは扱わない |
+| `2` | 引数・入力・読込・数値保存の失敗。標準エラー出力を確認 |
+| `3` | 数値結果は保存済み。CSV・図・反応図の一部が失敗。artifacts.yamlで対象と理由を確認 |
 
-Python APIではCLI終了コードの代わりに `result.status` と例外を扱います。
+Pythonでは積分失敗に`IntegrationError.partial_result`が付く場合があります。最後の有効な受理点までを保存でき、要求終了時刻と到達時刻は異なります。
+初期入力の不正は積分前の例外です。途中結果の存在を計算成功へ読み替えません。
+数値結果を先に公開し、CSV・図は要求ごとに生成します。`ResultPaths.artifacts`と`artifacts.yaml`に成否を記録します。
 利用者による中断やOSによる停止の途中状態をcheckpointとして保存する機能はありません。
 
 <a id="validation"></a>
@@ -2018,21 +2074,18 @@ Python APIではCLI終了コードの代わりに `result.status` と例外を�
 |---|---|---|
 | `validate` 成功 | 入力・参照・組み立てが成立 | 時間積分成功、実験一致 |
 | `status.success: true` | 要求した積分区間を完了 | 定常到達、装置予測精度 |
-| `classification: standard` | 標準機能構成に該当 | 全装置・条件での認定 |
-| `classification: experimental` | 標準範囲外の構成 | 必ず計算できない、必ず誤る |
+| モデルの適用条件・省略の表示 | 選択した係数源・近似・無効な物理項を確認できる | 装置精度の認定 |
 | 収束試験に合格 | 指定量の数値誤差・保存間隔依存が小さい | 反応機構や物理仮定の正しさ |
 
-standardは固定気体温度、準中性、負イオンのない単一一価正イオン、実断面積Maxwellian＋電子energy収支、
-prescribed absorbed power、floating Bohm壁またはwall off、決定論的boundary分岐の構成です。
-表面反応・拡張状態等を含めるとexperimentalになります。入口・排気・zone間移送は標準範囲でも使えます。
-分類は通常runとauditで共通です。
+構築時と結果に、モデル固有の適用条件と、運動量移行data欠落・表面反応無効化などの省略を示します。
+構成全体をstandard/experimentalの二値で認定しません。実験と比較する量・条件・誤差は別に評価します。
 
 ```bash
-plasma-global audit work/argon/case.yaml
+plasma-global audit runs/argon-001/result.h5
 ```
 
-auditは実際に時間積分し、構成、来歴、終了状態を報告します。軽い静的検査ではありません。
-独立した参照のない自明なゼロ残差を大量に再計算して精度認定する機能は設けていません。
+auditは保存結果だけを調べ、再積分しません。残差は利用者が保存済み系列と許容差を明示します。
+独立した参照のない自明なゼロ残差を再計算して精度認定する機能は設けていません。
 
 単位・元素／電荷／site、内部輸送の体積積分保存、解析解、独立quadrature、不連続forcing、
 HDF5再読込等で実装を検査しています。別コードとの比較は次の範囲に限定します。
@@ -2040,12 +2093,12 @@ HDF5再読込等で実装を検査しています。別コードとの比較は�
 | 参照例 | 比較範囲と回帰許容差 |
 |---|---|
 | CRANE 2反応Ar | 同じ終端0.75 μsの最終Ar⁺密度、相対差5×10⁻⁴以下 |
-| ZDPlaskin由来例 | 同じ終端0.7520833 msの種密度と回路量。最終種密度・保存点peak電子密度10%、最終電圧・電流・E/N 5%以下 |
+| ZDPlasKin由来例 | 元入力に揃えた初期状態から、参照の303時刻で種密度と回路量を比較。終端値と、参照最大値で規格化した波形誤差を記録 |
 
 独立実験の装置検証ではなく、元コードの実行全体の同一性も意味しません。
-終端時刻は参照summary・回路CSVと一致することを検査します。peakは各データの保存点での最大で、
-保存格子の違いと係数の由来を含む比較上の制約は[理論資料のZDPlaskin比較](THEORY.md#zdplaskin-benchmark)で説明します。
-本書のAr図は再現可能な過渡例です。独立実験との比較、不確かさの定量化は[次の計画](ROADMAP.md)に残っています。
+終端時刻は出典に記録した参照波形の時刻と一致することを検査します。peakは各データの保存点での最大で、
+初期状態、係数の生成条件、終端と立上りで差が異なる理由は[理論資料のZDPlasKin比較](THEORY.md#zdplaskin-benchmark)で説明します。
+本書のAr図は再現可能な過渡例です。壁拡散が支配する後期残光については、規格化した電子密度を公開測定と比較しました。 [後期残光の結果と範囲](THEORY.md#argon-afterglow-benchmark)
 
 自分のcaseでは観測量、領域、吸収電力の定義を揃えます。許容差と保存間隔を別々に変え、壁面積・輸送・
 速度係数の感度を調べます。校正条件と評価条件を分け、測定誤差や根拠のある入力分布から不確かさを評価します。
@@ -2054,10 +2107,9 @@ HDF5再読込等で実装を検査しています。別コードとの比較は�
 
 <a id="benchmark-cases"></a>
 
-### 同梱検証ケースを使って数値誤差を調べる
+### 同梱検証ケースを実行する
 
-同梱する17の数値検証ケースは `cases/benchmarks/` にあり、設定値を直接読める完全なcase YAMLです。
-共通設定を別のscenarioファイルへ継承する仕組みは使いません。
+同梱する18の検証ケースは `cases/benchmarks/` にあります。各case YAMLで装置・物理モデル・出力を設定します。
 
 | `init` に渡す名前 | 数 | 確認する内容 |
 |---|---:|---|
@@ -2068,6 +2120,7 @@ HDF5再読込等で実装を検査しています。別コードとの比較は�
 | `benchmarks/argon-pressure-minus10`、`benchmarks/argon-pressure-plus10` | 2 | 初期圧力の±10%感度 |
 | `benchmarks/argon-area-minus10`、`benchmarks/argon-area-plus10` | 2 | 壁面積の±10%感度 |
 | `benchmarks/argon-sampling-40us`、`benchmarks/argon-sampling-20us`、`benchmarks/argon-sampling-10us`、`benchmarks/argon-sampling-5us`、`benchmarks/argon-sampling-2.5us`、`benchmarks/argon-sampling-1.25us` | 6 | 保存間隔に対する反応イベント積分の収束 |
+| `benchmarks/argon-afterglow` | 1 | Ar 15 Paにおける後期残光の電子密度減衰と公開測定の比較 |
 
 例えば解析解と比べられる反応ケースは次で動かせます。
 
@@ -2077,8 +2130,8 @@ plasma-global validate work/decay/case.yaml
 plasma-global run work/decay/case.yaml --output runs/decay-001
 ```
 
-この実行は時系列とCSVを生成します。解析解との比較・誤差集計・図を含む19ケース一式は、
-この17ケースとCRANE・ZDPlaskinの2ケースを使います。比較用の保存参照と実行ツールを含む
+この実行は時系列とCSVを生成します。解析解・参照値との比較、誤差集計、図を含む一式は、
+上の18ケースとCRANE・ZDPlasKinの2ケースを使います。保存参照と実行ツールを含む
 リポジトリのルートで、次を実行します。
 
 ```bash
@@ -2086,11 +2139,10 @@ python -m pip install ".[plot]"
 python -m tools.benchmarks.theory --output runs/theory-001
 ```
 
-`results.json`、`figures/` の10図、`runs/` 配下の19計算結果を作ります。
+`results.json`、`figures/` の11図、`runs/` 配下の20計算結果を作ります。
 JSONの `case_yaml` はリポジトリからの入力path、`result_h5` は今回指定した出力先からの相対pathです。
 版管理した数値記録 `benchmarks/theory/results.json` に、生成結果ファイルそのものは同梱しません。
-保存参照は `benchmarks/references/`、係数の再生成元は `benchmarks/raw/` にあり、
-外部ネットワーク、別コードの実行環境、未公開ファイルは不要です。
+保存参照は `benchmarks/references/` にあります。同梱データでオフライン再計算できます。
 個別ケースの計算はインストール済みパッケージだけで実行でき、`argon_analysis` の図には前述の描画依存を使います。
 各問題の設定、比較する量、グラフと数値の解釈は[Theoryのベンチマーク節](THEORY.md#benchmarks)を参照してください。
 
@@ -2106,7 +2158,7 @@ JSONの `case_yaml` はリポジトリからの入力path、`result_h5` は今�
 | plasma-globalが見つからない | インストールした仮想環境を使い、`python -m plasma_global.cli --help` で確認。pipと実行Pythonを同じ環境にそろえる |
 | numpy・h5py等をimportできない | 使用Pythonとインストール先、エラーのライブラリ名を確認。社内端末の実行制限は管理者の導入手順に従い、別環境へ無差別に再インストールしない |
 | fileが見つからない | YAML内参照は記述元YAML基準、CLI引数は作業ディレクトリ基準。initしたbundleをディレクトリごと保つ |
-| unknown field・重複キーで止まる | 公開変数名と階層を確認。断片例を追記する場合は既存キーを置換し、旧schemaの入力はmigrate-v3を使う |
+| unknown field・重複キーで止まる | 現行の公開変数名と階層を確認。断片例を追記する場合は既存キーを置換する |
 | 出力先が既に存在する | 新しいrun名・図名を選ぶ |
 | pressureとdensityが合わない | p＝heavy密度和×kT。mole fraction指定ならseedの扱いも確認 |
 | 電子係数が範囲外になる | 軸・単位・混合比・生成条件を確認し、必要範囲の表を用意する |
@@ -2128,32 +2180,12 @@ JSONの `case_yaml` はリポジトリからの入力path、`result_h5` は今�
 
 <a id="migration"></a>
 
-## 17. 互換性と移行
+## 17. 形式と互換方針
 
-入力schema v4と結果HDF5 format v3は別のversionです。通常runは入力v4だけを受け付け、
-保存済み結果HDF5 v2／v3の読込は維持します。古い結果の新しい派生量を自動補完しません。
+公開入力はschema v5、結果HDF5はformat v4を受け付けます。両者のversionは別です。
+入力、係数CSV、結果の意味を一つに定め、旧形式の読込、別名、暗黙の値の補完を通常経路へ持ち込みません。
+現行仕様へ変更したときは、同梱ケース・参照データ・説明・検査も同じ形式へ揃えます。
 
-```bash
-plasma-global migrate-v3 old/case.yaml --output work/converted
-plasma-global validate work/converted/case.yaml
-plasma-global run work/converted/case.yaml --output runs/converted-001
-```
-
-v3移行は新しいbundleへ一方向変換し、case、必要なchemistry／CSV、`migration.yaml` を作ります。
-旧includeを宣言元path基準で展開し、旧電子HDF5をCSVへ変換します。通常runtimeへ旧読込分岐は戻しません。
-
-| 旧指定 | 現行指定 |
-|---|---|
-| `chemistry.manifest` | `chemistry.file` または直接定義 |
-| list内のzone等のID | mappingのkey |
-| zone直下の圧力・初期組成 | `zone.initial` |
-| 電子モデル・closure・lookupの個別選択 | `electrons.kind` と `coefficients` |
-| 電子HDF5 | 直接入力のCSV |
-| `default_absorbed_power_W` 等 | portの `absorbed_power_W` 等 |
-| recipe／stepの必須ID | `run`、任意のlabel |
-
-旧pulseはstep開始基準を明示して保持し、CSVのoffsetも具体化します。
-生成時密度が不明な絶対μは、旧計算で採用した密度を明示し、未確認であることを移行記録へ残します。
-旧DCで表のμに隠れて使われなかった固定μは除去し、理由を記録します。
-変換後は初期状態、電源・流量、時間原点、係数単位・生成条件を確認してください。
-v2の旧runtime・移行入口は削除済みです。v2資産は対応する旧版でv3へ変換してから移行します。
+再計算には、対応するコード、実効case、係数の生成条件・出典、初期状態、運転時刻を記録します。
+結果の再解析ではHDF5に保存された系列名・領域・単位を使い、保存していない量を推定しません。
+実装整理の履歴は[開発・保守の作業記録](DEVELOPMENT.md#change-record)にまとめています。

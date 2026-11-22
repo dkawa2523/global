@@ -5,11 +5,12 @@ from __future__ import annotations
 import ast
 import os
 import shlex
-import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
+
+from tools._process import ProcessResult, run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 QUALITY_DIR = ROOT / "quality"
@@ -49,17 +50,10 @@ def _run(
     *,
     env: dict[str, str] | None = None,
     allowed: set[int] | None = None,
-) -> subprocess.CompletedProcess[str]:
+    cwd: Path = ROOT,
+) -> ProcessResult:
     print(f"\n> {shlex.join(command)}", flush=True)
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        env=_environment(env),
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    result = run_process(command, cwd=cwd, env=_environment(env))
     expected = {0} if allowed is None else allowed
     if result.returncode not in expected:
         _die(
@@ -73,17 +67,9 @@ def _capture(
     *,
     env: dict[str, str] | None = None,
     allowed: set[int] | None = None,
+    cwd: Path = ROOT,
 ) -> str:
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        env=_environment(env),
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        check=False,
-    )
+    result = run_process(command, cwd=cwd, env=_environment(env), capture_output=True)
     expected = {0} if allowed is None else allowed
     if result.returncode not in expected:
         details = "\n".join(part for part in (result.stdout, result.stderr) if part)

@@ -27,10 +27,10 @@ from plasma_global.input._compile_reactor_components import (
     compile_walls,
     compile_zones,
 )
-from plasma_global.input._resolved_case import ResolvedCase, ZoneConfig
+from plasma_global.input.schema import CaseSpec, InitialConditions
 from plasma_global.models.external_table import ExternalTableStore
 from plasma_global.models.gas_energy import HeavyEnergyClosure
-from plasma_global.models.power import PowerCoordinator
+from plasma_global.models.power import CompiledPowerCommand, PowerCoordinator
 from plasma_global.models.surface import CompiledSurfaceModel
 from plasma_global.models.walls import WallBoundary
 
@@ -50,7 +50,7 @@ class CompiledReactor:
 
 
 def compile_initial_densities(
-    case: ResolvedCase, chemistry: CompiledChemistry
+    case: CaseSpec, chemistry: CompiledChemistry
 ) -> Mapping[str, Mapping[str, float]]:
     """Compile every zone's selected initial-composition representation."""
 
@@ -59,55 +59,65 @@ def compile_initial_densities(
     }
     known_species = set(species_index)
     resolved: dict[str, Mapping[str, float]] = {}
-    for zone in case.reactor.zones:
-        if zone.initial_densities_m3 is not None:
+    for zone_id, definition in case.reactor.zones.items():
+        zone = definition.initial
+        if zone.densities_m3 is not None:
             densities = _compile_explicit_densities(
+                zone_id,
                 zone,
-                zone.initial_densities_m3,
+                zone.densities_m3,
                 known_species,
             )
-        elif zone.initial_mole_fractions is not None:
+        elif zone.mole_fractions is not None:
             densities = _compile_mole_fraction_composition(
+                zone_id,
                 zone,
-                zone.initial_mole_fractions,
+                zone.mole_fractions,
                 chemistry,
                 species_index,
             )
         else:
             raise CaseValidationError(
-                f"zone {zone.zone_id!r} needs densities or mole fractions"
+                f"zone {zone_id!r} needs densities or mole fractions"
             )
         positive_charge_density = sum(
             chemistry.charges[species_index[species_id]] * density
             for species_id, density in densities.items()
             if chemistry.charges[species_index[species_id]] > 0.0
         )
-        if positive_charge_density <= 0.0:
+        if (
+            positive_charge_density <= 0.0
+            and case.models.electron_density.kind == "quasineutral"
+        ):
             raise CaseValidationError(
-                f"zone {zone.zone_id!r} requires an explicit positive-ion seed"
+                f"zone {zone_id!r} requires an explicit positive-ion seed"
             )
-        resolved[zone.zone_id] = MappingProxyType(densities)
+        resolved[zone_id] = MappingProxyType(
+            {species_id: densities.get(species_id, 0.0) for species_id in species_index}
+        )
     return MappingProxyType(resolved)
 
 
 def validate_surface_initial_conditions(
-    case: ResolvedCase, chemistry_data: ChemistryData
+    case: CaseSpec, chemistry_data: ChemistryData
 ) -> None:
     """Validate the public input adapter through the shared surface contract."""
 
-    for surface in case.reactor.surfaces:
-        roles = surface_species_roles(chemistry_data.species, surface.surface_id)
+    for surface_id, surface in case.reactor.surfaces.items():
+        roles = surface_species_roles(chemistry_data.species, surface_id)
         if error := _surface_initial_state_error(
-            surface.surface_id, surface.initial_coverages, roles
+            surface_id, surface.initial_coverages, roles
         ):
             raise CaseValidationError(error)
 
 
 def compile_reactor(
-    case: ResolvedCase,
+    case: CaseSpec,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
     external_tables: ExternalTableStore,
+    *,
+    initial_commands: Mapping[str, CompiledPowerCommand] | None = None,
 ) -> CompiledReactor:
     """Compile topology, transport, walls, and typed power ports."""
 
@@ -116,14 +126,17 @@ def compile_reactor(
         zones=compile_zones(case),
         transport=compile_static_transport(case, chemistry, heavy_energy_closure),
         wall_boundaries=compile_walls(case, chemistry),
-        power_coordinator=compile_power_coordinator(case, chemistry, external_tables),
+        power_coordinator=compile_power_coordinator(
+            case, chemistry, external_tables, initial_commands
+        ),
         heavy_energy_closure=heavy_energy_closure,
         surface_model=compile_surface_model(case, chemistry_data, chemistry),
     )
 
 
 def _compile_explicit_densities(
-    zone: ZoneConfig,
+    zone_id: str,
+    zone: InitialConditions,
     initial_densities_m3: Mapping[str, float],
     known_species: set[str],
 ) -> dict[str, float]:
@@ -133,7 +146,7 @@ def _compile_explicit_densities(
     unknown = set(densities) - known_species
     if unknown:
         raise CaseValidationError(
-            f"zone {zone.zone_id!r} initializes unknown species {sorted(unknown)}"
+            f"zone {zone_id!r} initializes unknown species {sorted(unknown)}"
         )
     pressure_from_state = (
         sum(densities.values()) * _BOLTZMANN_J_K * zone.gas_temperature_K
@@ -145,7 +158,7 @@ def _compile_explicit_densities(
         abs_tol=1.0e-12,
     ):
         raise CaseValidationError(
-            f"zone {zone.zone_id!r} pressure_Pa={zone.pressure_Pa:g} is "
+            f"zone {zone_id!r} pressure_Pa={zone.pressure_Pa:g} is "
             "inconsistent with sum(initial_densities_m3)*kB*T="
             f"{pressure_from_state:g}"
         )
@@ -153,7 +166,8 @@ def _compile_explicit_densities(
 
 
 def _compile_mole_fraction_composition(
-    zone: ZoneConfig,
+    zone_id: str,
+    zone: InitialConditions,
     initial_mole_fractions: Mapping[str, float],
     chemistry: CompiledChemistry,
     species_index: dict[str, int],
@@ -161,11 +175,11 @@ def _compile_mole_fraction_composition(
     """Convert neutral mole fractions plus charged seeds to number densities."""
 
     fractions = dict(initial_mole_fractions)
-    seeds = dict(zone.initial_seed_densities_m3)
+    seeds = dict(zone.seed_densities_m3)
     unknown = (set(fractions) | set(seeds)) - set(species_index)
     if unknown:
         raise CaseValidationError(
-            f"zone {zone.zone_id!r} initializes unknown species {sorted(unknown)}"
+            f"zone {zone_id!r} initializes unknown species {sorted(unknown)}"
         )
     nonneutral_fractions = [
         species_id
@@ -179,7 +193,7 @@ def _compile_mole_fraction_composition(
     ]
     if nonneutral_fractions or neutral_seeds:
         raise CaseValidationError(
-            f"zone {zone.zone_id!r} mole fractions must be neutral and seed "
+            f"zone {zone_id!r} mole fractions must be neutral and seed "
             "densities charged; invalid "
             f"fractions={sorted(nonneutral_fractions)}, "
             f"seeds={sorted(neutral_seeds)}"
@@ -188,7 +202,7 @@ def _compile_mole_fraction_composition(
     seed_density = sum(seeds.values())
     if seed_density >= total_density:
         raise CaseValidationError(
-            f"zone {zone.zone_id!r} seed density must be below p/(kB*T)"
+            f"zone {zone_id!r} seed density must be below p/(kB*T)"
         )
     neutral_density = total_density - seed_density
     densities = {

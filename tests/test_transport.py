@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
+from plasma_global.models.gas_energy import HeavyParticleThermodynamics
 
 
 def test_interzone_transport_conserves_volume_integrals() -> None:
@@ -14,7 +15,7 @@ def test_interzone_transport_conserves_volume_integrals() -> None:
         edge_to=np.array([1]),
         edge_conductance_m3_s=np.array([0.2]),
         n_species=2,
-        heavy_cv_over_kb=np.array([1.5, 1.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([1.5, 1.5])),
     )
     forcing = SegmentTransport(np.zeros((2, 2)), np.zeros(2))
     density = np.array([[10.0, 20.0], [1.0, 2.0]])
@@ -40,7 +41,7 @@ def test_inlet_and_pump_are_compiled_sources() -> None:
         edge_to=np.array([], dtype=int),
         edge_conductance_m3_s=np.array([]),
         n_species=1,
-        heavy_cv_over_kb=np.array([1.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([1.5])),
     )
     forcing = SegmentTransport(np.array([[3.0]]), np.array([4.0]))
     density_rhs, electron_rhs, heavy_rhs = network.evaluate(
@@ -62,7 +63,7 @@ def test_heavy_particle_flow_transports_enthalpy() -> None:
         edge_to=np.array([1]),
         edge_conductance_m3_s=np.array([0.2]),
         n_species=1,
-        heavy_cv_over_kb=np.array([1.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([1.5])),
     )
     forcing = SegmentTransport(np.zeros((2, 1)), np.array([4.0, 0.0]))
     density = np.array([[10.0], [1.0]])
@@ -93,7 +94,7 @@ def test_heavy_energy_transport_rejects_missing_heat_capacity() -> None:
         n_species=1,
     )
 
-    with pytest.raises(ValueError, match="requires heavy_cv_over_kb"):
+    with pytest.raises(ValueError, match="requires thermodynamics"):
         network.evaluate(
             np.array([[2.0]]),
             SegmentTransport.zeros(1, 1),

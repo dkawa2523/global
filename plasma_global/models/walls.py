@@ -9,6 +9,7 @@ from types import MappingProxyType
 
 import numpy as np
 
+from plasma_global._identifiers import validate_identifier
 from plasma_global.errors import ModelConfigurationError, StateDomainError
 from plasma_global.models.electrons import ElectronState
 
@@ -27,11 +28,11 @@ class BoundaryReaction:
     probability: float = 1.0
 
     def __post_init__(self) -> None:
-        if not self.reaction_id or not self.incident_species:
-            raise ModelConfigurationError(
-                "Boundary reaction and incident species IDs must not be empty"
-            )
-        products = {str(key): float(value) for key, value in self.products.items()}
+        _validate_wall_id("reaction_id", self.reaction_id)
+        _validate_wall_id("incident_species", self.incident_species)
+        for species_id in self.products:
+            _validate_wall_id("product species", species_id)
+        products = {key: float(value) for key, value in self.products.items()}
         if any(not math.isfinite(value) or value < 0.0 for value in products.values()):
             raise ModelConfigurationError(
                 "Boundary product yields must be finite and non-negative"
@@ -171,8 +172,10 @@ def _validate_branch_probabilities(reactions: tuple[BoundaryReaction, ...]) -> N
 
 
 def _validate_wall_id(name: str, value: str) -> None:
-    if not value:
-        raise ModelConfigurationError(f"Wall boundary {name} must not be empty")
+    try:
+        validate_identifier(value)
+    except ValueError as exc:
+        raise ModelConfigurationError(f"Wall boundary {name}: {exc}") from exc
 
 
 def _validate_wall_nonnegative(name: str, value: float) -> None:
@@ -197,6 +200,7 @@ class WallBoundary:
     diffusion_coefficient_m2_s: float | None = None
     diffusion_length_m: float | None = None
     auto_bohm_h_factor: AutoBohmHFactor | None = None
+    electron_temperature_reference_eV: float | None = None
 
     def __post_init__(self) -> None:
         _validate_wall_id("zone_id", self.zone_id)
@@ -209,6 +213,16 @@ class WallBoundary:
             self.transport_kind,
             self.auto_bohm_h_factor,
         )
+        reference = self.electron_temperature_reference_eV
+        if reference is not None and (
+            self.transport_kind != "ambipolar"
+            or not math.isfinite(reference)
+            or reference <= 0.0
+        ):
+            raise ModelConfigurationError(
+                "electron_temperature_reference_eV must be positive "
+                "and only applies to ambipolar transport"
+            )
         _validate_wall_transport(
             kind=self.transport_kind,
             area_m2=self.area_m2,

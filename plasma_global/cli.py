@@ -6,72 +6,45 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any
 
 import yaml
 
 from plasma_global._yaml import YamlLoadError
-from plasma_global.api import load_case, simulate, write_result
-from plasma_global.audit import audit_case
+from plasma_global.api import (
+    compile_case,
+    list_models,
+    load_case,
+    simulate,
+    write_result,
+)
+from plasma_global.errors import IntegrationError
 from plasma_global.output import (
+    ResultPaths,
+    audit_result_h5,
     export_result_csv,
+    inspect_result_h5,
     network_result_h5,
     plot_result_h5,
-    preflight_output,
 )
 
 
-def _kind_ids(annotation: Any) -> tuple[str, ...]:
-    """Extract Literal discriminator values from an Annotated model union."""
-
-    args = get_args(annotation)
-    union = args[0] if args else annotation
-    members = get_args(union) or (union,)
-    values: list[str] = []
-    for member in members:
-        field = getattr(member, "model_fields", {}).get("kind")
-        if field is None:
-            continue
-        values.extend(str(value) for value in get_args(field.annotation))
-    return tuple(dict.fromkeys(values))
-
-
-def _model_catalog() -> dict[str, tuple[str, ...]]:
-    from plasma_global.input._resolved_case import (
-        ElectronDensityModel,
-        GasEnergyModel,
-        PowerModel,
-        WallTransport,
-    )
-    from plasma_global.input.schema import ElectronModel
-
-    return {
-        "electrons": _kind_ids(ElectronModel),
-        "electron_density": _kind_ids(ElectronDensityModel),
-        "gas_energy": _kind_ids(GasEnergyModel),
-        "power": _kind_ids(PowerModel),
-        "wall_transport": _kind_ids(WallTransport),
-    }
-
-
 def _cmd_validate(args: argparse.Namespace) -> int:
-    from plasma_global.build import compile_case
-
     case = load_case(args.case)
     compiled = compile_case(case)
     print("Validation OK (input and compilation; integration has not run)")
     print(
         f"Case: {case.case.name}; zones: {len(case.reactor.zones)}; "
-        f"duration: {case.recipe.duration_s:g} s"
+        f"duration: {case.run.total_duration_s:g} s"
     )
     print(
-        f"Electrons: {case.models.electron_closure.kind}; "
-        f"coefficients: {case.models.electrons.kind}"
+        f"Electrons: {case.models.electrons.kind}; "
+        f"coefficients: {getattr(case.models.electrons.coefficients, 'kind', 'table')}"
     )
-    for zone in case.reactor.zones:
+    for identity, zone in case.reactor.zones.items():
         print(
-            f"Initial {zone.zone_id}: {zone.pressure_Pa:g} Pa, "
-            f"{zone.gas_temperature_K:g} K"
+            f"Initial {identity}: {zone.initial.pressure_Pa:g} Pa, "
+            f"{zone.initial.gas_temperature_K:g} K"
         )
     for table in dict.fromkeys(
         id(table) for table in compiled.model.electron_kinetics_by_zone.values()
@@ -87,7 +60,33 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         )
     for issue in compiled.assessment.issues:
         print(f"{issue.level}: {issue.message}", file=sys.stderr)
+    _print_output_omissions(compiled.output_plan.metadata)
     return 0
+
+
+def _print_output_omissions(metadata: Any) -> None:
+    for item in metadata.get("default_output_omissions", ()):
+        interval = item["unavailable_intervals"][0]
+        print(
+            f"WARNING: basic output omits {item['series']!r}; "
+            f"undefined in segment {interval['segment_id']!r}: {interval['reason']}",
+            file=sys.stderr,
+        )
+
+
+def _report_saved_paths(paths: ResultPaths) -> None:
+    print(paths.result_h5)
+    print(paths.summary_yaml)
+    if paths.result_csv is not None:
+        print(paths.result_csv)
+    for path in paths.analysis_files:
+        print(path)
+    for item in paths.artifacts.requests:
+        if item.status == "failed":
+            print(
+                f"ARTIFACT ERROR [{item.kind}/{item.name}]: {item.message}",
+                file=sys.stderr,
+            )
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -96,31 +95,57 @@ def _cmd_run(args: argparse.Namespace) -> int:
             f"Output directory already exists: {args.output}; "
             "choose a new run directory"
         )
-    case = load_case(args.case)
-    preflight_output(case.output)
-    result = simulate(case)
+    case = compile_case(load_case(args.case))
+    _print_output_omissions(case.output_plan.metadata)
+    try:
+        result = simulate(case)
+    except IntegrationError as exc:
+        if exc.partial_result is None:
+            print(f"INTEGRATION ERROR: {exc}", file=sys.stderr)
+            return 1
+        result = exc.partial_result
     paths = write_result(result, args.output)
-    print(paths.result_h5)
-    print(paths.summary_yaml)
-    if paths.result_csv is not None:
-        print(paths.result_csv)
-    for path in paths.analysis_files:
-        print(path)
+    _report_saved_paths(paths)
     for issue in result.metadata.get("assessment", {}).get("issues", ()):
         print(f"{issue['level']}: {issue['message']}", file=sys.stderr)
-    return int(not result.status.success)
+    if not result.status.success:
+        print(f"INTEGRATION ERROR: {result.status.message}", file=sys.stderr)
+        return 1
+    return 0 if paths.artifacts.success else 3
+
+
+def _conservation_tolerances(values: list[str]) -> dict[str, float]:
+    result: dict[str, float] = {}
+    for value in values:
+        name, separator, raw = value.partition("=")
+        if not separator or not name or name != name.strip():
+            raise ValueError("conservation constraints require SERIES=TOLERANCE")
+        if name in result:
+            raise ValueError(f"duplicate conservation constraint {name!r}")
+        result[name] = float(raw)
+    return result
 
 
 def _cmd_audit(args: argparse.Namespace) -> int:
-    report = audit_case(load_case(args.case))
+    tolerances = _conservation_tolerances(args.conservation)
+    report = audit_result_h5(
+        args.result,
+        conservation_observables=tuple(tolerances),
+        conservation_tolerances=tolerances,
+        nonnegative_series=args.nonnegative,
+        negative_tolerance=args.negative_tolerance,
+    )
     print(yaml.safe_dump(report.to_dict(), sort_keys=False, allow_unicode=True).strip())
     return 0 if report.passed else 1
 
 
-def _cmd_migrate_v3(args: argparse.Namespace) -> int:
-    from plasma_global.input.migrate_v3 import migrate_v3
-
-    print(migrate_v3(args.source, args.output))
+def _cmd_inspect(args: argparse.Namespace) -> int:
+    document = inspect_result_h5(args.result)
+    print(
+        json.dumps(document, indent=2, ensure_ascii=False)
+        if args.json
+        else yaml.safe_dump(document, sort_keys=False, allow_unicode=True).strip()
+    )
     return 0
 
 
@@ -143,14 +168,17 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_models(args: argparse.Namespace) -> int:
-    catalog = _model_catalog()
+    catalog = list_models(args.category, args.kind)
     if args.json:
         print(json.dumps(catalog, indent=2, ensure_ascii=False))
         return 0
-    for category, identifiers in catalog.items():
+    if args.kind is not None:
+        print(yaml.safe_dump(catalog, sort_keys=False, allow_unicode=True).strip())
+        return 0
+    for category, entries in catalog.items():
         print(f"{category}:")
-        for identifier in identifiers:
-            print(f"  - {identifier}")
+        for kind, entry in entries.items():
+            print(f"  {kind}: {entry['purpose']}")
     return 0
 
 
@@ -175,55 +203,31 @@ def _cmd_plot(args: argparse.Namespace) -> int:
 
 
 def _cmd_outputs(args: argparse.Namespace) -> int:
-    from plasma_global._output_values import PORT_UNITS, port_values
-    from plasma_global.build import compile_case
-    from plasma_global.core.result import series_unit
-    from plasma_global.postprocess import available_observables
+    from plasma_global._output_plan import build_output_catalog, compile_output
+    from plasma_global.build import compile_physics
 
-    compiled = compile_case(load_case(args.case))
-    plan = compiled.output_plan
-    model = compiled.model
-    initial = model.initial_state(compiled.initial_state)
-    segment = model.segments[0]
-    ports = port_values(model.evaluate(segment.start_s, initial, segment))
-    names = tuple(
-        dict.fromkeys(
-            (
-                *compiled.model.layout.labels,
-                *available_observables(compiled.model),
-                *plan.port_names,
-                *ports,
-                *plan.aliases,
-            )
+    prepared = compile_physics(load_case(args.case))
+    rows = build_output_catalog(prepared.case, prepared.model, prepared.chemistry_data)
+    selection_error = None
+    try:
+        rows = dict(
+            compile_output(
+                prepared.case, prepared.model, prepared.chemistry_data
+            ).catalog
         )
-    )
-    units = {
-        **plan.metadata["series_units"],
-        **{
-            name: PORT_UNITS[name.partition("[")[0].removeprefix("port_")]
-            for name in ports
-        },
-    }
-    rows = {
-        name: {
-            "unit": series_unit(name, units),
-            "stored": name in compiled.model.layout.labels
-            or name in plan.stored
-            or name in plan.aliases,
-        }
-        for name in names
-    }
+    except (ValueError, KeyError) as exc:
+        selection_error = str(exc)
     print(
         json.dumps(rows, indent=2, ensure_ascii=False)
         if args.json
         else yaml.safe_dump(rows, sort_keys=False, allow_unicode=True).strip()
     )
+    if selection_error:
+        print(f"OUTPUT SELECTION ERROR: {selection_error}", file=sys.stderr)
     return 0
 
 
 def _cmd_network(args: argparse.Namespace) -> int:
-    from plasma_global.input._schema_output import NetworkConfig
-
     values = {
         "mode": args.mode,
         "measure": args.measure,
@@ -235,9 +239,12 @@ def _cmd_network(args: argparse.Namespace) -> int:
         "species": args.species,
     }
     overrides = {key: value for key, value in values.items() if value is not None}
-    config = NetworkConfig.model_validate(overrides) if overrides else None
     for path in network_result_h5(
-        args.result, args.output, config=config, image_format=args.format
+        args.result,
+        args.output,
+        name=args.name,
+        overrides=overrides,
+        image_format=args.format,
     ):
         print(path)
     return 0
@@ -259,10 +266,22 @@ def _parser() -> argparse.ArgumentParser:
     run.set_defaults(handler=_cmd_run)
 
     audit = commands.add_parser(
-        "audit", help="Simulate a case and report model assessment and provenance"
+        "audit", help="Check saved numerical results without integration"
     )
-    audit.add_argument("case", type=Path)
+    audit.add_argument("result", type=Path)
+    audit.add_argument("--nonnegative", nargs="*", default=[])
+    audit.add_argument(
+        "--conservation", action="append", default=[], metavar="SERIES=TOLERANCE"
+    )
+    audit.add_argument("--negative-tolerance", type=float, default=0.0)
     audit.set_defaults(handler=_cmd_audit)
+
+    inspect = commands.add_parser(
+        "inspect", help="Inspect saved status, series, units and provenance"
+    )
+    inspect.add_argument("result", type=Path)
+    inspect.add_argument("--json", action="store_true")
+    inspect.set_defaults(handler=_cmd_inspect)
 
     initialize = commands.add_parser(
         "init", help="Copy a working example with its input data"
@@ -274,14 +293,11 @@ def _parser() -> argparse.ArgumentParser:
     initialize.add_argument("--output", type=Path)
     initialize.set_defaults(handler=_cmd_init)
 
-    migrate = commands.add_parser(
-        "migrate-v3", help="Convert v3 inputs into a new v4 bundle"
+    models = commands.add_parser(
+        "models", help="Discover models, required inputs and working examples"
     )
-    migrate.add_argument("source", type=Path)
-    migrate.add_argument("--output", type=Path, required=True)
-    migrate.set_defaults(handler=_cmd_migrate_v3)
-
-    models = commands.add_parser("models", help="List accepted model IDs")
+    models.add_argument("category", nargs="?")
+    models.add_argument("kind", nargs="?")
     models.add_argument("--json", action="store_true")
     models.set_defaults(handler=_cmd_models)
 
@@ -297,6 +313,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Draw a Graphviz reaction mechanism or event network from saved results",
     )
     network.add_argument("result", type=Path)
+    network.add_argument("--name", help="Select one saved network request")
     network.add_argument("--output", type=Path, required=True)
     network.add_argument("--mode", choices=("mechanism", "events"))
     network.add_argument("--measure", choices=("cumulative", "rate"))

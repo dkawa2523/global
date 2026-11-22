@@ -34,20 +34,27 @@ class _PortEvaluation:
     observables: Mapping[str, float]
 
 
+DC_VOLTAGE_UNITS = {
+    "source_voltage_V": "V",
+    "plasma_voltage_V": "V",
+    "current_A": "A",
+}
+
+
 def validate_prescribed_power_port(
     electron_fraction: float,
     gas_fraction: float,
-    default_power_W: float | None,
+    absorbed_power_W: float | None,
 ) -> None:
     fractions = electron_fraction, gas_fraction
     if not np.isfinite(fractions).all() or min(fractions) < 0.0:
         raise CaseValidationError("power fractions must be finite and nonnegative")
     if abs(sum(fractions) - 1.0) > 1.0e-12:
         raise CaseValidationError("electron_fraction + gas_fraction must equal one")
-    if default_power_W is not None and (
-        not math.isfinite(default_power_W) or default_power_W < 0.0
+    if absorbed_power_W is not None and (
+        not math.isfinite(absorbed_power_W) or absorbed_power_W < 0.0
     ):
-        raise CaseValidationError("default_power_W must be finite and nonnegative")
+        raise CaseValidationError("absorbed_power_W must be finite and nonnegative")
 
 
 def prescribed_power_evaluation(
@@ -55,14 +62,14 @@ def prescribed_power_evaluation(
     port_id: str,
     electron_fraction: float,
     gas_fraction: float,
-    default_power_W: float | None,
+    absorbed_power_W: float | None,
     command_kind: _CommandKind | None,
     command_power_W: float | None,
 ) -> _PortEvaluation:
     if command_kind == "power" and command_power_W is not None:
         power_W = command_power_W
-    elif command_kind is None and default_power_W is not None:
-        power_W = default_power_W
+    elif command_kind is None and absorbed_power_W is not None:
+        power_W = absorbed_power_W
     else:
         raise CaseValidationError(
             f"prescribed-power port {port_id!r} requires a power command"
@@ -91,8 +98,8 @@ def validate_dc_series_port(
     gap_m: float,
     electrode_area_m2: float,
     absorption_fraction: float,
-    configured_mobility_m2_V_s: float | None,
-    default_voltage_V: float | None,
+    constant_mobility_m2_V_s: float | None,
+    source_voltage_V: float | None,
 ) -> None:
     positive = {
         "ballast_resistance_ohm": ballast_resistance_ohm,
@@ -113,23 +120,35 @@ def validate_dc_series_port(
     ):
         raise CaseValidationError("absorption_fraction must be between zero and one")
     _validate_optional_finite_parameter(
-        "configured mobility", configured_mobility_m2_V_s, positive=True
+        "configured mobility", constant_mobility_m2_V_s, positive=True
     )
-    _validate_optional_finite_parameter("default voltage", default_voltage_V)
+    _validate_optional_finite_parameter("default voltage", source_voltage_V)
 
 
 def _source_voltage(
     *,
     port_id: str,
-    default_voltage_V: float | None,
+    source_voltage_V: float | None,
     command_kind: _CommandKind | None,
     command_voltage_V: float | None,
 ) -> float:
     if command_kind == "voltage" and command_voltage_V is not None:
         return command_voltage_V
-    if command_kind is None and default_voltage_V is not None:
-        return default_voltage_V
+    if command_kind is None and source_voltage_V is not None:
+        return source_voltage_V
     raise CaseValidationError(f"DC-series port {port_id!r} requires a voltage command")
+
+
+def _dc_load_response(
+    source_voltage_V: float, ballast_ohm: float, gap_m: float, conductivity_area: float
+) -> tuple[float, float, float]:
+    plasma_resistance = (
+        gap_m / conductivity_area if conductivity_area > 0.0 else math.inf
+    )
+    if not math.isfinite(plasma_resistance):
+        return source_voltage_V, 0.0, 0.0
+    current = source_voltage_V / (ballast_ohm + plasma_resistance)
+    return current * plasma_resistance, current, current * current * plasma_resistance
 
 
 def dc_series_evaluation(
@@ -139,8 +158,8 @@ def dc_series_evaluation(
     gap_m: float,
     electrode_area_m2: float,
     absorption_fraction: float,
-    configured_mobility_m2_V_s: float | None,
-    default_voltage_V: float | None,
+    constant_mobility_m2_V_s: float | None,
+    source_voltage_V: float | None,
     electron_density_m3: float,
     neutral_density_m3: float,
     electron_mobility_m2_V_s: float | None,
@@ -149,24 +168,28 @@ def dc_series_evaluation(
 ) -> _PortEvaluation:
     source_voltage = _source_voltage(
         port_id=port_id,
-        default_voltage_V=default_voltage_V,
+        source_voltage_V=source_voltage_V,
         command_kind=command_kind,
         command_voltage_V=command_voltage_V,
     )
-    mobility = electron_mobility_m2_V_s or configured_mobility_m2_V_s
-    if mobility is None:
-        raise ModelDomainError(f"DC-series port {port_id!r} requires electron mobility")
-    conductivity = E_CHARGE * electron_density_m3 * mobility
-    if conductivity <= 0.0:
-        plasma_resistance = math.inf
+    if electron_density_m3 == 0.0 or source_voltage == 0.0:
         current = 0.0
         plasma_voltage = source_voltage
         absorbed = 0.0
     else:
-        plasma_resistance = gap_m / (conductivity * electrode_area_m2)
-        current = source_voltage / (ballast_resistance_ohm + plasma_resistance)
-        plasma_voltage = current * plasma_resistance
-        absorbed = current * current * plasma_resistance * absorption_fraction
+        mobility = electron_mobility_m2_V_s or constant_mobility_m2_V_s
+        if mobility is None:
+            raise ModelDomainError(
+                f"DC-series port {port_id!r} requires electron mobility"
+            )
+        conductivity = E_CHARGE * electron_density_m3 * mobility
+        plasma_voltage, current, dissipated = _dc_load_response(
+            source_voltage,
+            ballast_resistance_ohm,
+            gap_m,
+            conductivity * electrode_area_m2,
+        )
+        absorbed = dissipated * absorption_fraction
     field = abs(plasma_voltage) / gap_m
     if neutral_density_m3 <= 0.0:
         raise ModelDomainError("DC-series E/N requires positive neutral density")
@@ -179,9 +202,25 @@ def dc_series_evaluation(
             "source_voltage_V": source_voltage,
             "plasma_voltage_V": plasma_voltage,
             "current_A": current,
-            "plasma_resistance_ohm": plasma_resistance,
         },
     )
+
+
+def _dc_mobility_support(
+    kinetics: TabulatedElectronKinetics,
+    neutral_density_m3: float,
+    vacuum_field_Td: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    axis = kinetics.axis
+    mobility = kinetics.mobility_curve(neutral_density_m3)
+    if kinetics.bounds == "hold":
+        if axis[0] > 0.0:
+            axis = np.concatenate(([0.0], axis))
+            mobility = np.concatenate(([mobility[0]], mobility))
+        if vacuum_field_Td > axis[-1]:
+            axis = np.concatenate((axis, [vacuum_field_Td]))
+            mobility = np.concatenate((mobility, [mobility[-1]]))
+    return axis, mobility
 
 
 def solve_dc_series_local_field(
@@ -190,7 +229,7 @@ def solve_dc_series_local_field(
     ballast_resistance_ohm: float,
     gap_m: float,
     electrode_area_m2: float,
-    default_voltage_V: float | None,
+    source_voltage_V: float | None,
     electron_density_m3: float,
     neutral_density_m3: float,
     kinetics: TabulatedElectronKinetics,
@@ -199,23 +238,20 @@ def solve_dc_series_local_field(
 ) -> float:
     """Solve the series-circuit E/N equation on a piecewise-linear table."""
 
-    axis = np.asarray(kinetics.axis, dtype=float)
-    mobility = np.asarray(kinetics.mobility_curve(neutral_density_m3), dtype=float)
-    if mobility.shape != axis.shape:
-        raise CaseValidationError(
-            "local-field kinetics mobility must share the E/N axis"
-        )
     if neutral_density_m3 <= 0.0:
         raise ModelDomainError(
             f"DC-series port {port_id!r} requires positive neutral density"
         )
     source_voltage = _source_voltage(
         port_id=port_id,
-        default_voltage_V=default_voltage_V,
+        source_voltage_V=source_voltage_V,
         command_kind=command_kind,
         command_voltage_V=command_voltage_V,
     )
+    if source_voltage == 0.0:
+        return 0.0
     vacuum_field_Td = abs(source_voltage) / gap_m / neutral_density_m3 / TD_TO_V_M2
+    axis, mobility = _dc_mobility_support(kinetics, neutral_density_m3, vacuum_field_Td)
     conductance_factor = (
         ballast_resistance_ohm
         * E_CHARGE
@@ -230,25 +266,19 @@ def solve_dc_series_local_field(
     constant = -vacuum_field_Td
 
     machine_epsilon = np.finfo(float).eps
-    linear_intervals = np.abs(quadratic) <= machine_epsilon * np.maximum(
-        np.abs(linear), 1.0
-    )
+    linear_intervals = quadratic == 0.0
     discriminant = linear * linear - 4.0 * quadratic * constant
     real_quadratic = ~linear_intervals & (discriminant >= 0.0)
     with np.errstate(divide="ignore", invalid="ignore"):
-        root_scale = np.sqrt(np.maximum(discriminant, 0.0))
+        # Compute one root without subtraction of nearly equal terms and
+        # recover the other from their product c/a.
+        numerator = -0.5 * (
+            linear + np.copysign(np.sqrt(np.maximum(discriminant, 0.0)), linear)
+        )
         root_sets = (
             np.where(linear_intervals, -constant / linear, np.nan),
-            np.where(
-                real_quadratic,
-                (-linear - root_scale) / (2.0 * quadratic),
-                np.nan,
-            ),
-            np.where(
-                real_quadratic,
-                (-linear + root_scale) / (2.0 * quadratic),
-                np.nan,
-            ),
+            np.where(real_quadratic, numerator / quadratic, np.nan),
+            np.where(real_quadratic, constant / numerator, np.nan),
         )
     left = axis[:-1]
     right = axis[1:]
@@ -282,7 +312,7 @@ def solve_dc_series_local_field(
             f"[{axis[0]:g}, {axis[-1]:g}] Td"
         )
 
-    selector = float(axis[len(axis) // 2])
+    selector = float(kinetics.axis[len(kinetics.axis) // 2])
     for _ in range(3):
         selector_mobility = float(np.interp(selector, axis, mobility))
         selector = vacuum_field_Td / (1.0 + conductance_factor * selector_mobility)
@@ -322,7 +352,7 @@ def external_table_evaluation(
         "plasma_potential_V": sample.plasma_potential_V,
     }
     if sample.voltage_V is not None:
-        observables["source_voltage_V"] = sample.voltage_V
+        observables[sample.voltage_quantity] = sample.voltage_V
     if sample.current_A is not None:
         observables["current_A"] = sample.current_A
     return _PortEvaluation(

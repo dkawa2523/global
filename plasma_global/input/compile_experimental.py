@@ -7,45 +7,16 @@ from collections.abc import Mapping
 from plasma_global.chemistry.data import ChemistryData, ReactionData
 from plasma_global.errors import CaseValidationError
 from plasma_global.experimental.accumulators import (
-    GenericStateAccumulator,
     SurfaceEventRate,
 )
 from plasma_global.experimental.runtime import (
     ExperimentalRuntimeAccumulator,
-    compile_generic_state_accumulator,
 )
-from plasma_global.input._resolved_case import (
+from plasma_global.input._schema_run import (
     ExperimentalConfig,
     ExperimentalWallInventoryConfig,
-    ResolvedCase,
-    SurfaceConfig,
 )
-
-
-def _compile_generic_extension(
-    selected: ExperimentalConfig,
-    chemistry_data: ChemistryData,
-    *,
-    zone_ids: tuple[str, ...],
-    surface_ids: tuple[str, ...],
-) -> GenericStateAccumulator | None:
-    if selected.extensions is None:
-        return None
-    try:
-        generic = compile_generic_state_accumulator(
-            chemistry_data.experimental,
-            zone_ids=zone_ids,
-            surface_ids=surface_ids,
-        )
-    except (TypeError, ValueError) as exc:
-        raise CaseValidationError(
-            f"Cannot compile experimental chemistry extensions: {exc}"
-        ) from exc
-    if generic is None:
-        raise CaseValidationError(
-            "experimental.extensions requires chemistry.experimental.state_variables"
-        )
-    return generic
+from plasma_global.input.schema import CaseSpec, SurfaceDefinition
 
 
 def _compile_film_changes(
@@ -106,9 +77,9 @@ def _compile_wall_inventory(
 def _applicable_surface_pairs(
     reaction: ReactionData,
     surface_ids: tuple[str, ...],
-    surface_by_id: Mapping[str, SurfaceConfig],
-) -> tuple[tuple[str, SurfaceConfig], ...]:
-    pairs: list[tuple[str, SurfaceConfig]] = []
+    surface_by_id: Mapping[str, SurfaceDefinition],
+) -> tuple[tuple[str, SurfaceDefinition], ...]:
+    pairs: list[tuple[str, SurfaceDefinition]] = []
     for surface_id in reaction.surfaces or surface_ids:
         surface = surface_by_id.get(surface_id)
         if surface is None or (
@@ -122,7 +93,7 @@ def _applicable_surface_pairs(
 def _surface_event_template(
     reaction_id: str,
     surface_id: str,
-    surface: SurfaceConfig,
+    surface: SurfaceDefinition,
     film_factor: float,
     inventory_particles: Mapping[str, float],
 ) -> SurfaceEventRate | None:
@@ -134,10 +105,9 @@ def _surface_event_template(
             "requires positive site_density_m2"
         )
     return SurfaceEventRate(
-        event_id=f"{reaction_id}@{surface_id}",
+        reaction_id=reaction_id,
         zone_id=surface.zone_id,
         surface_id=surface_id,
-        rate_m2_s=0.0,
         area_m2=surface.area_m2,
         site_density_m2=max(surface.site_density_m2, 1.0),
         inventory_particles_per_event=inventory_particles,
@@ -147,12 +117,12 @@ def _surface_event_template(
 
 def _compile_surface_event_templates(
     chemistry_data: ChemistryData,
-    surfaces: tuple[SurfaceConfig, ...],
+    surfaces: Mapping[str, SurfaceDefinition],
     film_changes: Mapping[str, float],
     inventory_events: Mapping[tuple[str, str], Mapping[str, float]],
 ) -> tuple[SurfaceEventRate, ...]:
-    surface_ids = tuple(surface.surface_id for surface in surfaces)
-    surface_by_id = {surface.surface_id: surface for surface in surfaces}
+    surface_ids = tuple(surfaces)
+    surface_by_id = surfaces
     templates: list[SurfaceEventRate] = []
     seen_inventory_events: set[tuple[str, str]] = set()
     for reaction in chemistry_data.surface_reactions:
@@ -185,7 +155,6 @@ def _compile_surface_event_templates(
 def _build_runtime_accumulator(
     selected: ExperimentalConfig,
     *,
-    generic: GenericStateAccumulator | None,
     surface_ids: tuple[str, ...],
     inventory: Mapping[str, Mapping[str, float]],
     templates: tuple[SurfaceEventRate, ...],
@@ -193,7 +162,6 @@ def _build_runtime_accumulator(
     film_config = selected.film
     try:
         return ExperimentalRuntimeAccumulator(
-            generic=generic,
             film_surfaces=surface_ids if film_config is not None else (),
             initial_inventory_by_surface=inventory,
             surface_event_templates=templates,
@@ -210,7 +178,7 @@ def _build_runtime_accumulator(
 
 
 def compile_experimental_accumulator(
-    case: ResolvedCase,
+    case: CaseSpec,
     chemistry_data: ChemistryData,
     surface_model: object | None,
 ) -> tuple[ExperimentalRuntimeAccumulator | None, tuple[str, ...]]:
@@ -220,14 +188,8 @@ def compile_experimental_accumulator(
     if selected is None:
         return None, ()
 
-    surfaces = tuple(case.reactor.surfaces)
-    surface_ids = tuple(surface.surface_id for surface in surfaces)
-    generic = _compile_generic_extension(
-        selected,
-        chemistry_data,
-        zone_ids=tuple(zone.zone_id for zone in case.reactor.zones),
-        surface_ids=surface_ids,
-    )
+    surfaces = case.reactor.surfaces
+    surface_ids = tuple(surfaces)
     film_changes = _compile_film_changes(selected, chemistry_data, surface_model)
     inventory, inventory_events = _compile_wall_inventory(
         selected.wall_inventory, surface_model
@@ -235,7 +197,6 @@ def compile_experimental_accumulator(
     features = tuple(
         name
         for name, config in (
-            ("extensions", selected.extensions),
             ("film", selected.film),
             ("wall_inventory", selected.wall_inventory),
         )
@@ -252,7 +213,6 @@ def compile_experimental_accumulator(
     )
     accumulator = _build_runtime_accumulator(
         selected,
-        generic=generic,
         surface_ids=surface_ids,
         inventory=inventory,
         templates=templates,

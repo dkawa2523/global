@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from plasma_global._output_channels import EventChannel, event_channels
-from plasma_global._output_values import PORT_UNITS, port_values
+from plasma_global._output_values import port_series_units
 from plasma_global._series_selection import expand_series
 from plasma_global.chemistry.data import ChemistryData, ReactionData
 from plasma_global.core._solver_sampling import _global_sample_times
@@ -17,8 +17,8 @@ from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import SolverSettings
 from plasma_global.core.result import series_unit
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input._schema_output import NetworkConfig, PlotConfig, ProbeConfig
+from plasma_global.input.schema import CaseSpec
 from plasma_global.postprocess import available_observables
 
 
@@ -27,8 +27,9 @@ class OutputPlan:
     stored: tuple[str, ...]
     evaluated: tuple[str, ...]
     aliases: Mapping[str, str]
-    port_names: tuple[str, ...]
+    available_units: Mapping[str, str]
     metadata: Mapping[str, Any]
+    catalog: Mapping[str, Mapping[str, Any]]
 
 
 def composition_names(plot: PlotConfig, model: CompiledGlobalModel) -> tuple[str, ...]:
@@ -101,6 +102,11 @@ _SURFACE_QUANTITIES = {
     "surface_temperature_K",
 }
 
+_REGION_KINDS = {
+    **dict.fromkeys(_SURFACE_QUANTITIES | {"film"}, "surface"),
+    "inventory": "inventory",
+}
+
 
 def _probe_targets(probe: ProbeConfig, model: CompiledGlobalModel) -> set[str]:
     if probe.zone is not None:
@@ -137,7 +143,6 @@ def _probe_aliases(
     identity: str,
     probe: ProbeConfig,
     model: CompiledGlobalModel,
-    available: set[str],
 ) -> dict[str, str]:
     target, quantities = _probe_source_names(probe, model)
     _validate_probe_target(probe, model, target, quantities)
@@ -164,29 +169,161 @@ def _probe_aliases(
         )
     if not aliases:
         raise CaseValidationError(f"probe {identity}: no modeled quantities match")
-    if unknown := set(aliases.values()) - available:
-        raise CaseValidationError(
-            f"probe {identity}: unavailable quantities {sorted(unknown)}"
-        )
     return aliases
 
 
-def _port_names(
-    case: ResolvedCase, model: CompiledGlobalModel, initial: np.ndarray
-) -> tuple[str, ...]:
-    requested = any(
-        probe.power_port is not None for probe in case.output.probes.values()
+def _validated_probe_aliases(
+    case: CaseSpec, model: CompiledGlobalModel, available: Mapping[str, str]
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for name, probe in case.output.probes.items():
+        sources = _probe_aliases(name, probe, model)
+        if unknown := set(sources.values()) - available.keys():
+            raise CaseValidationError(
+                f"probe {name}: unavailable quantities {sorted(unknown)}"
+            )
+        aliases.update(sources)
+    return aliases
+
+
+BASIC_QUANTITIES = (
+    "electron_density_m3",
+    "electron_temperature_eV",
+    "mean_energy_eV",
+    "gas_temperature_K",
+    "absorbed_power_W",
+    "reduced_field_Td",
+    "charge_residual_m3",
+    "pressure_Pa",
+    "neutral_density_m3",
+    "heavy_density_m3",
+)
+
+
+def _catalog_entry(
+    name: str, unit: str, *, region_kind: str = "zone"
+) -> dict[str, Any]:
+    quantity, _, suffix = name.partition("[")
+    parts = suffix.removesuffix("]").split(",")
+    return {
+        "unit": unit,
+        "quantity": "number_density_m3" if quantity == "n" else quantity,
+        "region": parts[0],
+        "region_kind": region_kind,
+        "components": parts[1:],
+        "available": True,
+        "stored": False,
+        "unavailable_intervals": [],
+    }
+
+
+def _field_available(model: CompiledGlobalModel, zone: str, segment: Any) -> bool:
+    table = model.electron_kinetics_by_zone.get(zone)
+    if (
+        table is not None
+        and table.lookup == "mean_energy"
+        and table.effective_field_Td is not None
+    ):
+        return True
+    return (
+        model.power_coordinator is not None
+        and model.power_coordinator.has_reduced_field_source(
+            zone, segment.port_commands
+        )
     )
-    requested = requested or any("port_" in name for name in case.output.observables)
-    requested = requested or any("port_" in name for name in case.output.summary_series)
-    requested = requested or any(
-        any("port_" in name for name in plot.series)
-        for plot in case.output.plots.values()
-    )
-    if not requested:
-        return ()
-    segment = model.segments[0]
-    return tuple(port_values(model.evaluate(segment.start_s, initial, segment)))
+
+
+def _missing_interval(segment: Any, reason: str) -> dict[str, Any]:
+    return {
+        "segment_id": segment.segment_id,
+        "start_s": segment.start_s,
+        "end_s": segment.end_s,
+        "reason": reason,
+    }
+
+
+def _field_catalog(model: CompiledGlobalModel) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for zone in model.zones:
+        name = f"reduced_field_Td[{zone.zone_id}]"
+        row = _catalog_entry(name, "Td")
+        row["unavailable_intervals"] = [
+            _missing_interval(
+                segment, "no reduced-field source or effective-field coefficient column"
+            )
+            for segment in model.segments
+            if not _field_available(model, zone.zone_id, segment)
+        ]
+        row["available"] = not row["unavailable_intervals"]
+        rows[name] = row
+    return rows
+
+
+def _power_port_catalog(model: CompiledGlobalModel) -> dict[str, dict[str, Any]]:
+    by_segment = [
+        (segment, port_series_units(model, segment)) for segment in model.segments
+    ]
+    units = {name: unit for _, current in by_segment for name, unit in current.items()}
+    rows: dict[str, dict[str, Any]] = {}
+    for name, unit in units.items():
+        row = _catalog_entry(name, unit, region_kind="power_port")
+        row["unavailable_intervals"] = [
+            _missing_interval(
+                segment, "power-port model or command does not define this observable"
+            )
+            for segment, current in by_segment
+            if name not in current
+        ]
+        row["available"] = not row["unavailable_intervals"]
+        rows[name] = row
+    return rows
+
+
+def build_output_catalog(
+    case: CaseSpec,
+    model: CompiledGlobalModel,
+    data: ChemistryData,
+) -> dict[str, dict[str, Any]]:
+    """Describe physical series independently of user output selections."""
+    names = (*model.layout.labels, *available_observables(model))
+    return {
+        **{
+            name: _catalog_entry(
+                name,
+                series_unit(name),
+                region_kind=_REGION_KINDS.get(name.partition("[")[0], "zone"),
+            )
+            for name in names
+        },
+        **{
+            name: _catalog_entry(
+                name,
+                series_unit(name),
+                region_kind="zone" if channel.domain == "gas" else "surface",
+            )
+            for channel in event_channels(model)
+            for name in (
+                channel.rate_name,
+                channel.frequency_name,
+                channel.count_name,
+            )
+        },
+        **_field_catalog(model),
+        **_power_port_catalog(model),
+    }
+
+
+def _validate_available(
+    selected: Iterable[str], catalog: Mapping[str, Mapping[str, Any]]
+) -> None:
+    for name in selected:
+        intervals = catalog[name]["unavailable_intervals"]
+        if intervals:
+            first = intervals[0]
+            raise CaseValidationError(
+                f"output series {name!r} is undefined in segment "
+                f"{first['segment_id']!r}: {first['reason']}"
+            )
 
 
 def _reaction_metadata(
@@ -194,7 +331,7 @@ def _reaction_metadata(
 ) -> dict[str, Any]:
     reaction = definitions[channel.domain, channel.reaction]
     return {
-        "id": f"{channel.domain}:{channel.region}:{channel.reaction}",
+        "id": channel.rate_name,
         "domain": channel.domain,
         "region": channel.region,
         "zone": channel.zone,
@@ -246,11 +383,11 @@ def _reaction_definitions(data: ChemistryData) -> dict[tuple[str, str], Reaction
 def _network_channels(
     config: NetworkConfig,
     channels: tuple[EventChannel, ...],
-    case: ResolvedCase,
+    case: CaseSpec,
     definitions: Mapping[tuple[str, str], ReactionData],
 ) -> tuple[EventChannel, ...]:
-    zone_ids = {zone.zone_id for zone in case.reactor.zones}
-    surface_ids = {surface.surface_id for surface in case.reactor.surfaces}
+    zone_ids = set(case.reactor.zones)
+    surface_ids = set(case.reactor.surfaces)
     if set(config.zones) - zone_ids or set(config.surfaces) - surface_ids:
         raise CaseValidationError("network references unknown zones or surfaces")
     chosen = tuple(
@@ -266,40 +403,7 @@ def _network_channels(
     return chosen
 
 
-def _series_units(
-    names: Iterable[str], aliases: Mapping[str, str], declared: Mapping[str, str]
-) -> dict[str, str]:
-    names = tuple(names)
-    if unknown := set(declared) - set(names) - set(aliases.values()):
-        raise CaseValidationError(
-            f"output.units references unsaved series: {sorted(unknown)}"
-        )
-    result: dict[str, str] = {}
-    for name in names:
-        source = aliases.get(name, name)
-        unit = series_unit(source)
-        if source.startswith("port_"):
-            unit = PORT_UNITS[source.partition("[")[0].removeprefix("port_")]
-        given = declared.get(name, declared.get(source, unit))
-        if unit != "unspecified" and given != unit:
-            raise CaseValidationError(
-                f"series {name!r} requires canonical unit {unit!r}; "
-                "no unit conversion is performed"
-            )
-        result[name] = given
-    return result
-
-
-def _validate_named_selections(case: ResolvedCase, available: tuple[str, ...]) -> None:
-    for label, names in (
-        ("observables", case.output.observables),
-        ("summary series", case.output.summary_series),
-    ):
-        if unknown := set(names) - set(available):
-            raise CaseValidationError(f"unknown output {label} {sorted(unknown)}")
-
-
-def _validate_network_species(case: ResolvedCase, data: ChemistryData) -> None:
+def _validate_network_species(case: CaseSpec, data: ChemistryData) -> None:
     species = {item.id for item in data.species}
     for config in case.output.networks.values():
         if unknown := set(config.species) - species:
@@ -308,7 +412,7 @@ def _validate_network_species(case: ResolvedCase, data: ChemistryData) -> None:
             )
 
 
-def _validate_snapshot_times(case: ResolvedCase, model: CompiledGlobalModel) -> None:
+def _validate_snapshot_times(case: CaseSpec, model: CompiledGlobalModel) -> None:
     requested = [
         config.time_s
         for config in case.output.networks.values()
@@ -336,7 +440,7 @@ def _validate_snapshot_times(case: ResolvedCase, model: CompiledGlobalModel) -> 
 
 
 def _event_selection(
-    case: ResolvedCase,
+    case: CaseSpec,
     channels: tuple[EventChannel, ...],
     definitions: Mapping[tuple[str, str], ReactionData],
 ) -> tuple[str, ...]:
@@ -352,56 +456,140 @@ def _event_selection(
     )
 
 
+def _declared_series(case: CaseSpec, model: CompiledGlobalModel) -> tuple[str, ...]:
+    zones = case.output.zones or list(model.layout.zone_ids)
+    if unknown := set(zones) - set(model.layout.zone_ids):
+        raise CaseValidationError(f"unknown output zones {sorted(unknown)}")
+    return (
+        *case.output.observables,
+        *(
+            f"{quantity}[{zone}]"
+            for quantity in case.output.quantities
+            for zone in zones
+        ),
+    )
+
+
+def _canonical_requests(
+    case: CaseSpec, observables: tuple[str, ...], summary: tuple[str, ...]
+) -> dict[str, Any]:
+    values = case.output.model_dump(mode="json")
+    for name in ("profile", "quantities", "zones"):
+        values.pop(name, None)
+    values.update(observables=list(observables), summary_series=list(summary))
+    return values
+
+
+def _basic_series(
+    case: CaseSpec, model: CompiledGlobalModel, catalog: Mapping[str, Any]
+) -> tuple[str, ...]:
+    if case.output.profile == "minimal":
+        return ()
+    return tuple(
+        f"{quantity}[{zone}]"
+        for zone in model.layout.zone_ids
+        for quantity in BASIC_QUANTITIES
+        if catalog[f"{quantity}[{zone}]"]["available"]
+    )
+
+
+def _bind_output_series(
+    case: CaseSpec,
+    model: CompiledGlobalModel,
+    catalog: Mapping[str, Any],
+    aliases: Mapping[str, str],
+    channels: tuple[EventChannel, ...],
+    definitions: Mapping[tuple[str, str], ReactionData],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    available = tuple(catalog)
+    basic = _basic_series(case, model, catalog)
+    explicit = expand_series(_declared_series(case, model), available)
+    summary = (
+        expand_series(case.output.summary_series, available)
+        if case.output.summary_series
+        else basic
+    )
+    selected = expand_series(
+        (
+            *basic,
+            *explicit,
+            *_artifact_series(case, model, available),
+            *_event_selection(case, channels, definitions),
+            *summary,
+        ),
+        available,
+    )
+    _validate_available((*selected, *aliases.values()), catalog)
+    stored = tuple(
+        name
+        for name in selected
+        if name not in model.layout.labels and name not in aliases
+    )
+    evaluated = tuple(
+        dict.fromkeys(
+            (
+                *stored,
+                *(name for name in aliases.values() if name not in model.layout.labels),
+            )
+        )
+    )
+    return stored, evaluated, summary
+
+
+def _default_omissions(
+    case: CaseSpec, catalog: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    if case.output.profile == "minimal":
+        return []
+    return [
+        {"series": name, "unavailable_intervals": row["unavailable_intervals"]}
+        for name, row in catalog.items()
+        if row["quantity"] in BASIC_QUANTITIES and not row["available"]
+    ]
+
+
 def compile_output(
-    case: ResolvedCase,
+    case: CaseSpec,
     model: CompiledGlobalModel,
     data: ChemistryData,
-    initial: np.ndarray,
 ) -> OutputPlan:
     definitions = _reaction_definitions(data)
     _validate_network_species(case, data)
     _validate_snapshot_times(case, model)
-    states = model.layout.labels
-    port_names = _port_names(case, model, initial)
-    available = tuple(
-        dict.fromkeys((*states, *available_observables(model), *port_names))
-    )
-    aliases: dict[str, str] = {}
-    for name, probe in case.output.probes.items():
-        aliases.update(_probe_aliases(name, probe, model, set(available)))
-    _validate_named_selections(case, (*available, *aliases))
+    catalog = build_output_catalog(case, model, data)
+    units = {name: str(row["unit"]) for name, row in catalog.items()}
+    aliases = _validated_probe_aliases(case, model, units)
+    for name, source in aliases.items():
+        catalog[name] = {**catalog[source], "source_series": source}
+        units[name] = units[source]
     channels = event_channels(model)
-    selected = [
-        *case.output.observables,
-        *_artifact_series(case, model, (*available, *aliases)),
-        *_event_selection(case, channels, definitions),
-        *case.output.summary_series,
-    ]
-    stored = expand_series(selected, (*available, *aliases))
-    stored = tuple(
-        name for name in stored if name not in states and name not in aliases
+    stored, evaluated, summary = _bind_output_series(
+        case, model, catalog, aliases, channels, definitions
     )
-    evaluated = tuple(
-        dict.fromkeys(
-            (*stored, *(name for name in aliases.values() if name not in states))
-        )
+    names = {*model.layout.labels, *stored, *aliases}
+    for name, row in catalog.items():
+        row["stored"] = name in names
+    metadata = _metadata(
+        case, model, data, channels, stored, aliases, definitions, units
     )
-    metadata = _metadata(case, model, data, channels, stored, aliases, definitions)
-    return OutputPlan(stored, evaluated, aliases, port_names, metadata)
+    metadata.update(
+        output_requests=_canonical_requests(case, stored, summary),
+        summary_series=list(summary),
+        series_catalog=catalog,
+        default_output_omissions=_default_omissions(case, catalog),
+    )
+    return OutputPlan(stored, evaluated, aliases, units, metadata, catalog)
 
 
-def _validate_plot_range(plot: PlotConfig, case: ResolvedCase) -> None:
+def _validate_plot_range(plot: PlotConfig, case: CaseSpec) -> None:
     if plot.time_range_s is not None:
         start, end = plot.time_range_s
-        if (
-            start < case.recipe.start_time_s
-            or end > case.recipe.start_time_s + case.recipe.duration_s
-        ):
+        if start < case.run.start_time_s or end > case.run.end_time_s:
             raise CaseValidationError("plot time_range_s is outside the run")
 
 
 def _artifact_series(
-    case: ResolvedCase, model: CompiledGlobalModel, available: tuple[str, ...]
+    case: CaseSpec, model: CompiledGlobalModel, available: tuple[str, ...]
 ) -> tuple[str, ...]:
     result: list[str] = []
     for plot in case.output.plots.values():
@@ -416,17 +604,20 @@ def _artifact_series(
 
 
 def _metadata(
-    case: ResolvedCase,
+    case: CaseSpec,
     model: CompiledGlobalModel,
     data: ChemistryData,
     channels: tuple[EventChannel, ...],
     stored: tuple[str, ...],
     aliases: Mapping[str, str],
     definitions: Mapping[tuple[str, str], ReactionData],
+    available_units: Mapping[str, str],
 ) -> dict[str, Any]:
     names = (*model.layout.labels, *stored, *aliases)
     return {
-        "output_requests": case.output.model_dump(mode="json"),
+        "output_requests": _canonical_requests(
+            case, stored, tuple(case.output.summary_series)
+        ),
         "probes": {
             name: {
                 "source_series": source,
@@ -436,17 +627,19 @@ def _metadata(
             }
             for name, source in aliases.items()
         },
-        "series_units": _series_units(names, aliases, case.output.units),
+        "series_units": {
+            name: available_units[aliases.get(name, name)] for name in names
+        },
         "model_geometry": {
             "zones": {
                 zone.zone_id: {"volume_m3": zone.volume_m3} for zone in model.zones
             },
             "surfaces": {
-                surface.surface_id: {
+                identity: {
                     "zone": surface.zone_id,
                     "area_m2": surface.area_m2,
                 }
-                for surface in case.reactor.surfaces
+                for identity, surface in case.reactor.surfaces.items()
             },
             "species": {
                 item.id: {"phase": item.phase, "charge": item.charge}
@@ -470,14 +663,10 @@ def _metadata(
             ),
             "sampling_dependent": True,
         },
-        "run_step_boundaries_s": list(
-            np.cumsum(
-                [
-                    case.recipe.start_time_s,
-                    *(step.duration_s for step in case.recipe.steps),
-                ]
-            )
-        ),
+        "run_step_boundaries_s": [
+            case.run.start_time_s,
+            *(end for _, end in case.run.step_bounds()),
+        ],
         "observable_time_convention": (
             "left limit at forcing boundaries; cumulative event counts are continuous"
         ),

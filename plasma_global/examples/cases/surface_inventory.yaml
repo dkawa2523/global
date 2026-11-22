@@ -1,0 +1,130 @@
+schema_version: 5
+case:
+  name: surface_inventory
+  description: 吸着・脱離・膜形成を1領域1表面で追う小例。被覆率、膜厚、堆積粒子数を区別し、気相と表面を含むAr原子数を確認する。
+chemistry:
+  species:
+  - id: e
+    charge: -1
+    mass_amu: 0.00054858
+    state_tags:
+    - electron
+  - id: Ar
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+  - id: Ar_plus
+    charge: 1
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+  - id: site
+    phase: surface
+    mass_amu: 0.0
+    elements:
+      site: 1.0
+    state_tags:
+    - site
+    surfaces:
+    - wall
+  - id: Ar_ads
+    phase: surface
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+      site: 1.0
+    state_tags:
+    - adsorbate
+    surfaces:
+    - wall
+  - id: Ar_film
+    phase: surface
+    mass_amu: 39.948
+    elements:
+      Ar: 1.0
+      site: 1.0
+    state_tags:
+    - film_fragment
+    surfaces:
+    - wall
+  surface_reactions:
+  - id: adsorb
+    equation: Ar + site -> Ar_ads
+    rate:
+      kind: sticking
+      value: 0.01
+      coverage:
+        kind: site_blocking
+        site_species: site
+        exponent: 1.0
+    surfaces:
+    - wall
+  - id: desorb
+    equation: Ar_ads -> Ar + site
+    rate:
+      kind: desorption
+      frequency_s_inv: 100.0
+      activation_eV: 0.0
+    surfaces:
+    - wall
+  - id: deposit
+    equation: Ar + site -> Ar_film
+    rate:
+      kind: sticking
+      value: 0.0001
+      coverage:
+        kind: site_blocking
+        site_species: site
+        exponent: 1.0
+    surfaces:
+    - wall
+reactor:
+  zones:
+    plasma:
+      volume_m3: 0.01
+      initial:
+        pressure_Pa: 0.828389404141947
+        gas_temperature_K: 300.0
+        mole_fractions:
+          Ar: 1.0
+        seed_densities_m3:
+          Ar_plus: 1000000000000.0
+        mean_energy_eV: 3.0
+  surfaces:
+    wall:
+      zone_id: plasma
+      area_m2: 0.01
+      temperature_K: 300.0
+      site_density_m2: 1.0e+19
+      initial_coverages:
+        Ar_ads: 0.0
+      wall_transport:
+        kind: 'off'
+models:
+  electrons:
+    kind: energy_balance
+  surface_kinetics:
+    kind: mass_action
+run:
+  duration_s: 0.001
+experimental:
+  film:
+    monolayer_thickness_m: 3.0e-10
+  wall_inventory:
+    initial_by_surface:
+      wall:
+        deposited_Ar: 0.0
+    events:
+    - reaction_id: deposit
+      surface_id: wall
+      inventory_particles_per_event:
+        deposited_Ar: 1.0
+solver:
+  rtol: 1.0e-08
+  sample_interval_s: 5.0e-05
+output:
+  csv: true
+  summary_series:
+  - film[wall]
+  - inventory[wall,deposited_Ar]
+  - coverage[wall,Ar_ads]

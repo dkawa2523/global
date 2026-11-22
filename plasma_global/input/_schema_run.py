@@ -94,21 +94,12 @@ class ExperimentalWallInventoryConfig(StrictModel):
         return self
 
 
-class ExperimentalExtensionsConfig(StrictModel):
-    """Presence enables experimental chemistry extension state and terms."""
-
-
 class ExperimentalConfig(StrictModel):
     film: ExperimentalFilmConfig | None = None
     wall_inventory: ExperimentalWallInventoryConfig | None = None
-    extensions: ExperimentalExtensionsConfig | None = None
 
     @model_validator(mode="after")
     def enables_at_least_one_feature(self) -> Self:
-        if (
-            self.film is None
-            and self.wall_inventory is None
-            and self.extensions is None
-        ):
+        if self.film is None and self.wall_inventory is None:
             raise ValueError("experimental must enable at least one explicit feature")
         return self

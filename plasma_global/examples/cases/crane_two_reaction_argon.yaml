@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: crane_two_reaction_argon
   description: 'Executable local reproduction of the public CRANE tutorials/TwoReactionArgon

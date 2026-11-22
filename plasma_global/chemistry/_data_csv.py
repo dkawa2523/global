@@ -8,6 +8,7 @@ data objects.  Manifest traversal and YAML validation live in
 from __future__ import annotations
 
 import csv
+import io
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -15,7 +16,11 @@ from typing import Any, Literal
 
 import numpy as np
 
-from plasma_global.chemistry._contracts import cross_section_data_error
+from plasma_global._input_sources import InputSourceStore
+from plasma_global.chemistry._contracts import (
+    cross_section_data_error,
+    validate_reaction_energy_fields,
+)
 from plasma_global.chemistry.data import ReactionData, SpeciesData, parse_equation
 from plasma_global.errors import ChemistryError
 
@@ -24,6 +29,10 @@ def _split(value: str | None, delimiter: str = "|") -> tuple[str, ...]:
     if value is None or not value.strip():
         return ()
     return tuple(item.strip() for item in value.split(delimiter) if item.strip())
+
+
+def _selectors(value: str | None) -> tuple[str, ...]:
+    return () if value is None or value == "" else tuple(value.split("|"))
 
 
 def _number_map(value: str | None, where: str) -> Mapping[str, float]:
@@ -49,9 +58,15 @@ def _number_map(value: str | None, where: str) -> Mapping[str, float]:
 
 
 def _csv_rows(
-    path: Path, *, required: set[str], optional: set[str]
+    path: Path,
+    *,
+    required: set[str],
+    optional: set[str],
+    sources: InputSourceStore | None = None,
+    role: str,
 ) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+    source_store = sources if sources is not None else InputSourceStore()
+    with io.StringIO(source_store.read_text(path, role), newline="") as stream:
         reader = csv.DictReader(stream)
         fieldnames = tuple(reader.fieldnames or ())
         if len(set(fieldnames)) != len(fieldnames):
@@ -69,8 +84,17 @@ def _csv_rows(
         for line, row in enumerate(reader, start=2):
             if None in row:
                 raise ChemistryError(f"{path}:{line} contains extra CSV fields")
-            rows.append({str(key): (value or "").strip() for key, value in row.items()})
+            rows.append(
+                {str(key): _csv_cell(str(key), value) for key, value in row.items()}
+            )
         return rows
+
+
+def _csv_cell(key: str, value: str | None) -> str:
+    text = value or ""
+    if key in {"id", "rate_model", "zones", "surfaces"}:
+        return text
+    return text.strip()
 
 
 def _metadata(row: Mapping[str, str]) -> Mapping[str, Any]:
@@ -82,32 +106,18 @@ def _metadata(row: Mapping[str, str]) -> Mapping[str, Any]:
     return MappingProxyType(result)
 
 
-_ELECTRON_ENERGY_FIELDS = (
-    "energy_loss_eV",
-    "electron_energy_transfer_eV",
-)
-
-
-def _electron_energy_field(
+def electron_energy_transfer(
     values: Mapping[str, Any],
     where: str,
     *,
     required: bool,
-) -> str | None:
-    present = tuple(
-        name for name in _ELECTRON_ENERGY_FIELDS if values.get(name) not in {None, ""}
-    )
-    if len(present) > 1 or (required and len(present) != 1):
-        raise ChemistryError(
-            f"{where} must define exactly one of energy_loss_eV or "
-            "electron_energy_transfer_eV"
-        )
-    return present[0] if present else None
-
-
-def _finite_electron_energy_value(
-    values: Mapping[str, Any], where: str, name: str
-) -> float:
+) -> float | None:
+    """Read the signed electron energy deposited per reaction event."""
+    name = "electron_energy_transfer_eV"
+    if values.get(name) in {None, ""}:
+        if required:
+            raise ChemistryError(f"{where} must define {name}")
+        return None
     try:
         value = float(values[name])
     except (TypeError, ValueError) as exc:
@@ -117,31 +127,14 @@ def _finite_electron_energy_value(
     return value
 
 
-def electron_energy_values(
-    values: Mapping[str, Any],
-    where: str,
-    *,
-    required: bool,
-) -> tuple[float | None, float | None]:
-    """Parse either the legacy loss or canonical signed energy transfer."""
-
-    name = _electron_energy_field(values, where, required=required)
-    if name is None:
-        return None, None
-    value = _finite_electron_energy_value(values, where, name)
-    if name == "energy_loss_eV":
-        if value < 0.0:
-            raise ChemistryError(
-                f"{where}.energy_loss_eV must be finite and nonnegative"
-            )
-        return value, None
-    return None, value
-
-
-def load_species(path: Path) -> tuple[SpeciesData, ...]:
+def load_species(
+    path: Path, *, sources: InputSourceStore | None = None
+) -> tuple[SpeciesData, ...]:
     rows = _csv_rows(
         path,
         required={"id", "phase", "charge", "mass_amu", "elements"},
+        sources=sources,
+        role="chemistry.species",
         optional={
             "state_tags",
             "surfaces",
@@ -154,23 +147,9 @@ def load_species(path: Path) -> tuple[SpeciesData, ...]:
     result: list[SpeciesData] = []
     for line, row in enumerate(rows, start=2):
         species_id = row["id"]
-        if not species_id:
-            raise ChemistryError(f"{path}:{line}: species id is empty")
         phase = row["phase"]
-        if phase not in {"gas", "surface"}:
-            raise ChemistryError(f"{path}:{line}: phase must be gas or surface")
         charge, mass = int(row["charge"]), float(row["mass_amu"])
-        if not np.isfinite(mass) or mass < 0.0:
-            raise ChemistryError(
-                f"{path}:{line}: mass_amu must be finite and nonnegative"
-            )
         cv_over_kb = float(row["cv_over_kb"]) if row.get("cv_over_kb") else None
-        if cv_over_kb is not None and (
-            not np.isfinite(cv_over_kb) or cv_over_kb <= 0.0
-        ):
-            raise ChemistryError(
-                f"{path}:{line}: cv_over_kb must be finite and positive"
-            )
         result.append(
             SpeciesData(
                 id=species_id,
@@ -179,7 +158,7 @@ def load_species(path: Path) -> tuple[SpeciesData, ...]:
                 mass_amu=mass,
                 elements=_number_map(row.get("elements"), f"{path}:{line}:elements"),
                 state_tags=frozenset(_split(row.get("state_tags"))),
-                surfaces=_split(row.get("surfaces")),
+                surfaces=_selectors(row.get("surfaces")),
                 cv_over_kb=cv_over_kb,
                 metadata=_metadata(row),
             )
@@ -187,30 +166,11 @@ def load_species(path: Path) -> tuple[SpeciesData, ...]:
     return tuple(result)
 
 
-def _validate_reaction_energy_fields(
-    *,
-    family: Literal["gas", "boundary", "surface"],
-    where: str,
-    legacy_loss_eV: float | None,
-    signed_transfer_eV: float | None,
-    gas_heating_eV: float,
-) -> None:
-    nonzero_electron_transfer = any(
-        value is not None and value != 0.0
-        for value in (legacy_loss_eV, signed_transfer_eV)
-    )
-    if family != "gas" and nonzero_electron_transfer:
-        raise ChemistryError(
-            f"{where}: {family} reactions do not support electron-energy fields"
-        )
-    if family == "boundary" and gas_heating_eV != 0.0:
-        raise ChemistryError(
-            f"{where}: boundary reactions do not support gas_heating_eV"
-        )
-
-
 def load_reactions(
-    path: Path | None, *, family: Literal["gas", "boundary", "surface"] = "gas"
+    path: Path | None,
+    *,
+    family: Literal["gas", "boundary", "surface"] = "gas",
+    sources: InputSourceStore | None = None,
 ) -> tuple[ReactionData, ...]:
     if path is None:
         return ()
@@ -219,8 +179,9 @@ def load_reactions(
     rows = _csv_rows(
         path,
         required=required,
+        sources=sources,
+        role=f"chemistry.{family}_reactions",
         optional={
-            "energy_loss_eV",
             "electron_energy_transfer_eV",
             "gas_heating_eV",
             "zones",
@@ -231,17 +192,14 @@ def load_reactions(
     )
     result: list[ReactionData] = []
     for line, row in enumerate(rows, start=2):
-        reactants, products = parse_equation(row["equation"])
-        loss, transfer = electron_energy_values(row, f"{path}:{line}", required=False)
+        reactants, products = parse_equation(
+            row["equation"], allow_wall_absorption=boundary
+        )
+        transfer = electron_energy_transfer(row, f"{path}:{line}", required=False)
         gas_heating = float(row["gas_heating_eV"]) if row.get("gas_heating_eV") else 0.0
-        if not np.isfinite(gas_heating) or gas_heating < 0.0:
-            raise ChemistryError(
-                f"{path}:{line}: gas_heating_eV must be finite and nonnegative"
-            )
-        _validate_reaction_energy_fields(
+        validate_reaction_energy_fields(
             family=family,
             where=f"{path}:{line}",
-            legacy_loss_eV=loss,
             signed_transfer_eV=transfer,
             gas_heating_eV=gas_heating,
         )
@@ -251,10 +209,9 @@ def load_reactions(
                 reactants=reactants,
                 products=products,
                 rate_model=None if boundary else row["rate_model"],
-                energy_loss_eV=loss,
                 gas_heating_eV=gas_heating,
-                zones=_split(row.get("zones")),
-                surfaces=_split(row.get("surfaces")),
+                zones=_selectors(row.get("zones")),
+                surfaces=_selectors(row.get("surfaces")),
                 metadata=_metadata(row),
                 electron_energy_transfer_eV=transfer,
             )
@@ -262,9 +219,14 @@ def load_reactions(
     return tuple(result)
 
 
-def _cross_section_rows(path: Path, channel_id: object) -> list[tuple[float, float]]:
+def _cross_section_rows(
+    path: Path, channel_id: object, sources: InputSourceStore | None
+) -> list[tuple[float, float]]:
     try:
-        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        store = sources if sources is not None else InputSourceStore()
+        with io.StringIO(
+            store.read_text(path, "chemistry.cross_section"), newline=""
+        ) as stream:
             reader = csv.reader(stream)
             header = next(reader, None)
             grouped = header == ["channel_id", "energy_eV", "sigma_m2"]
@@ -294,11 +256,12 @@ def load_cross_section_curve(
     kind: object,
     target: object,
     threshold_eV: object,
+    sources: InputSourceStore | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load one exact two-column SI cross-section curve."""
 
     values = np.asarray(
-        _cross_section_rows(path, cross_section_id), dtype=float
+        _cross_section_rows(path, cross_section_id, sources), dtype=float
     ).reshape((-1, 2))
     energy, sigma = np.asarray(values[:, 0], float), np.asarray(values[:, 1], float)
     data_error = cross_section_data_error(

@@ -97,7 +97,7 @@ jobs:
       - name: Check representative physics against minimum numerical versions
         run: >-
           .venv/bin/python -m pytest
-          tests/test_experimental_eedf.py tests/test_approximate_two_term.py
+          tests/test_experimental_runtime.py tests/test_physics_numerics_acceptance.py
           tests/test_build_e2e.py tests/test_kinetics.py
           tests/test_result_output.py tests/test_maxwell_rates.py
           tests/test_input.py tests/test_coefficient_csv.py tests/test_external_bindings.py

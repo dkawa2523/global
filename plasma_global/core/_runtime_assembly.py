@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from plasma_global.core._term_ledger import ZoneTermLedger
 from plasma_global.models.electrons import ElectronState
-from plasma_global.models.gas_energy import BOLTZMANN_J_K
 from plasma_global.models.kinetics import ElectronKineticsResult
 from plasma_global.models.power import PowerCouplingResult
 from plasma_global.models.surface import SurfaceEvaluation
@@ -55,10 +55,10 @@ class PreparedZoneState:
 @dataclass(frozen=True, slots=True)
 class PowerEvaluation:
     coupling: PowerCouplingResult | None
-    kinetics_by_zone: dict[str, ElectronKineticsResult]
+    kinetics_by_zone: Mapping[str, ElectronKineticsResult]
     electron_power_W_by_zone: Mapping[str, float]
     gas_power_W_by_zone: Mapping[str, float]
-    reduced_field_Td_by_zone: dict[str, float]
+    reduced_field_Td_by_zone: Mapping[str, float]
     electron_states: dict[str, ElectronState]
 
 
@@ -97,7 +97,7 @@ class ZoneReactionWallEvaluation:
 @dataclass(frozen=True, slots=True)
 class SurfaceTerms:
     evaluation: SurfaceEvaluation | None
-    rates_by_zone: dict[str, dict[str, float]]
+    rates_by_zone: dict[str, dict[tuple[str, str], float]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,42 +107,14 @@ class EnergyTerms:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeZoneLedger:
-    zone_id: str
-    reaction_rates_m3_s: dict[str, float]
-    absorbed_power_J_m3_s: float
-    reaction_energy_loss_J_m3_s: float
-    wall_energy_loss_J_m3_s: float
-    gas_power_J_m3_s: float
-    gas_reaction_heating_J_m3_s: float
-    surface_reaction_heating_J_m3_s: float
-    wall_heavy_energy_exchange_J_m3_s: float
-    elastic_heating_J_m3_s: float
-    transport_species_source_m3_s: dict[str, float]
-    transport_electron_energy_J_m3_s: float
-    transport_heavy_energy_J_m3_s: float
-    inlet_heavy_energy_J_m3_s: float
-    surface_rates_m2_s: Mapping[str, float]
-    wall_fluxes: tuple[WallFluxRecord, ...]
-    wall_species_energy_J_m3_s: float
-    surface_species_energy_J_m3_s: float
-
-
-@dataclass(frozen=True, slots=True)
 class RuntimeEvaluation:
     derivative: np.ndarray
     electron_states: Mapping[str, ElectronState]
     kinetics_by_zone: Mapping[str, ElectronKineticsResult]
     gas_temperature_K_by_zone: Mapping[str, float]
     charge_residual_m3_by_zone: Mapping[str, float]
-    ledger_by_zone: Mapping[str, RuntimeZoneLedger]
+    ledger_by_zone: Mapping[str, ZoneTermLedger]
     power_coupling: PowerCouplingResult | None
-
-
-ExtensionRHS = Callable[
-    [PreparedEvaluationState, ReactionWallEvaluation, SurfaceTerms],
-    np.ndarray | None,
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +122,7 @@ class RuntimeAssembly:
     """Combine already evaluated physics terms into one state derivative."""
 
     model: CompiledGlobalModel
-    extension_rhs: ExtensionRHS
+    extension_rhs: np.ndarray | None
     prepared: PreparedEvaluationState
     power: PowerEvaluation
     transport: TransportEvaluation
@@ -159,7 +131,7 @@ class RuntimeAssembly:
     energy: EnergyTerms
     collect_ledger: bool
 
-    def assemble(self) -> tuple[np.ndarray, dict[str, RuntimeZoneLedger]]:
+    def assemble(self) -> tuple[np.ndarray, dict[str, ZoneTermLedger]]:
         derivative = np.zeros_like(self.prepared.values)
         surface_gas_rhs = self._surface_gas_rhs()
         surface_heating = self._surface_heating()
@@ -171,10 +143,9 @@ class RuntimeAssembly:
             derivative[self.model.layout.surface_coverage_slice] = (
                 self.surface.evaluation.coverage_derivative_s_inv
             )
-        extension_rhs = self.extension_rhs(self.prepared, self.reactions, self.surface)
-        if extension_rhs is not None:
-            derivative[self.model.layout.extension_slice] = extension_rhs
-        ledger_by_zone: dict[str, RuntimeZoneLedger] = {}
+        if self.extension_rhs is not None:
+            derivative[self.model.layout.extension_slice] = self.extension_rhs
+        ledger_by_zone: dict[str, ZoneTermLedger] = {}
         for zone_index, zone in enumerate(self.model.zones):
             ledger = self._assemble_zone_derivative(
                 derivative=derivative,
@@ -202,10 +173,9 @@ class RuntimeAssembly:
         closure = self.model.heavy_energy_closure
         if closure is None:
             return np.zeros(len(self.model.zones))
-        return (
-            BOLTZMANN_J_K
-            * self.prepared.gas_temperature_by_zone
-            * (species_rhs @ closure.cv_over_kb)
+        return closure.thermodynamics.internal_energy_source_J_m3_s(
+            species_rhs,
+            self.prepared.gas_temperature_by_zone,
         )
 
     def _assemble_zone_derivative(
@@ -217,7 +187,7 @@ class RuntimeAssembly:
         surface_heating: np.ndarray,
         wall_species_energy: np.ndarray,
         surface_species_energy: np.ndarray,
-    ) -> RuntimeZoneLedger | None:
+    ) -> ZoneTermLedger | None:
         zone = self.model.zones[zone_index]
         density_slice = self.model.layout.density_slices[zone.zone_id]
         rates = self.reactions.reaction_rates_by_zone[zone_index]
@@ -314,9 +284,9 @@ class RuntimeAssembly:
         surface_heating: np.ndarray,
         wall_species_energy: np.ndarray,
         surface_species_energy: np.ndarray,
-    ) -> RuntimeZoneLedger:
+    ) -> ZoneTermLedger:
         zone = self.model.zones[zone_index]
-        return RuntimeZoneLedger(
+        return ZoneTermLedger(
             zone_id=zone.zone_id,
             reaction_rates_m3_s={
                 reaction_id: float(rate)
@@ -366,8 +336,8 @@ __all__ = [
     "ReactionWallEvaluation",
     "RuntimeAssembly",
     "RuntimeEvaluation",
-    "RuntimeZoneLedger",
     "SurfaceTerms",
     "TransportEvaluation",
     "ZoneReactionWallEvaluation",
+    "ZoneTermLedger",
 ]

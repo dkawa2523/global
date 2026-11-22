@@ -23,8 +23,8 @@ class ElectronTableArrays:
 def validate_table_modes(lookup: object, bounds: object) -> None:
     if not isinstance(lookup, str) or lookup not in {"mean_energy", "local_field"}:
         raise CaseValidationError("table lookup must be mean_energy or local_field")
-    if not isinstance(bounds, str) or bounds not in {"error", "clip"}:
-        raise CaseValidationError("table bounds must be error or clip")
+    if not isinstance(bounds, str) or bounds not in {"error", "hold"}:
+        raise CaseValidationError("table bounds must be error or hold")
 
 
 def _copied_array(source: Path, name: str, values: object) -> np.ndarray:

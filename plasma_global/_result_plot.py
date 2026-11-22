@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from plasma_global._result_common import new_output_directory
+from plasma_global._series_selection import expand_series
 from plasma_global.core.result import SimulationResult, series_unit, to_plain_mapping
 from plasma_global.input._schema_output import OutputConfig, PlotConfig
 
@@ -112,7 +113,11 @@ def plot_result_h5(
         return tuple(directory / path for path in relative)
     image_format = image_format or "png"
     dpi = 150 if dpi is None else dpi
-    names = tuple(series) or tuple(result.observables) or result.state_labels
+    names = (
+        expand_series(series, (*result.state_labels, *result.observables))
+        if series
+        else tuple(result.observables) or result.state_labels
+    )
     _validate_plot_request(result, names, image_format, dpi)
     plt = _load_pyplot()
     directory = Path(output_dir).resolve()
@@ -165,9 +170,6 @@ def _group_data(result: SimulationResult, config: PlotConfig):
     if config.kind == "composition":
         unit = "1" if config.quantity == "mole_fraction" else "m^-3"
         return {unit: composition_data(result, config)}
-    # Load selection expansion only when grouped series are requested.
-    from plasma_global._series_selection import expand_series
-
     names = expand_series(config.series, (*result.state_labels, *result.observables))
     groups: dict[str, dict[str, np.ndarray]] = defaultdict(dict)
     for name in names:

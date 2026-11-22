@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
 
 import plasma_global.chemistry.compile as compile_module
+from plasma_global._input_sources import InputSourceStore
 from plasma_global.chemistry._contracts import normalized_cross_section_curve
+from plasma_global.chemistry._data_csv import load_reactions, load_species
+from plasma_global.chemistry._data_yaml import load_definition
 from plasma_global.chemistry._maxwell import compile_maxwell_rate
 from plasma_global.chemistry.compile import compile_chemistry
 from plasma_global.chemistry.data import (
@@ -63,7 +68,7 @@ def _mechanism(
         "    kind: ionization\n"
         "    target: Ar\n"
         "    threshold_eV: 5\n"
-        "    energy_loss_eV: 5\n"
+        "    electron_energy_transfer_eV: -5\n"
         "    file: xs.csv\n",
         encoding="utf-8",
     )
@@ -87,7 +92,7 @@ def test_compiles_balanced_chemistry_to_readonly_arrays(tmp_path: Path) -> None:
     np.testing.assert_array_equal(chemistry.stoichiometry, [[-1.0, 1.0]])
     np.testing.assert_array_equal(chemistry.reactant_orders, [[1.0, 0.0]])
     np.testing.assert_array_equal(chemistry.electron_orders, [1.0])
-    assert chemistry.energy_loss_eV.tolist() == [5.0]
+    assert chemistry.electron_energy_transfer_eV.tolist() == [-5.0]
     assert chemistry.boundary_reactions[0].products == {"Ar": 1.0}
     assert chemistry.boundary_reactions[0].wall_charge_per_event == 1.0
     assert chemistry.jacobian_species_pattern.tolist() == [
@@ -98,7 +103,7 @@ def test_compiles_balanced_chemistry_to_readonly_arrays(tmp_path: Path) -> None:
         chemistry.stoichiometry[0, 0] = 0.0
 
 
-def test_signed_electron_energy_transfer_preserves_legacy_loss_view(
+def test_signed_electron_energy_transfer_is_loaded_and_compiled(
     tmp_path: Path,
 ) -> None:
     manifest = _mechanism(tmp_path)
@@ -118,40 +123,6 @@ def test_signed_electron_energy_transfer_preserves_legacy_loss_view(
 
     assert loaded.cross_sections["ionization"].electron_energy_transfer_eV == -5.0
     np.testing.assert_array_equal(chemistry.electron_energy_transfer_eV, [-5.0])
-    np.testing.assert_array_equal(chemistry.energy_loss_eV, [5.0])
-
-
-def test_rejects_ambiguous_electron_energy_fields(tmp_path: Path) -> None:
-    manifest = _mechanism(tmp_path)
-    path = tmp_path / "cross_sections.yaml"
-    path.write_text(
-        path.read_text(encoding="utf-8").replace(
-            "    energy_loss_eV: 5\n",
-            "    energy_loss_eV: 5\n    electron_energy_transfer_eV: -5\n",
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ChemistryError, match="exactly one of"):
-        load_chemistry(manifest)
-
-
-def test_rejects_ambiguous_electron_energy_fields_before_parsing_values(
-    tmp_path: Path,
-) -> None:
-    manifest = _mechanism(tmp_path)
-    path = tmp_path / "cross_sections.yaml"
-    path.write_text(
-        path.read_text(encoding="utf-8").replace(
-            "    energy_loss_eV: 5\n",
-            "    energy_loss_eV: invalid\n"
-            "    electron_energy_transfer_eV: also-invalid\n",
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ChemistryError, match="exactly one of"):
-        load_chemistry(manifest)
 
 
 def _species_validation_chemistry(
@@ -162,7 +133,7 @@ def _species_validation_chemistry(
         kind="momentum_transfer",
         target=cross_section_target,
         threshold_eV=0.0,
-        energy_loss_eV=0.0,
+        electron_energy_transfer_eV=0.0,
         energy_eV=np.array([0.0, 1.0]),
         sigma_m2=np.array([1.0e-20, 1.0e-20]),
     )
@@ -217,7 +188,7 @@ def _programmatic_cross_section(**changes: object) -> CrossSectionData:
         kind="momentum_transfer",
         target="Ar",
         threshold_eV=0.0,
-        energy_loss_eV=0.0,
+        electron_energy_transfer_eV=0.0,
         energy_eV=np.array([0.0, 1.0, 10.0]),
         sigma_m2=np.array([0.0, 1.0e-20, 2.0e-20]),
     )
@@ -310,8 +281,6 @@ def test_programmatic_cross_section_curve_is_rejected_at_every_public_entry(
         ({"threshold_eV": np.nan}, "invalid threshold"),
         ({"threshold_eV": "1.0"}, "invalid threshold"),
         ({"threshold_eV": 10**10000}, "invalid threshold"),
-        ({"id": ""}, "id must be a non-empty string"),
-        ({"target": ""}, "target must be a non-empty string"),
     ],
     ids=(
         "kind",
@@ -320,8 +289,6 @@ def test_programmatic_cross_section_curve_is_rejected_at_every_public_entry(
         "nan-threshold",
         "string-threshold",
         "overflowing-threshold",
-        "id",
-        "target",
     ),
 )
 def test_programmatic_cross_section_metadata_is_rejected_at_every_public_entry(
@@ -401,7 +368,7 @@ def test_maxwellian_rejects_missing_low_energy_momentum_support() -> None:
         kind="momentum_transfer",
         target="Ar",
         threshold_eV=0.0,
-        energy_loss_eV=0.0,
+        electron_energy_transfer_eV=0.0,
         energy_eV=np.geomspace(1.0e-3, 10.0, 4001),
         sigma_m2=np.full(4001, sigma_m2),
     )
@@ -418,7 +385,7 @@ def test_onset_curve_normalizer_is_readonly_and_zero_below_threshold() -> None:
         kind="excitation",
         target="Ar",
         threshold_eV=10.0,
-        energy_loss_eV=10.0,
+        electron_energy_transfer_eV=-(10.0),
         energy_eV=source_energy,
         sigma_m2=source_sigma,
     )
@@ -534,7 +501,8 @@ def test_rejects_electron_energy_transfer_without_electron_topology(
         (
             "surface.csv",
             "surface_reactions: surface.csv\n",
-            "id,equation,rate_model,energy_loss_eV\nsurface_loss,Ar -> Ar,unused,5\n",
+            "id,equation,rate_model,electron_energy_transfer_eV\n"
+            "surface_loss,Ar -> Ar,unused,-5\n",
         ),
     ],
 )
@@ -556,9 +524,11 @@ def test_rejects_unused_non_gas_electron_energy_fields(
         load_chemistry(manifest)
 
 
-def test_programmatic_boundary_allows_zero_legacy_energy_field(tmp_path: Path) -> None:
+def test_programmatic_boundary_allows_zero_electron_energy_transfer(
+    tmp_path: Path,
+) -> None:
     loaded = load_chemistry(_mechanism(tmp_path))
-    boundary = replace(loaded.boundary_reactions[0], energy_loss_eV=0.0)
+    boundary = replace(loaded.boundary_reactions[0], electron_energy_transfer_eV=0.0)
 
     compiled = compile_chemistry(replace(loaded, boundary_reactions=(boundary,)))
 
@@ -567,7 +537,7 @@ def test_programmatic_boundary_allows_zero_legacy_energy_field(tmp_path: Path) -
 
 @pytest.mark.parametrize(
     "field_name",
-    ["energy_loss_eV", "electron_energy_transfer_eV", "gas_heating_eV"],
+    ["electron_energy_transfer_eV", "gas_heating_eV"],
 )
 def test_boundary_loader_allows_effectively_zero_energy_fields(
     tmp_path: Path, field_name: str
@@ -592,6 +562,59 @@ def test_boundary_loader_rejects_nonzero_gas_heating(tmp_path: Path) -> None:
 
     with pytest.raises(ChemistryError, match="do not support gas_heating_eV"):
         load_chemistry(manifest)
+
+
+def test_wall_absorption_is_explicit_in_a_boundary_csv(tmp_path: Path) -> None:
+    manifest = _mechanism(tmp_path)
+    path = tmp_path / "boundary.csv"
+    path.write_text("id,equation\nabsorb,Ar_plus -> 0\n", encoding="utf-8")
+    reaction = compile_chemistry(load_chemistry(manifest)).boundary_reactions[0]
+    assert not reaction.products
+    assert reaction.wall_charge_per_event == 1.0
+
+    path.write_text("id,equation\nabsorb,Ar_plus ->\n", encoding="utf-8")
+    with pytest.raises(ChemistryError, match="write '-> 0'"):
+        load_chemistry(manifest)
+
+
+def test_surface_gas_heat_uses_the_same_sign_in_yaml_and_csv(tmp_path: Path) -> None:
+    table = tmp_path / "surface.csv"
+    table.write_text(
+        "id,equation,rate_model,gas_heating_eV\n"
+        "desorb,adsorbed -> Ar + site,desorption,-0.25\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "chemistry.yaml"
+    definitions = {
+        "species": [{"id": "Ar", "mass_amu": 39.948}],
+        "rate_models": {
+            "desorption": {
+                "kind": "desorption",
+                "frequency_s_inv": 1.0,
+                "activation_eV": 0.0,
+            }
+        },
+    }
+    inline = load_definition(
+        {
+            **definitions,
+            "surface_reactions": [
+                {
+                    "id": "desorb",
+                    "equation": "adsorbed -> Ar + site",
+                    "rate": "desorption",
+                    "gas_heating_eV": -0.25,
+                }
+            ],
+        },
+        source,
+        tmp_path,
+    )
+    csv = load_definition(
+        {**definitions, "surface_reactions": table.name}, source, tmp_path
+    )
+    assert inline.surface_reactions == csv.surface_reactions
+    assert csv.surface_reactions[0].gas_heating_eV == -0.25
 
 
 def _generic_rate_dimension_chemistry(
@@ -780,7 +803,7 @@ def test_jacobian_pattern_does_not_overflow_with_many_shared_dependencies(
     )
 
 
-def test_rejects_legacy_rate_model_shared_across_incompatible_orders() -> None:
+def test_rejects_rate_model_shared_across_incompatible_orders() -> None:
     rate_model = RateModelData("shared", "constant", {"value": 1.0})
     chemistry = _generic_rate_dimension_chemistry(
         (
@@ -850,7 +873,6 @@ def test_product_electron_can_receive_explicit_chemi_ionization_energy() -> None
                 {"A": 1.0},
                 {"A_plus": 1.0, "e": 1.0},
                 "decay",
-                None,
                 electron_energy_transfer_eV=2.0,
             ),
         ),
@@ -949,7 +971,7 @@ def test_threshold_contract_is_ulp_aware_and_not_applied_to_momentum(
         "    kind: momentum_transfer\n"
         "    target: Ar\n"
         "    threshold_eV: 5\n"
-        "    energy_loss_eV: 0\n"
+        "    electron_energy_transfer_eV: 0.0\n"
         "    file: xs.csv\n",
         encoding="utf-8",
     )
@@ -1010,13 +1032,17 @@ def test_shared_tabulated_rate_model_is_compiled_once(
     calls = 0
     original = compile_module.load_rate_table
 
-    def counted(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    def counted(path: Path, *, sources=None) -> tuple[np.ndarray, np.ndarray]:
         nonlocal calls
         calls += 1
-        return original(path)
+        return original(path, sources=sources)
 
     monkeypatch.setattr(compile_module, "load_rate_table", counted)
-    chemistry = compile_chemistry(load_chemistry(manifest))
+    sources = InputSourceStore()
+    chemistry = compile_chemistry(
+        load_chemistry(manifest, sources=sources), sources=sources
+    )
+    assert (tmp_path / "rate.csv").resolve() in sources.contents()
 
     assert calls == 1
     assert chemistry.rate_evaluators[0] is chemistry.rate_evaluators[1]
@@ -1038,7 +1064,7 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
     )
     shared_rate = RateModelData("shared", "constant", {"value": 2.0e-15})
     bimolecular_rate = RateModelData("bimolecular", "constant", {"value": 2.0e-15})
-    surface_rate = RateModelData("stick", "surface_sticking", {})
+    surface_rate = RateModelData("stick", "sticking", {"value": 1.0})
     gas_reactions = (
         ReactionData(
             "dissociate",
@@ -1061,7 +1087,7 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
             {"O_minus": 1.0},
             {"e": 1.0, "O": 1.0},
             "shared",
-            0.5,
+            -(0.5),
         ),
     )
     boundary_reactions = (
@@ -1134,7 +1160,9 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
         [[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
     )
     np.testing.assert_array_equal(chemistry.electron_orders, [0.0, 1.0, 0.0])
-    np.testing.assert_array_equal(chemistry.energy_loss_eV, [0.0, 0.0, 0.5])
+    np.testing.assert_array_equal(
+        chemistry.electron_energy_transfer_eV, [0.0, 0.0, -0.5]
+    )
     np.testing.assert_array_equal(chemistry.gas_heating_eV, [0.25, 0.0, 0.0])
     assert chemistry.element_names == ("O",)
     np.testing.assert_array_equal(chemistry.element_matrix, [[1.0, 1.0, 2.0, 1.0]])
@@ -1161,7 +1189,7 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
         chemistry.stoichiometry,
         chemistry.reactant_orders,
         chemistry.electron_orders,
-        chemistry.energy_loss_eV,
+        chemistry.electron_energy_transfer_eV,
         chemistry.gas_heating_eV,
         chemistry.element_matrix,
         chemistry.jacobian_species_pattern,
@@ -1171,3 +1199,306 @@ def test_compile_preserves_matrix_and_metadata_order(tmp_path: Path) -> None:
         else:
             assert values.dtype == float
         assert not values.flags.writeable
+
+
+@pytest.mark.parametrize("source_kind", ["yaml", "csv", "python"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("elements", {"Ar": -1.0}), ("mass_amu", 0.0), ("cv_over_kb", 0.0)],
+)
+def test_species_physical_contract_is_shared_by_all_inputs(
+    tmp_path, source_kind, field, value
+):
+    record = {
+        "id": "Ar",
+        "phase": "gas",
+        "charge": 0,
+        "mass_amu": 39.948,
+        "elements": {"Ar": 1.0},
+    }
+    record[field] = value
+    with pytest.raises(ChemistryError, match=field):
+        _load_species_input(tmp_path, source_kind, record)
+
+
+def _load_species_input(
+    tmp_path: Path, source_kind: str, record: dict[str, Any]
+) -> None:
+    if source_kind == "python":
+        SpeciesData(**record)
+    elif source_kind == "yaml":
+        load_definition({"species": [record]}, tmp_path / "inline.yaml", tmp_path)
+    else:
+        path = tmp_path / "species.csv"
+        elements = ";".join(
+            f"{name}:{count}" for name, count in record["elements"].items()
+        )
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(
+                ("id", "phase", "charge", "mass_amu", "elements", "cv_over_kb")
+            )
+            writer.writerow(
+                (
+                    record["id"],
+                    "gas",
+                    0,
+                    record["mass_amu"],
+                    elements,
+                    record.get("cv_over_kb", ""),
+                )
+            )
+        load_species(path)
+
+
+def test_chemistry_sources_capture_bytes_used_by_nested_readers(tmp_path):
+    manifest = _mechanism(tmp_path)
+    store = InputSourceStore()
+    data = load_chemistry(manifest, sources=store)
+    captured = dict(store.contents())
+    assert set(captured) == {path.resolve() for path in data.source_files}
+    (tmp_path / "xs.csv").write_text("changed after parsing", encoding="utf-8")
+    compiled = compile_chemistry(data, sources=store)
+    assert compiled.cross_sections["ionization"].sigma_m2[-1] == 2e-20
+    assert dict(store.contents()) == captured
+
+
+def test_rate_contract_is_also_checked_for_python_construction(tmp_path):
+    data = load_chemistry(_mechanism(tmp_path))
+    invalid = RateModelData(
+        "electron_impact",
+        "electron_impact",
+        {"cross_section": "ionization", "branching_yield": -1.0},
+    )
+    with pytest.raises(ChemistryError, match="branching_yield"):
+        compile_chemistry(replace(data, rate_models={invalid.id: invalid}))
+
+
+@pytest.mark.parametrize("field", ["id", "target"])
+def test_cross_section_identifiers_are_rejected_at_construction(field: str) -> None:
+    with pytest.raises(ChemistryError, match="identifier"):
+        _programmatic_cross_section(**{field: ""})
+
+
+@pytest.mark.parametrize("source_kind", ["yaml", "csv", "python"])
+@pytest.mark.parametrize("bad_id", ["Ar,part", " Ar", "Ar ", "Ar[part]", "Ar\npart"])
+def test_species_series_components_share_the_same_identifier_boundary(
+    tmp_path: Path,
+    source_kind: str,
+    bad_id: str,
+) -> None:
+    record = {
+        "id": bad_id,
+        "phase": "gas",
+        "charge": 0,
+        "mass_amu": 39.948,
+        "elements": {"Ar": 1.0},
+    }
+    with pytest.raises(ChemistryError, match="identifier"):
+        _load_species_input(tmp_path, source_kind, record)
+
+
+@pytest.mark.parametrize(
+    "field", ["id", "rate_model", "zones", "surfaces", "reactants", "products"]
+)
+def test_direct_reaction_identifiers_and_selectors_reject_series_delimiters(
+    field: str,
+) -> None:
+    record = {
+        "id": "convert",
+        "reactants": {"A": 1.0},
+        "products": {"B": 1.0},
+        "rate_model": "conversion",
+        "electron_energy_transfer_eV": None,
+    }
+    if field in {"zones", "surfaces"}:
+        record[field] = ("z,part",)
+    elif field in {"reactants", "products"}:
+        record[field] = {"z,part": 1.0}
+    else:
+        record[field] = "z,part"
+    with pytest.raises(ChemistryError, match="identifier"):
+        ReactionData(**record)
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"cross_section": "bad,curve"},
+        {"rate_id": " rate"},
+        {"coverage": {"kind": "site_blocking", "site_species": "site,bad"}},
+        {"coverage": {"kind": "species_power", "species": "species[bad]"}},
+    ],
+)
+def test_direct_rate_identifier_references_use_the_same_contract(parameters) -> None:
+    with pytest.raises(ChemistryError, match="identifier"):
+        RateModelData("valid", "constant", parameters)
+
+
+@pytest.mark.parametrize("field", ["id", "target"])
+def test_cross_section_components_reject_reserved_series_delimiters(field: str) -> None:
+    with pytest.raises(ChemistryError, match="identifier"):
+        _programmatic_cross_section(**{field: "z,part"})
+
+
+def test_identifier_validation_preserves_scientific_punctuation_and_annotations() -> (
+    None
+):
+    species = SpeciesData(
+        "Ar+:励起*",
+        "surface",
+        1,
+        39.948,
+        {"element,key[]": 1.0},
+        surfaces=("wafer:*",),
+        metadata={"notes": " ,[]\n "},
+    )
+    reaction = ReactionData(
+        "reaction:励起*",
+        {species.id: 1.0},
+        {species.id: 1.0},
+        "rate:1*",
+        None,
+        zones=("領域",),
+        surfaces=("wafer:*",),
+    )
+    rate = RateModelData("rate:1*", "electron_table", {"rate_id": "Ar+:励起*"})
+    assert reaction.reactants[species.id] == 1.0
+    assert species.elements["element,key[]"] == 1.0
+    assert species.metadata["notes"] == " ,[]\n "
+    assert rate.parameters["rate_id"] == species.id
+
+
+@pytest.mark.parametrize("bad_id", ["Ar,part", " Ar", "Ar "])
+def test_public_case_rejects_ambiguous_chemistry_series_components(
+    tmp_path: Path, bad_id: str
+) -> None:
+    from plasma_global import case_from_mapping, compile_case
+    from tools.generate_schema_docs import minimal_case_document
+
+    document = minimal_case_document()
+    document["chemistry"]["species"][1]["id"] = bad_id
+    case = case_from_mapping(document, base_directory=tmp_path)
+    with pytest.raises(ChemistryError, match="identifier"):
+        compile_case(case)
+
+
+def test_public_case_preserves_chemical_punctuation_in_saved_species_series(
+    tmp_path: Path,
+) -> None:
+    from plasma_global import case_from_mapping, simulate
+    from tools.generate_schema_docs import minimal_case_document
+
+    document = minimal_case_document()
+    species = "Ar+:meta*"
+    document["chemistry"]["species"][2]["id"] = species
+    document["reactor"]["zones"]["plasma"]["initial"]["seed_densities_m3"] = {
+        species: 1e12
+    }
+    result = simulate(case_from_mapping(document, base_directory=tmp_path))
+    np.testing.assert_array_equal(result.series(f"n[plasma,{species}]"), 1e12)
+
+
+@pytest.mark.parametrize("used", [False, True])
+def test_declared_rate_table_is_captured_and_copied_even_when_unused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    used: bool,
+) -> None:
+    import yaml
+
+    import plasma_global.examples as examples
+    from plasma_global import compile_case, load_case
+    from tools.generate_schema_docs import minimal_case_document
+
+    source = tmp_path / "package"
+    (source / "cases").mkdir(parents=True)
+    (source / "data").mkdir()
+    table = source / "data" / "shared.csv"
+    table.write_text("x,value\n200,1\n1000,2\n", encoding="utf-8")
+    document = minimal_case_document()
+    document["chemistry"]["rate_models"] = {
+        "shared": {
+            "kind": "tabulated_1d",
+            "axis": "gas_temperature_K",
+            "file": "../data/shared.csv",
+            "bounds": "error",
+            "overall_order": 1,
+        }
+    }
+    document["chemistry"]["provenance"] = {"file": "notes/source.csv"}
+    if used:
+        document["chemistry"]["gas_reactions"] = [
+            {
+                "id": "identity",
+                "equation": "Ar -> Ar",
+                "rate": "shared",
+            }
+        ]
+    source_case = source / "cases" / "shared.yaml"
+    source_case.write_text(yaml.safe_dump(document), encoding="utf-8")
+    original = compile_case(load_case(source_case))
+    record = original.metadata["provenance"]["input_files"]["files"][str(table)]
+    assert "declared_rate_table" in record["roles"]
+    assert ("chemistry.rate_table" in record["roles"]) is used
+    assert original.input_sources[table] == table.read_bytes()
+
+    monkeypatch.setattr(examples, "files", lambda package: source)
+    copied_path = examples.initialize_example("shared", tmp_path / "copied")
+    copied = load_case(copied_path)
+    prepared = compile_case(copied)
+    assert (
+        copied_path.parent / "data" / "shared.csv"
+    ).read_bytes() == table.read_bytes()
+    assert copied.chemistry["provenance"]["file"] == "notes/source.csv"
+    assert not any(path.name == "source.csv" for path in prepared.input_sources)
+
+
+@pytest.mark.parametrize("source_kind", ["yaml", "csv", "python"])
+@pytest.mark.parametrize("selector", ["zones", "surfaces"])
+def test_reaction_selectors_are_validated_without_trimming(
+    tmp_path: Path,
+    source_kind: str,
+    selector: str,
+) -> None:
+    with pytest.raises(ChemistryError, match="identifier"):
+        _load_reaction_selector(tmp_path, source_kind, selector)
+
+
+def _load_reaction_selector(tmp_path: Path, source_kind: str, selector: str) -> None:
+    if source_kind == "python":
+        ReactionData(
+            "identity", {"Ar": 1.0}, {"Ar": 1.0}, "rate", None, **{selector: (" edge",)}
+        )
+    elif source_kind == "yaml":
+        load_definition(
+            {
+                "gas_reactions": [
+                    {
+                        "id": "identity",
+                        "equation": "Ar -> Ar",
+                        "rate": "rate",
+                        selector: [" edge"],
+                    }
+                ]
+            },
+            tmp_path / "inline.yaml",
+            tmp_path,
+        )
+    else:
+        path = tmp_path / "reaction.csv"
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(("id", "equation", "rate_model", selector))
+            writer.writerow(("identity", "Ar -> Ar", "rate", " edge"))
+        load_reactions(path)
+
+
+def test_direct_rate_model_id_and_chemistry_mapping_keys_are_components(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ChemistryError, match="identifier"):
+        RateModelData("rate,part", "constant", {"value": 1.0})
+    data = load_chemistry(_mechanism(tmp_path))
+    with pytest.raises(ChemistryError, match="identifier"):
+        replace(data, rate_models={"rate,part": next(iter(data.rate_models.values()))})

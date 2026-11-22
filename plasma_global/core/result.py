@@ -45,23 +45,6 @@ _PUBLIC_UNITS.update(
     }
 )
 
-_ORIGINAL_QUANTITIES = {
-    "electron_density_m3",
-    "charge_residual_m3",
-    "mean_energy_eV",
-    "electron_temperature_eV",
-    "gas_temperature_K",
-    "reduced_field_Td",
-    "absorbed_power_W",
-}
-
-
-def _legacy_unspecified_unit(label: str, unit: str) -> bool:
-    quantity = label.partition("[")[0]
-    added = quantity in _PUBLIC_UNITS and quantity not in _ORIGINAL_QUANTITIES
-    return unit == "unspecified" and (added or quantity in {"film", "inventory"})
-
-
 _PUBLIC_UNITS.update(
     {f"{domain}_event_rate_s_inv": "s^-1" for domain in ("gas", "surface", "boundary")}
 )
@@ -82,6 +65,8 @@ _PUBLIC_UNITS.update(
             "transport_heavy_power_W_m3",
             "inlet_heavy_power_W_m3",
             "wall_heavy_power_W_m3",
+            "wall_species_power_W_m3",
+            "surface_species_power_W_m3",
         ),
         "W m^-3",
     )
@@ -112,8 +97,6 @@ def series_unit(label: str, declared: Mapping[str, str] | None = None) -> str:
     if declared is None or label not in declared:
         return canonical
     unit = declared[label]
-    if _legacy_unspecified_unit(label, unit):
-        return unit
     if canonical != "unspecified" and unit != canonical:
         raise ValueError(
             f"series {label!r} requires canonical unit {canonical!r}; "
@@ -298,6 +281,88 @@ def _validate_summary_series(metadata: Mapping[str, Any], names: set[str]) -> No
         )
 
 
+def _result_catalog(metadata: Mapping[str, Any], names: set[str]) -> dict[str, Any]:
+    """Keep saved-series identity distinct from model-level availability."""
+    raw = metadata.get("series_catalog", {})
+    if not isinstance(raw, Mapping):
+        raise TypeError("metadata.series_catalog must be a mapping")
+    catalog = dict(raw)
+    units = metadata.get("series_units", {})
+    for name in names - catalog.keys():
+        quantity, _, location = name.partition("[")
+        parts: list[str] = location.removesuffix("]").split(",") if location else []
+        catalog[name] = {
+            "quantity": "number_density_m3" if quantity == "n" else quantity,
+            "region": parts[0] if parts else None,
+            "region_kind": "unspecified",
+            "components": parts[1:],
+            "unit": series_unit(name, units),
+            "available": True,
+            "stored": True,
+            "unavailable_intervals": [],
+        }
+    for name, row in catalog.items():
+        _exact_name(name, name="catalog series")
+        _validate_catalog_row(name, row, names, units)
+    return catalog
+
+
+def _validate_catalog_row(
+    name: str,
+    row: Any,
+    stored: set[str],
+    units: Mapping[str, str],
+) -> None:
+    if not isinstance(row, Mapping):
+        raise TypeError(f"series catalog entry {name!r} must be a mapping")
+    unit = _exact_name(row.get("unit"), name="catalog unit")
+    series_unit(name, {name: unit})
+    if name in stored and unit != series_unit(name, units):
+        raise ValueError(f"catalog unit disagrees with saved series {name!r}")
+    if row.get("stored") is not (name in stored):
+        raise ValueError(f"catalog stored flag disagrees with saved series {name!r}")
+    _validate_catalog_identity(row)
+    _validate_catalog_availability(row)
+
+
+def _validate_catalog_identity(row: Mapping[str, Any]) -> None:
+    _exact_name(row.get("quantity"), name="catalog quantity")
+    _exact_name(row.get("region_kind"), name="catalog region_kind")
+    if row.get("region") is not None:
+        _exact_name(row["region"], name="catalog region")
+    components = row.get("components")
+    if not isinstance(components, (tuple, list)):
+        raise TypeError("catalog components must be a sequence")
+    for component in components:
+        _exact_name(component, name="catalog component")
+
+
+def _validate_catalog_interval(interval: Any) -> None:
+    if not isinstance(interval, Mapping):
+        raise TypeError("catalog interval must be a mapping")
+    _exact_name(interval.get("segment_id"), name="catalog segment_id")
+    _exact_name(interval.get("reason"), name="catalog unavailable reason")
+    start, end = interval.get("start_s"), interval.get("end_s")
+    if not isinstance(start, (float, int)) or not isinstance(end, (float, int)):
+        raise TypeError("catalog interval boundaries must be numeric")
+    if not np.isfinite(start) or not np.isfinite(end) or start >= end:
+        raise ValueError("catalog unavailable interval must be finite and increasing")
+
+
+def _validate_catalog_availability(row: Mapping[str, Any]) -> None:
+    if not isinstance(row.get("available"), bool):
+        raise TypeError("catalog available must be a boolean")
+    intervals = row.get("unavailable_intervals")
+    if not isinstance(intervals, (tuple, list)):
+        raise TypeError("catalog unavailable_intervals must be a sequence")
+    if row["available"] != (not intervals):
+        raise ValueError("catalog availability disagrees with unavailable intervals")
+    if row["stored"] and not row["available"]:
+        raise ValueError("a saved series cannot be undefined in its catalog")
+    for interval in intervals:
+        _validate_catalog_interval(interval)
+
+
 @dataclass(frozen=True, slots=True)
 class SimulationStatus:
     """Terminal state of a simulation independent of a solver implementation."""
@@ -369,6 +434,10 @@ class SimulationResult:
         metadata = _freeze_mapping(self.metadata, name="metadata")
         names = set(labels) | set(observables)
         _validate_series_units(metadata, names)
+        metadata = _freeze_mapping(
+            {**metadata, "series_catalog": _result_catalog(metadata, names)},
+            name="metadata",
+        )
         _validate_summary_series(metadata, names)
         object.__setattr__(self, "metadata", metadata)
         object.__setattr__(

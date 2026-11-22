@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from plasma_global._identifiers import validate_identifier
 from plasma_global.chemistry._contracts import surface_reaction_shape_error
 from plasma_global.chemistry.data import ChemistryData, RateModelData, ReactionData
 from plasma_global.chemistry.surface_roles import (
@@ -39,15 +40,20 @@ class SurfaceGeometry:
     initial_coverages: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.surface_id or not self.zone_id:
-            raise CaseValidationError("surface and zone IDs must be nonempty")
+        try:
+            validate_identifier(self.surface_id)
+            validate_identifier(self.zone_id)
+            for species_id in self.initial_coverages:
+                validate_identifier(species_id)
+        except ValueError as exc:
+            raise CaseValidationError(f"surface geometry identifier: {exc}") from exc
         values = self.area_m2, self.site_density_m2, self.temperature_K
         if not np.isfinite(values).all() or min(values) <= 0.0:
             raise CaseValidationError(
                 "surface area, site density, and temperature must be positive"
             )
         coverages = {
-            str(name): float(value) for name, value in self.initial_coverages.items()
+            name: float(value) for name, value in self.initial_coverages.items()
         }
         if any(not math.isfinite(value) or value < 0.0 for value in coverages.values()):
             raise CaseValidationError(
@@ -84,10 +90,12 @@ class SurfaceStateLayout:
 
 @dataclass(frozen=True, slots=True)
 class SurfaceEvaluation:
+    """Evaluated sources with event rates keyed by (reaction_id, surface_id)."""
+
     gas_derivative_m3_s: np.ndarray
     coverage_derivative_s_inv: np.ndarray
     gas_heating_J_m3_s: np.ndarray
-    rates_m2_s: Mapping[str, float]
+    rates_m2_s: Mapping[tuple[str, str], float]
 
 
 @dataclass
@@ -112,6 +120,7 @@ class CompiledSurfaceModel:
         self.gas_species_ids = tuple(self.gas_species_ids)
         self.zone_ids = tuple(self.zone_ids)
         self.surfaces = tuple(self.surfaces)
+        self._validate_component_ids()
         self.gas_masses_kg = np.array(self.gas_masses_kg, dtype=float, copy=True)
         self.zone_volumes_m3 = np.array(self.zone_volumes_m3, dtype=float, copy=True)
         if self.gas_masses_kg.shape != (len(self.gas_species_ids),) or np.any(
@@ -145,6 +154,15 @@ class CompiledSurfaceModel:
         self._kernels = self._compile_kernels()
         self._runtime = self._build_runtime()
         object.__setattr__(self, "_compiled_immutable", True)
+
+    def _validate_component_ids(self) -> None:
+        try:
+            for value in (*self.gas_species_ids, *self.zone_ids):
+                validate_identifier(value)
+            for species in self.chemistry.species:
+                validate_identifier(species.id)
+        except ValueError as exc:
+            raise CaseValidationError(f"surface model identifier: {exc}") from exc
 
     def _build_runtime(self) -> _SurfaceRuntime:
         return _SurfaceRuntime(
@@ -296,7 +314,6 @@ class CompiledSurfaceModel:
     def _compile_stoichiometry(
         self,
         reaction: ReactionData,
-        model: RateModelData,
         surface_id: str,
     ) -> tuple[tuple[tuple[int, float], ...], tuple[tuple[int, float], ...]]:
         gas_delta: list[tuple[int, float]] = []
@@ -310,11 +327,6 @@ class CompiledSurfaceModel:
                 continue
             species = self._species[species_id]
             if species.phase == "gas":
-                # The wall-transport ledger already removes an incident ion.
-                # An ion-assisted event consumes that shared flux, so the
-                # surface kernel must not subtract it a second time.
-                if model.kind == "ion_assisted" and species.charge > 0 and delta < 0.0:
-                    continue
                 gas_delta.append((self._gas_index[species_id], delta))
             else:
                 index = self.layout.state_index.get((surface_id, species_id))
@@ -333,7 +345,7 @@ class CompiledSurfaceModel:
             reaction, model, surface
         )
         gas_delta, coverage_delta = self._compile_stoichiometry(
-            reaction, model, surface.surface_id
+            reaction, surface.surface_id
         )
         zone_index = self._zone_index[surface.zone_id]
         area_over_volume = surface.area_m2 / self.zone_volumes_m3[zone_index]
@@ -341,7 +353,7 @@ class CompiledSurfaceModel:
             reaction=reaction,
             surface_index=surface_index,
             zone_index=zone_index,
-            rate_id=f"{reaction.id}@{surface.surface_id}",
+            event_key=(reaction.id, surface.surface_id),
             rate_kernel=numeric_rate,
             coverage_factor=coverage_factor,
             surface_mass_action=mass_action,
@@ -424,10 +436,10 @@ class CompiledSurfaceModel:
             raise KeyError((surface_id, species_id))
         return float(state[index])
 
-    def _continue_solver_coverages(self, state: np.ndarray) -> None:
+    def continue_solver_coverages(self, state: np.ndarray) -> None:
         self._runtime.continue_coverages(state)
 
-    def _validate_solver_coverages(
+    def validate_solver_coverages(
         self, state: np.ndarray, domain_atol: np.ndarray
     ) -> None:
         self._runtime.validate_coverages(state, domain_atol)

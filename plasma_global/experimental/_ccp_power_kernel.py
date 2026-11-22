@@ -11,13 +11,13 @@ from plasma_global.experimental._power_kernels import (
     ELEMENTARY_CHARGE_C,
     TD_TO_V_M2,
     _command_value,
-    _envelope_value,
     _positive,
-    _validate_default_commands,
+    _validate_constant_commands,
     _validate_port_ids,
 )
 from plasma_global.models.power import (
     CompiledPowerCommand,
+    PowerContribution,
     PowerPortResult,
     PowerState,
 )
@@ -25,40 +25,28 @@ from plasma_global.models.power import (
 if TYPE_CHECKING:
     from plasma_global.experimental.power import CCPPowerPort
 
-
-def _zero_ccp_result(port: CCPPowerPort, state: PowerState) -> PowerPortResult:
-    """Return the source-off boundary without manufacturing plasma diagnostics."""
-
-    pressure_Pa = state.neutral_density_m3 * BOLTZMANN_J_K * port.gas_temperature_K
-    zeros = {
-        "delivered_power_W": 0.0,
-        "apparent_power_VA": 0.0,
-        "absorbed_power_W": 0.0,
-        "rf_voltage_rms_V": 0.0,
-        "rf_current_rms_A": 0.0,
-        "bulk_resistance_ohm": 0.0,
-        "sheath_reactance_ohm": 0.0,
-        "powered_sheath_thickness_m": 0.0,
-        "grounded_sheath_thickness_m": 0.0,
-        "self_bias_V": 0.0,
-        "plasma_potential_V": 0.0,
-        "powered_sheath_voltage_V": 0.0,
-        "grounded_sheath_voltage_V": 0.0,
-        "ion_flux_m2_s": 0.0,
-        "estimated_mean_ion_energy_eV": 0.0,
-        "mean_ion_energy_eV": 0.0,
-    }
-    return PowerPortResult(
-        port_id=port.port_id,
-        zone_id=port.zone_id,
-        electron_power_W=0.0,
-        reduced_field_Td=0.0,
-        observables={
-            "frequency_Hz": port.frequency_Hz,
-            **zeros,
-            "pressure_Pa": pressure_Pa,
-        },
-    )
+CCP_OFF_OBSERVABLE_UNITS = {
+    "frequency_Hz": "Hz",
+    "delivered_power_W": "W",
+    "apparent_power_VA": "VA",
+    "absorbed_power_W": "W",
+    "rf_voltage_rms_V": "V",
+    "rf_current_rms_A": "A",
+    "self_bias_V": "V",
+    "plasma_potential_V": "V",
+}
+CCP_PLASMA_OBSERVABLE_UNITS = {
+    "bulk_resistance_ohm": "ohm",
+    "sheath_reactance_ohm": "ohm",
+    "powered_sheath_thickness_m": "m",
+    "grounded_sheath_thickness_m": "m",
+    "powered_sheath_voltage_V": "V",
+    "grounded_sheath_voltage_V": "V",
+    "ion_flux_m2_s": "m^-2 s^-1",
+    "estimated_mean_ion_energy_eV": "eV",
+    "pressure_Pa": "Pa",
+}
+CCP_OBSERVABLE_UNITS = {**CCP_OFF_OBSERVABLE_UNITS, **CCP_PLASMA_OBSERVABLE_UNITS}
 
 
 def validate_ccp_power_port(port: CCPPowerPort) -> None:
@@ -74,8 +62,8 @@ def validate_ccp_power_port(port: CCPPowerPort) -> None:
     }
     for name, value in positive.items():
         _positive(name, value)
-    _validate_default_commands(
-        port.default_power_W, port.default_voltage_V, model_name="CCP"
+    _validate_constant_commands(
+        port.absorbed_power_W, port.voltage_rms_V, model_name="CCP"
     )
 
 
@@ -87,13 +75,18 @@ def evaluate_ccp_power_port(
 ) -> PowerPortResult:
     mode, value = _command_value(
         command,
-        default_power_W=port.default_power_W,
-        default_voltage_V=port.default_voltage_V,
+        power_W=port.absorbed_power_W,
+        voltage_V=port.voltage_rms_V,
     )
-    envelope = _envelope_value(port.pulse, time_s)
-    absorbed_command = value * envelope
+    del time_s
+    absorbed_command = value
     if absorbed_command == 0.0:
-        return _zero_ccp_result(port, state)
+        return PowerPortResult(
+            port_id=port.port_id,
+            zone_id=port.zone_id,
+            reduced_field_Td=0.0,
+            observables=port.off_observables,
+        )
     if absorbed_command > 0.0 and state.electron_density_m3 == 0.0:
         raise ModelDomainError(
             "positive CCP power or voltage requires positive electron density"
@@ -165,7 +158,7 @@ def evaluate_ccp_power_port(
     return PowerPortResult(
         port_id=port.port_id,
         zone_id=port.zone_id,
-        electron_power_W=absorbed,
+        contributions=(PowerContribution(port.zone_id, absorbed),),
         reduced_field_Td=reduced_field,
         observables={
             "frequency_Hz": port.frequency_Hz,
@@ -184,7 +177,6 @@ def evaluate_ccp_power_port(
             "grounded_sheath_voltage_V": grounded_sheath_V,
             "ion_flux_m2_s": ion_flux,
             "estimated_mean_ion_energy_eV": mean_ion_energy,
-            "mean_ion_energy_eV": mean_ion_energy,
             "pressure_Pa": pressure_Pa,
         },
     )

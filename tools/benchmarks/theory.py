@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import platform
@@ -20,18 +19,29 @@ import yaml
 from scipy.integrate import quad
 
 from plasma_global import load_case, simulate, write_result
-from plasma_global.build import compile_case
+from plasma_global._numeric_csv import read_numeric_csv
 from plasma_global.chemistry._contracts import normalized_cross_section_curve
 from plasma_global.chemistry._maxwell import compile_maxwell_rate
 from plasma_global.chemistry.data import CrossSectionData, load_chemistry
 from plasma_global.core.result import SimulationResult, to_plain_mapping
+from plasma_global.output import read_result_h5
 from tools.benchmarks import _theory_figures
+from tools.benchmarks.prepare_zdplaskin_reference import HISTORY_FILE
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "plasma_global/examples/cases"
 REFERENCES = ROOT / "benchmarks/references"
 E_CHARGE = 1.602176634e-19
 ELECTRON_MASS = 9.1093837139e-31
+DC_SERIES = {
+    "electron_density_m3": "electron_density_m3[plasma]",
+    "Ar_star_density_m3": "n[plasma,Ar_star]",
+    "Ar_plus_density_m3": "n[plasma,Ar_plus]",
+    "Ar2_plus_density_m3": "n[plasma,Ar2_plus]",
+    "plasma_voltage_V": "port_plasma_voltage_V[dc_series_drive]",
+    "current_A": "port_current_A[dc_series_drive]",
+    "reduced_field_Td": "port_reduced_field_Td[dc_series_drive]",
+}
 
 
 @dataclass(frozen=True)
@@ -59,16 +69,23 @@ class Runner:
     output: Path
     runs: list[Run] = field(default_factory=list)
 
-    def run(self, identifier: str) -> Run:
+    def run(self, identifier: str, *, save_at_s: np.ndarray | None = None) -> Run:
         source = CASES / f"{identifier}.yaml"
         case = load_case(source)
+        if save_at_s is not None:
+            solver = case.solver.model_copy(
+                update={"sample_interval_s": None, "save_at_s": save_at_s.tolist()}
+            )
+            case = case.model_copy(update={"solver": solver})
         started = time.perf_counter()
         result = simulate(case)
         elapsed = time.perf_counter() - started
         if result.status.success is not True:
             raise RuntimeError(f"{identifier}: {result.status.message}")
         name = source.stem
-        write_result(result, self.output / "runs" / name)
+        paths = write_result(result, self.output / "runs" / name)
+        if not paths.artifacts.success:
+            raise RuntimeError(f"{identifier}: artifact generation failed")
         print(f"{identifier}: {elapsed:.3f} s, {result.n_times} points", flush=True)
         run = Run(name, source, result, elapsed)
         self.runs.append(run)
@@ -80,6 +97,7 @@ class Runner:
             Path(_theory_figures.__file__),
             *REFERENCES.glob("*.yaml"),
             *REFERENCES.glob("*.csv"),
+            *REFERENCES.glob("*.in"),
         }
         for run in self.runs:
             paths.update(
@@ -231,28 +249,43 @@ def analytic_benchmarks(runner: Runner) -> dict[str, Any]:
     }
 
 
-def _dc_trace(run: Run) -> dict[str, list[float]]:
-    compiled = compile_case(load_case(run.case_file))
-    trace: dict[str, list[float]] = {
-        "time_s": run.result.time_s.tolist(),
-        "plasma_voltage_V": [],
-        "current_A": [],
-        "reduced_field_Td": [],
+def _dc_comparison(run: Run, history: dict[str, np.ndarray]) -> dict[str, Any]:
+    times = history["time_s"]
+    if not np.array_equal(run.result.time_s[1:], times):
+        raise ValueError("DC comparison requires every reference time after t=0")
+    measured = {}
+    for quantity, series in DC_SERIES.items():
+        actual = run.result.series(series)[1:]
+        expected = history[quantity]
+        measured[quantity] = {
+            "final": float(actual[-1]),
+            "reference_final": float(expected[-1]),
+            "final_relative_error": _relative_error(
+                float(actual[-1]), float(expected[-1])
+            ),
+            "waveform_error_by_reference_peak": float(
+                np.max(np.abs(actual - expected)) / np.max(np.abs(expected))
+            ),
+        }
+    electrons = run.result.series(DC_SERIES["electron_density_m3"])[1:]
+    reference_electrons = history["electron_density_m3"]
+    return {
+        **run.record(),
+        "reference_csv": (REFERENCES / HISTORY_FILE).relative_to(ROOT).as_posix(),
+        "matched_time_count": times.size,
+        "comparisons": measured,
+        "electron_peak": {
+            "actual_m3": float(np.max(electrons)),
+            "actual_time_s": float(times[np.argmax(electrons)]),
+            "reference_m3": float(np.max(reference_electrons)),
+            "reference_time_s": float(times[np.argmax(reference_electrons)]),
+        },
     }
-    for time_s, state in zip(run.result.time_s, run.result.state, strict=True):
-        evaluation = compiled.model.evaluate(float(time_s), state, compiled.segments[0])
-        if evaluation.power_coupling is None:
-            raise RuntimeError("DC benchmark requires a port result")
-        port = evaluation.power_coupling.port_results["dc_series_drive"]
-        trace["plasma_voltage_V"].append(float(port.observables["plasma_voltage_V"]))
-        trace["current_A"].append(float(port.observables["current_A"]))
-        if port.reduced_field_Td is None:
-            raise RuntimeError("DC benchmark requires the reduced field")
-        trace["reduced_field_Td"].append(float(port.reduced_field_Td))
-    return trace
 
 
-def cross_code_benchmarks(runner: Runner) -> dict[str, Any]:
+def cross_code_benchmarks(
+    runner: Runner, dc_reference: dict[str, np.ndarray]
+) -> dict[str, Any]:
     crane = runner.run("crane_two_reaction_argon")
     reference = yaml.safe_load(
         (REFERENCES / "crane_two_reaction_argon_reference.yaml").read_text()
@@ -260,76 +293,7 @@ def cross_code_benchmarks(runner: Runner) -> dict[str, Any]:
     _same_end_time(crane, float(reference["conditions"]["end_time_s"]))
     expected = float(reference["converted_output_final"]["Ar_plus_density_m3"])
     actual = float(crane.result.series("n[plasma,Ar_plus]")[-1])
-    zdp = runner.run("zdplaskin_example2")
-    saved = yaml.safe_load(
-        (REFERENCES / "zdplaskin_example2_summary.yaml").read_text()
-    )["saved_output"]
-    _same_end_time(zdp, float(saved["final_saved_time_s"]))
-    labels = {
-        "Ar_star": "n[plasma,Ar_star]",
-        "Ar_plus": "n[plasma,Ar_plus]",
-        "Ar2_plus": "n[plasma,Ar2_plus]",
-    }
-    rows = []
-    for name, label in labels.items():
-        value = float(zdp.result.series(label)[-1])
-        expected_value = float(saved[f"final_saved_{name}_density_m3"])
-        rows.append(
-            {
-                "quantity": name,
-                "actual": value,
-                "reference": expected_value,
-                "relative_error": _relative_error(value, expected_value),
-                "unit": "m^-3",
-            }
-        )
-    electrons = zdp.result.series(labels["Ar_plus"]) + zdp.result.series(
-        labels["Ar2_plus"]
-    )
-    for name, value in (
-        ("final", float(electrons[-1])),
-        ("peak", float(np.max(electrons))),
-    ):
-        expected_value = float(saved[f"{name}_saved_electron_density_m3"])
-        rows.append(
-            {
-                "quantity": f"electron_{name}",
-                "actual": value,
-                "reference": expected_value,
-                "relative_error": _relative_error(value, expected_value),
-                "unit": "m^-3",
-            }
-        )
-    trace = _dc_trace(zdp)
-    with (REFERENCES / "zdplaskin_example2_circuit.csv").open(
-        encoding="utf-8", newline=""
-    ) as stream:
-        circuit_reference = [
-            {key: float(value) for key, value in row.items()}
-            for row in csv.DictReader(stream)
-        ]
-    circuit = circuit_reference[-1]
-    if float(circuit["time_s"]) != float(zdp.result.time_s[-1]):
-        raise ValueError("DC circuit reference must use the same terminal time")
-    values = [
-        ("voltage", trace["plasma_voltage_V"][-1], "voltage_V", "V"),
-        ("current", trace["current_A"][-1], "current_A", "A"),
-        ("reduced_field", trace["reduced_field_Td"][-1], "reduced_field_Td", "Td"),
-    ]
-    for name, value, key, unit in values:
-        if value is None:
-            raise RuntimeError(f"DC benchmark did not produce {name}")
-        value = float(value)
-        expected_value = float(circuit[key])
-        rows.append(
-            {
-                "quantity": name,
-                "actual": value,
-                "reference": expected_value,
-                "relative_error": _relative_error(value, expected_value),
-                "unit": unit,
-            }
-        )
+    zdp = runner.run("zdplaskin_example2", save_at_s=dc_reference["time_s"])
     return {
         "crane": {
             **crane.record(),
@@ -338,13 +302,7 @@ def cross_code_benchmarks(runner: Runner) -> dict[str, Any]:
             "relative_error": _relative_error(actual, expected),
             "conditions": reference["converted_conditions"],
         },
-        "zdplaskin": {
-            **zdp.record(),
-            "comparisons": rows,
-            "reference_values": saved,
-            "circuit_trace": trace,
-            "circuit_reference": circuit_reference,
-        },
+        "zdplaskin": _dc_comparison(zdp, dc_reference),
     }
 
 
@@ -466,6 +424,82 @@ def event_sampling(runner: Runner) -> list[dict[str, Any]]:
     return rows
 
 
+def argon_afterglow(runner: Runner) -> dict[str, Any]:
+    source = REFERENCES / "beckers_argon_afterglow.yaml"
+    reference = yaml.safe_load(source.read_text(encoding="utf-8"))
+    measurement = reference["measurement"]
+    mobility = reference["ion_mobility"]
+    times, measured_density = np.asarray(measurement["time_s_and_density_m3"]).T
+
+    run = runner.run("benchmarks/argon-afterglow", save_at_s=times)
+    record = run.record()
+    saved = read_result_h5(runner.output / record["result_h5"])
+    if not np.array_equal(saved.time_s, times):
+        raise ValueError("Ar afterglow comparison requires the Fig. 5 reading times")
+    config = _config(run)["reactor"]
+    initial = config["zones"]["plasma"]["initial"]
+    if (
+        initial["pressure_Pa"] != measurement["pressure_Pa"]
+        or initial["gas_temperature_K"] != mobility["gas_temperature_K"]
+    ):
+        raise ValueError(
+            "Ar afterglow: case pressure and nominal gas temperature "
+            "must match the reference"
+        )
+
+    measured_ratio = measured_density / measured_density[0]
+    density = saved.series("electron_density_m3[plasma]")
+    simulated_ratio = density / density[0]
+    # Linear fit to log(n), with a free intercept for the unknown sensor scale.
+    centered = times - times.mean()
+    slope_weights = centered / (centered @ centered)
+    measured_slope = float(slope_weights @ np.log(measured_ratio))
+    simulated_slope = float(slope_weights @ np.log(simulated_ratio))
+    reading_slope_span = float(
+        np.sum(np.abs(slope_weights))
+        * math.log(10.0)
+        * measurement["log10_density_reading_half_width"]
+    )
+
+    transport = config["surfaces"]["cavity"]["wall_transport"]
+    exact_tau = (
+        transport["diffusion_length_m"] ** 2 / transport["diffusion_coefficient_m2_s"]
+    )
+    exact_ratio = np.exp(-(times - times[0]) / exact_tau)
+    mobility_span = (
+        mobility["reduced_mobility_reported_plus_minus_m2_V_s"]
+        / mobility["reduced_mobility_m2_V_s"]
+    )
+    return {
+        **record,
+        "reference_yaml": source.relative_to(ROOT).as_posix(),
+        "pressure_Pa": initial["pressure_Pa"],
+        "nominal_gas_temperature_K": initial["gas_temperature_K"],
+        "diffusion_length_m": transport["diffusion_length_m"],
+        "diffusion_coefficient_m2_s": transport["diffusion_coefficient_m2_s"],
+        "simulated_tau_s": -1.0 / simulated_slope,
+        "measured_tau_s": -1.0 / measured_slope,
+        "tau_relative_bias": measured_slope / simulated_slope - 1.0,
+        "exact_tau_s": exact_tau,
+        "max_relative_density_error_vs_exact": float(
+            np.max(np.abs(simulated_ratio / exact_ratio - 1.0))
+        ),
+        "tau_s_reading_bounds": [
+            -1.0 / (measured_slope - reading_slope_span),
+            -1.0 / (measured_slope + reading_slope_span),
+        ],
+        "tau_s_mobility_bounds": [
+            exact_tau / (1.0 + mobility_span),
+            exact_tau / (1.0 - mobility_span),
+        ],
+        "comparison": {
+            "time_s": times.tolist(),
+            "mcrs_density_ratio": measured_ratio.tolist(),
+            "volume_mean_density_ratio": simulated_ratio.tolist(),
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
@@ -473,6 +507,7 @@ def main() -> int:
     target = args.output.resolve()
     target.mkdir(parents=True, exist_ok=False)
     runner = Runner(target)
+    dc_reference = read_numeric_csv(REFERENCES / HISTORY_FILE)
     report: dict[str, Any] = {
         "platform": platform.platform(),
         "python": platform.python_version(),
@@ -482,7 +517,7 @@ def main() -> int:
         },
         "maxwell": maxwell_benchmark(),
         "analytic": analytic_benchmarks(runner),
-        "cross_code": cross_code_benchmarks(runner),
+        "cross_code": cross_code_benchmarks(runner, dc_reference),
     }
     report["argon_convergence"], baseline = argon_convergence(runner)
     report["software"] = to_plain_mapping(
@@ -490,12 +525,18 @@ def main() -> int:
     )
     report["sensitivity"] = argon_sensitivity(runner, baseline)
     report["event_sampling"] = event_sampling(runner)
+    report["argon_afterglow"] = argon_afterglow(runner)
     report["inputs"] = runner.inputs()
     (target / "results.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    runs = {run.name: run.result for run in runner.runs}
+    dc_result = runs["zdplaskin_example2"]
+    dc_series = {
+        name: dc_result.series(series)[1:] for name, series in DC_SERIES.items()
+    }
     _theory_figures.write_figures(
-        report, {run.name: run.result for run in runner.runs}, target / "figures"
+        report, runs, dc_series, dc_reference, target / "figures"
     )
     print(target / "results.json")
     return 0

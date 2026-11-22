@@ -10,16 +10,27 @@ from typing import Any, Protocol, TypeVar
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from plasma_global._identifiers import validate_identifier
 from plasma_global.core._compiled_chemistry import (
     ChemistrySource,
     CompiledChemistryData,
     compile_chemistry_data,
 )
 from plasma_global.core._compiled_domain import DomainValidator
-from plasma_global.core._compiled_jacobian import JacobianBuilder
 from plasma_global.core._compiled_runtime import RuntimeEvaluator
-from plasma_global.core._initial_state import build_initial_state
-from plasma_global.core._runtime_assembly import RuntimeEvaluation, RuntimeZoneLedger
+from plasma_global.core._initial_state import (
+    build_initial_state,
+    validate_initial_state,
+)
+from plasma_global.core._runtime_assembly import RuntimeEvaluation
+from plasma_global.core._state_blocks import (
+    CompiledStateBlock,
+    StateBlockLayout,
+    StateKind,
+    compile_state_blocks,
+    jacobian_sparsity,
+)
+from plasma_global.core._term_ledger import ZoneTermLedger
 from plasma_global.core.domain import InitialState, RecipeSegment, Zone
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
 from plasma_global.errors import ModelConfigurationError
@@ -35,7 +46,6 @@ from plasma_global.models.surface import CompiledSurfaceModel
 from plasma_global.models.walls import (
     CompiledWallBoundary,
     WallBoundary,
-    WallFluxRecord,
     compile_wall_boundary,
 )
 
@@ -61,20 +71,13 @@ class ExtensionStateAccumulator(Protocol):
     @property
     def labels(self) -> Sequence[str]: ...
 
-    @property
-    def lower_bounds(self) -> Sequence[float | None]: ...
-
-    @property
-    def upper_bounds(self) -> Sequence[float | None]: ...
-
     def initial_state(self) -> np.ndarray: ...
 
     def rhs(
         self,
         values: np.ndarray,
         *,
-        drivers: Mapping[str, Mapping[str, float]],
-        surface_rates_m2_s: Mapping[str, float],
+        surface_rates_m2_s: Mapping[tuple[str, str], float],
     ) -> np.ndarray: ...
 
 
@@ -118,8 +121,10 @@ class StateLayout:
     extension_slice: slice = field(init=False)
     labels: tuple[str, ...] = field(init=False)
     size: int = field(init=False)
+    blocks: tuple[StateBlockLayout, ...] = field(init=False)
 
     def __post_init__(self) -> None:
+        self._validate_component_ids()
         density_slices: dict[str, slice] = {}
         energy_indices: dict[str, int] = {}
         heavy_energy_indices: dict[str, int] = {}
@@ -170,45 +175,57 @@ class StateLayout:
             raise ModelConfigurationError("State labels must be globally unique")
         object.__setattr__(self, "labels", tuple(labels))
         object.__setattr__(self, "size", cursor)
+        object.__setattr__(self, "blocks", self._block_layouts())
 
+    def _validate_component_ids(self) -> None:
+        components = (
+            *self.species_ids,
+            *self.zone_ids,
+            *(item for key in self.surface_coverage_keys for item in key),
+        )
+        try:
+            for value in components:
+                validate_identifier(value)
+        except ValueError as exc:
+            raise ModelConfigurationError(f"State layout component: {exc}") from exc
 
-@dataclass(frozen=True)
-class ZoneTermLedger:
-    zone_id: str
-    reaction_rates_m3_s: Mapping[str, float]
-    absorbed_power_J_m3_s: float
-    reaction_energy_loss_J_m3_s: float
-    wall_energy_loss_J_m3_s: float
-    gas_power_J_m3_s: float
-    gas_reaction_heating_J_m3_s: float
-    surface_reaction_heating_J_m3_s: float
-    wall_heavy_energy_exchange_J_m3_s: float
-    elastic_heating_J_m3_s: float
-    transport_species_source_m3_s: Mapping[str, float]
-    transport_electron_energy_J_m3_s: float
-    transport_heavy_energy_J_m3_s: float
-    inlet_heavy_energy_J_m3_s: float
-    surface_rates_m2_s: Mapping[str, float]
-    wall_fluxes: tuple[WallFluxRecord, ...]
-    wall_species_energy_J_m3_s: float = 0.0
-    surface_species_energy_J_m3_s: float = 0.0
+    def _block_layouts(self) -> tuple[StateBlockLayout, ...]:
+        labels = self.labels
+        density_slices = self.density_slices
+        energy_indices = self.electron_energy_indices
+        heavy_energy_indices = self.heavy_energy_indices
+        coverage_start = self.surface_coverage_slice.start
+        extension_start = self.extension_slice.start
+        blocks: list[StateBlockLayout] = []
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "reaction_rates_m3_s",
-            _frozen_mapping(self.reaction_rates_m3_s),
-        )
-        object.__setattr__(
-            self,
-            "transport_species_source_m3_s",
-            _frozen_mapping(self.transport_species_source_m3_s),
-        )
-        object.__setattr__(
-            self,
-            "surface_rates_m2_s",
-            _frozen_mapping(self.surface_rates_m2_s),
-        )
+        def add(
+            kind: StateKind, owner: str, indices: tuple[int, ...], unit: str
+        ) -> None:
+            if indices:
+                blocks.append(
+                    StateBlockLayout(
+                        kind,
+                        owner,
+                        indices,
+                        tuple(labels[index] for index in indices),
+                        (unit,) * len(indices),
+                    )
+                )
+
+        for zone_id in self.zone_ids:
+            density = density_slices[zone_id]
+            add("density", zone_id, tuple(range(density.start, density.stop)), "m^-3")
+            if zone_id in energy_indices:
+                add("electron_energy", zone_id, (energy_indices[zone_id],), "J m^-3")
+            if zone_id in heavy_energy_indices:
+                add("heavy_energy", zone_id, (heavy_energy_indices[zone_id],), "J m^-3")
+        add("coverage", "surfaces", tuple(range(coverage_start, extension_start)), "1")
+        for index, label in enumerate(self.extension_labels, start=extension_start):
+            unit = {"film": "m", "inventory": "1"}.get(
+                label.partition("[")[0], "unspecified"
+            )
+            add("inventory", label, (index,), unit)
+        return tuple(blocks)
 
 
 @dataclass(frozen=True)
@@ -244,31 +261,6 @@ class ModelEvaluation:
         object.__setattr__(self, "ledger_by_zone", _frozen_mapping(self.ledger_by_zone))
 
 
-def _public_zone_ledger(payload: RuntimeZoneLedger) -> ZoneTermLedger:
-    """Materialize the stable public ledger at the facade boundary."""
-
-    return ZoneTermLedger(
-        zone_id=payload.zone_id,
-        reaction_rates_m3_s=payload.reaction_rates_m3_s,
-        absorbed_power_J_m3_s=payload.absorbed_power_J_m3_s,
-        reaction_energy_loss_J_m3_s=payload.reaction_energy_loss_J_m3_s,
-        wall_energy_loss_J_m3_s=payload.wall_energy_loss_J_m3_s,
-        gas_power_J_m3_s=payload.gas_power_J_m3_s,
-        gas_reaction_heating_J_m3_s=payload.gas_reaction_heating_J_m3_s,
-        surface_reaction_heating_J_m3_s=payload.surface_reaction_heating_J_m3_s,
-        wall_heavy_energy_exchange_J_m3_s=(payload.wall_heavy_energy_exchange_J_m3_s),
-        elastic_heating_J_m3_s=payload.elastic_heating_J_m3_s,
-        transport_species_source_m3_s=payload.transport_species_source_m3_s,
-        transport_electron_energy_J_m3_s=(payload.transport_electron_energy_J_m3_s),
-        transport_heavy_energy_J_m3_s=payload.transport_heavy_energy_J_m3_s,
-        inlet_heavy_energy_J_m3_s=payload.inlet_heavy_energy_J_m3_s,
-        surface_rates_m2_s=payload.surface_rates_m2_s,
-        wall_fluxes=payload.wall_fluxes,
-        wall_species_energy_J_m3_s=payload.wall_species_energy_J_m3_s,
-        surface_species_energy_J_m3_s=payload.surface_species_energy_J_m3_s,
-    )
-
-
 def _public_model_evaluation(payload: RuntimeEvaluation) -> ModelEvaluation:
     """Convert private runtime data to the documented diagnostic object."""
 
@@ -278,10 +270,7 @@ def _public_model_evaluation(payload: RuntimeEvaluation) -> ModelEvaluation:
         kinetics_by_zone=payload.kinetics_by_zone,
         gas_temperature_K_by_zone=payload.gas_temperature_K_by_zone,
         charge_residual_m3_by_zone=payload.charge_residual_m3_by_zone,
-        ledger_by_zone={
-            zone_id: _public_zone_ledger(ledger)
-            for zone_id, ledger in payload.ledger_by_zone.items()
-        },
+        ledger_by_zone=payload.ledger_by_zone,
         power_coupling=payload.power_coupling,
     )
 
@@ -319,9 +308,6 @@ class BoundSegmentRHS:
         self._cached_derivative = derivative
         return derivative
 
-    def rhs(self, time_s: float, state: np.ndarray) -> np.ndarray:
-        return self(time_s, state)
-
     @property
     def jac_sparsity(self) -> csr_matrix:
         return self.model.jac_sparsity
@@ -353,8 +339,7 @@ class CompiledGlobalModel:
     electron_density_provider: ElectronDensityProvider | None = None
     domain_atol: float | np.ndarray = 0.0
     layout: StateLayout = field(init=False)
-    state_lower_bounds: np.ndarray = field(init=False)
-    state_upper_bounds: np.ndarray = field(init=False)
+    state_blocks: tuple[CompiledStateBlock, ...] = field(init=False)
     _jac_sparsity: csr_matrix = field(init=False, repr=False)
     _chemistry_data: CompiledChemistryData = field(init=False, repr=False)
     _zone_by_id: Mapping[str, Zone] = field(init=False, repr=False)
@@ -415,10 +400,6 @@ class CompiledGlobalModel:
         return self._chemistry_data.electron_orders
 
     @property
-    def energy_loss_eV(self) -> np.ndarray:
-        return self._chemistry_data.energy_loss_eV
-
-    @property
     def electron_energy_transfer_eV(self) -> np.ndarray:
         """Signed reaction energy deposited into electrons per event."""
 
@@ -443,6 +424,10 @@ class CompiledGlobalModel:
     def __post_init__(self) -> None:
         self.zones = tuple(self.zones)
         self.segments = tuple(self.segments)
+        if self.power_coordinator is None:
+            self.power_coordinator = PowerCoordinator(
+                ports=(), zone_ids=tuple(zone.zone_id for zone in self.zones)
+            )
         self.wall_boundaries = tuple(self.wall_boundaries)
         self.electron_kinetics_by_zone = _frozen_mapping(self.electron_kinetics_by_zone)
         self._chemistry_data = compile_chemistry_data(self.chemistry)
@@ -457,8 +442,17 @@ class CompiledGlobalModel:
             extension_labels=extension_labels,
         )
         self.domain_atol = self._compile_domain_atol(self.domain_atol)
-        self.state_lower_bounds, self.state_upper_bounds = self._compile_state_bounds()
         self._zone_by_id = _frozen_mapping({zone.zone_id: zone for zone in self.zones})
+        self._active_reaction_indices_by_zone = self._compile_active_reactions()
+        self._walls_by_zone = self._compile_wall_boundaries()
+        self._transport_by_segment = self._compile_segment_transport()
+        self.state_blocks = compile_state_blocks(self)
+        self._jac_sparsity = _readonly_csr(
+            jacobian_sparsity(self.layout.size, self.state_blocks)
+        )
+        object.__setattr__(self, "_compiled_immutable", True)
+
+    def _compile_active_reactions(self) -> Mapping[str, tuple[int, ...]]:
         active_reactions_by_zone: dict[str, tuple[int, ...]] = {}
         for zone in self.zones:
             active_reactions_by_zone[zone.zone_id] = tuple(
@@ -466,9 +460,11 @@ class CompiledGlobalModel:
                 for reaction_index, selected_zones in enumerate(self.reaction_zones)
                 if not selected_zones or zone.zone_id in selected_zones
             )
-        self._active_reaction_indices_by_zone = _frozen_mapping(
-            active_reactions_by_zone
-        )
+        return _frozen_mapping(active_reactions_by_zone)
+
+    def _compile_wall_boundaries(
+        self,
+    ) -> Mapping[str, tuple[CompiledWallBoundary, ...]]:
         walls_by_zone: dict[str, list[CompiledWallBoundary]] = {
             zone.zone_id: [] for zone in self.zones
         }
@@ -481,12 +477,9 @@ class CompiledGlobalModel:
                     masses_kg=self.masses_kg,
                 )
             )
-        self._walls_by_zone = _frozen_mapping(
+        return _frozen_mapping(
             {zone_id: tuple(values) for zone_id, values in walls_by_zone.items()}
         )
-        self._transport_by_segment = self._compile_segment_transport()
-        self._jac_sparsity = _readonly_csr(JacobianBuilder(self).build())
-        object.__setattr__(self, "_compiled_immutable", True)
 
     def _compile_domain_atol(self, value: float | np.ndarray) -> np.ndarray:
         raw = np.asarray(value, dtype=float)
@@ -503,48 +496,6 @@ class CompiledGlobalModel:
             raise ModelConfigurationError("domain_atol must be finite and nonnegative")
         array.setflags(write=False)
         return array
-
-    def _extension_bounds(self, name: str, unbounded: float) -> np.ndarray:
-        accumulator = self.extension_accumulator
-        if accumulator is None:
-            return np.empty(0, dtype=float)
-        raw = tuple(getattr(accumulator, name))
-        expected = len(self.layout.extension_labels)
-        if len(raw) != expected:
-            description = name.replace("_", " ")
-            raise ModelConfigurationError(
-                f"Extension {description} must match its compiled state block"
-            )
-        try:
-            bounds = np.asarray(
-                [unbounded if value is None else float(value) for value in raw],
-                dtype=float,
-            )
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ModelConfigurationError(
-                f"Extension {name.replace('_', ' ')} must be numeric or None"
-            ) from exc
-        if np.any(np.isnan(bounds)):
-            raise ModelConfigurationError(
-                f"Extension {name.replace('_', ' ')} must not contain NaN"
-            )
-        return bounds
-
-    def _compile_state_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        lower = np.zeros(self.layout.size, dtype=float)
-        upper = np.full(self.layout.size, float("inf"), dtype=float)
-        if self.extension_accumulator is not None:
-            extension_lower = self._extension_bounds("lower_bounds", float("-inf"))
-            extension_upper = self._extension_bounds("upper_bounds", float("inf"))
-            if np.any(extension_lower > extension_upper):
-                raise ModelConfigurationError(
-                    "Extension upper bounds must not be below lower bounds"
-                )
-            lower[self.layout.extension_slice] = extension_lower
-            upper[self.layout.extension_slice] = extension_upper
-        lower.setflags(write=False)
-        upper.setflags(write=False)
-        return lower, upper
 
     def _surface_coverage_keys(self) -> tuple[tuple[str, str], ...]:
         if self.surface_model is None:
@@ -614,6 +565,22 @@ class CompiledGlobalModel:
 
     def initial_state(self, initial: InitialState) -> np.ndarray:
         return build_initial_state(self, initial)
+
+    def validate_initial_state(self, initial: InitialState | np.ndarray) -> np.ndarray:
+        return validate_initial_state(self, initial)
+
+    def continue_solver_trial(self, state: np.ndarray) -> np.ndarray:
+        """Return a physical continuation without modifying the integrator state."""
+
+        values = np.array(state, dtype=float, copy=True)
+        for block in self.state_blocks:
+            indices = list(block.layout.indices)
+            local = values[indices]
+            if block.domain.nonnegative:
+                np.maximum(local, 0.0, out=local)
+            block.domain.continue_trial(local)
+            values[indices] = local
+        return values
 
     def evaluate(
         self,

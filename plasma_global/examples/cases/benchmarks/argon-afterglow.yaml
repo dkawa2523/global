@@ -1,0 +1,51 @@
+schema_version: 5
+case:
+  name: argon-afterglow
+  description: Ar 15 PaのEUV後期残光。円筒の両極性拡散で電子密度の減衰を求める。
+chemistry:
+  species:
+  - {id: e, charge: -1, mass_amu: 0.00054858, state_tags: [electron]}
+  - {id: Ar, mass_amu: 39.948, elements: {Ar: 1}}
+  - {id: Ar_plus, charge: 1, mass_amu: 39.948, elements: {Ar: 1}}
+  boundary_reactions:
+  - id: neutralization
+    equation: Ar_plus -> Ar
+    surfaces: [cavity]
+reactor:
+  zones:
+    plasma:
+      # Beckers et al. 2016, radius 33 mm and height 20 mm.
+      volume_m3: 6.84238879951857e-05
+      initial:
+        pressure_Pa: 15.0
+        gas_temperature_K: 293.0
+        mole_fractions: {Ar: 1.0}
+        # The comparison uses normalized density. No absolute MCRS density is imposed.
+        seed_densities_m3: {Ar_plus: 1.0e15}
+        mean_energy_eV: 0.03787317968712806
+  surfaces:
+    cavity:
+      zone_id: plasma
+      area_m2: 0.010989291102257099
+      temperature_K: 293.0
+      wall_transport:
+        kind: ambipolar
+        # Fundamental mode of the closed-cylinder approximation.
+        diffusion_length_m: 0.005774914953965642
+        # Thermal ions and electrons, using K0 from Helm and Elford (1977).
+        diffusion_coefficient_m2_s: 0.05561678262658024
+models:
+  electrons:
+    # Use only the density for comparison. Elastic heat exchange is omitted.
+    kind: energy_balance
+run:
+  # Seconds after the EUV pulse maximum, within Phase II.
+  start_time_s: 0.00045
+  duration_s: 0.0014
+solver:
+  rtol: 1.0e-8
+  sample_interval_s: 0.00002
+output:
+  observables:
+  - electron_density_m3[plasma]
+  csv: true

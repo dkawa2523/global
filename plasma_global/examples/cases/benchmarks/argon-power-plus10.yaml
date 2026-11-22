@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: argon-power-plus10
   description: 低圧Arの局所感度。通電電力を基準の1.1倍に変更し、他の入力を固定する。

@@ -2,80 +2,82 @@
 
 from __future__ import annotations
 
-from typing import assert_never
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, assert_never
 
 from plasma_global.errors import CaseValidationError
-from plasma_global.experimental.profile import PrescribedElectronProfile
 from plasma_global.input._compile_power import compile_external_binding
-from plasma_global.input._resolved_case import (
+from plasma_global.input._schema_power import (
     ContinuousWaveform,
+    DCSeriesCommand,
     DCSeriesModel,
-    ExperimentalCCPCommand,
     ExperimentalCCPModel,
-    ExperimentalICPCommand,
     ExperimentalICPModel,
-    ExperimentalRFEnvelopeCommand,
     ExperimentalRFEnvelopeModel,
     ExternalTableCommand,
     ExternalTableModel,
     PowerPortCommand,
-    PowerPortConfig,
     PrescribedPowerModel,
-    RecipeStepConfig,
-    ResolvedCase,
     SquarePulseWaveform,
     Waveform,
-)
-from plasma_global.input._resolved_case import (
-    DCSeriesCommand as DCSeriesCommandConfig,
-)
-from plasma_global.input._resolved_case import (
-    PrescribedPowerCommand as PrescribedPowerCommandConfig,
+    parse_power_command,
 )
 from plasma_global.models.external_table import ExternalTableBinding, ExternalTableStore
 from plasma_global.models.power import CompiledPowerCommand
 
+if TYPE_CHECKING:
+    from plasma_global.input.schema import PowerDefinition, RunStep
+
 MAX_COMPILED_SEGMENTS = 100_000
 
 
-def compiled_step_boundaries(
-    step: RecipeStepConfig,
-    ports: dict[str, PowerPortConfig],
-    external_tables: ExternalTableStore,
-    prescribed_electron_profile: PrescribedElectronProfile | None,
+def parse_step_power_commands(
+    step: RunStep, ports: Mapping[str, PowerDefinition]
+) -> dict[str, PowerPortCommand]:
+    """Parse public command values once before splitting the step."""
+    return {
+        port_id: parse_power_command(ports[port_id].model, values)
+        for port_id, values in step.commands.power_ports.items()
+    }
+
+
+def power_step_boundaries(
+    commands: dict[str, PowerPortCommand],
+    external_bindings: dict[str, ExternalTableBinding],
     start_s: float,
     end_s: float,
-) -> tuple[list[float], dict[str, ExternalTableBinding]]:
-    """Return every time boundary at which a step's commands can change."""
+    *,
+    run_start_s: float,
+) -> set[float]:
+    """Return discontinuities introduced by power commands within one step."""
 
-    boundaries = {start_s, end_s}
-    boundaries.update(_profile_boundaries(prescribed_electron_profile, start_s, end_s))
-    external_bindings, external_boundaries = _external_bindings_for_step(
-        step,
-        ports,
-        external_tables,
-        start_s,
-        end_s,
-    )
-    boundaries.update(external_boundaries)
-    for command in step.commands.power_ports.values():
-        waveform = _command_waveform(command)
-        if waveform is not None:
-            boundaries.update(_waveform_boundaries(waveform, start_s, end_s))
-    return sorted(boundaries), external_bindings
+    boundaries: set[float] = set()
+    for binding in external_bindings.values():
+        binding.validate_interval(start_s, end_s)
+        boundaries.update(_external_binding_boundaries(binding, start_s, end_s))
+    for command in commands.values():
+        if not isinstance(command, ExternalTableCommand):
+            boundaries.update(
+                _waveform_boundaries(
+                    command.waveform, start_s, end_s, run_start_s=run_start_s
+                )
+            )
+    return boundaries
 
 
 def resolved_step_power_commands(
-    step: RecipeStepConfig,
-    ports: dict[str, PowerPortConfig],
+    commands: dict[str, PowerPortCommand],
+    ports: Mapping[str, PowerDefinition],
     external_bindings: dict[str, ExternalTableBinding],
-    external_tables: ExternalTableStore,
     midpoint_s: float,
+    *,
+    run_start_s: float,
     step_start_s: float,
+    step_id: str,
 ) -> dict[str, CompiledPowerCommand]:
     """Bind every active port command at one constant-command interval."""
 
-    commands = {
+    resolved = {
         port_id: CompiledPowerCommand(
             kind="external_table",
             external_table=(
@@ -89,53 +91,43 @@ def resolved_step_power_commands(
     for port_id, port in ports.items():
         if port_id in external_bindings:
             continue
-        command = step.commands.power_ports.get(port_id)
-        if command is None:
-            commands[port_id] = _required_default_command(port, step.step_id)
-            continue
-        waveform = _command_waveform(command)
-        enabled = waveform is None or _waveform_is_on(
-            waveform,
-            midpoint_s,
-            step_start_s,
+        command = commands.get(port_id)
+        if isinstance(command, ExternalTableCommand):
+            raise CaseValidationError(
+                f"power port {port_id!r} has no external table binding"
+            )
+        enabled = command is None or _waveform_is_on(
+            command.waveform, midpoint_s, step_start_s, run_start_s=run_start_s
         )
-        resolved_command = _resolved_port_command(
-            port,
-            command,
-            enabled=enabled,
-            external_tables=external_tables,
+        resolved[port_id] = _resolve_power_command(
+            port_id, port, command, enabled=enabled, step_id=step_id
         )
-        commands[port_id] = (
-            resolved_command
-            if resolved_command is not None
-            else _required_default_command(port, step.step_id)
-        )
-    return commands
+    return resolved
 
 
-def _required_default_command(
-    port: PowerPortConfig, step_id: str
+def _resolve_power_command(
+    port_id: str,
+    port: PowerDefinition,
+    command: PowerPortCommand | None,
+    *,
+    enabled: bool,
+    step_id: str,
 ) -> CompiledPowerCommand:
-    model = port.model
-    if isinstance(model, PrescribedPowerModel):
-        kind, value = "power", model.default_absorbed_power_W
-    elif isinstance(model, DCSeriesModel):
-        kind, value = "voltage", model.source_voltage_V
-    elif isinstance(model, ExperimentalICPModel):
-        kind, value = "power", model.default_delivered_power_W
-    elif isinstance(model, (ExperimentalRFEnvelopeModel, ExperimentalCCPModel)):
-        kind, value = (
-            ("power", model.default_absorbed_power_W)
-            if model.control == "absorbed_power"
-            else ("voltage", model.default_voltage_rms_V)
-        )
-    else:
-        raise TypeError(f"port {port.port_id!r} requires an external-table binding")
+    if not enabled:
+        if isinstance(command, DCSeriesCommand):
+            return CompiledPowerCommand(kind="voltage", voltage_V=command.off_voltage_V)
+        return CompiledPowerCommand(kind="off")
+    kind, value = _command_setpoint(port_id, port, command)
     if value is None:
         raise CaseValidationError(
-            f"recipe step {step_id!r}, power port {port.port_id!r} requires a "
+            f"recipe step {step_id!r}, power port {port_id!r} requires a "
             f"{kind} command or a model default"
         )
+    if value == 0.0 and isinstance(
+        port.model,
+        (ExperimentalRFEnvelopeModel, ExperimentalCCPModel, ExperimentalICPModel),
+    ):
+        return CompiledPowerCommand(kind="off")
     return (
         CompiledPowerCommand(kind="power", power_W=value)
         if kind == "power"
@@ -143,48 +135,28 @@ def _required_default_command(
     )
 
 
-def prescribed_electron_density_at(
-    case: ResolvedCase,
-    prescribed_electron_profile: PrescribedElectronProfile | None,
-    time_s: float,
-) -> dict[str, float]:
-    """Sample a piecewise-constant prescribed electron profile."""
-
-    if (
-        prescribed_electron_profile is None
-        or prescribed_electron_profile.interpolation != "previous"
-    ):
-        return {}
-    return {
-        zone.zone_id: prescribed_electron_profile.density(time_s, zone.zone_id)
-        for zone in case.reactor.zones
-    }
-
-
-def _profile_boundaries(
-    profile: PrescribedElectronProfile | None, start_s: float, end_s: float
-) -> tuple[float, ...]:
-    if profile is None or profile.interpolation != "previous":
-        return ()
-    return tuple(float(time_s) for time_s in profile.time_s if start_s < time_s < end_s)
+def _command_setpoint(
+    port_id: str, port: PowerDefinition, command: PowerPortCommand | None
+) -> tuple[str, float | None]:
+    model = port.model
+    if isinstance(model, PrescribedPowerModel):
+        return "power", _setpoint(command, "absorbed_power_W", model.absorbed_power_W)
+    if isinstance(model, DCSeriesModel):
+        return "voltage", _setpoint(command, "source_voltage_V", model.source_voltage_V)
+    if isinstance(model, ExperimentalICPModel):
+        return "power", _setpoint(command, "delivered_power_W", model.delivered_power_W)
+    if isinstance(model, (ExperimentalRFEnvelopeModel, ExperimentalCCPModel)):
+        if model.control == "voltage":
+            return "voltage", _setpoint(command, "voltage_rms_V", model.voltage_rms_V)
+        return "power", _setpoint(command, "absorbed_power_W", model.absorbed_power_W)
+    raise TypeError(f"port {port_id!r} requires an external-table binding")
 
 
-def _command_waveform(command: PowerPortCommand) -> Waveform | None:
-    """Return the waveform only for command variants that define one."""
-
-    if isinstance(command, ExternalTableCommand):
-        return None
-    if isinstance(command, PrescribedPowerCommandConfig):
-        return command.waveform
-    if isinstance(command, DCSeriesCommandConfig):
-        return command.waveform
-    if isinstance(command, ExperimentalRFEnvelopeCommand):
-        return command.waveform
-    if isinstance(command, ExperimentalCCPCommand):
-        return command.waveform
-    if isinstance(command, ExperimentalICPCommand):
-        return command.waveform
-    assert_never(command)
+def _setpoint(
+    command: PowerPortCommand | None, field: str, default: float | None
+) -> float | None:
+    value = getattr(command, field, None)
+    return default if value is None else float(value)
 
 
 def _external_binding_boundaries(
@@ -200,13 +172,13 @@ def _external_binding_boundaries(
 
 
 def _waveform_boundaries(
-    waveform: Waveform, start_s: float, end_s: float
+    waveform: Waveform, start_s: float, end_s: float, *, run_start_s: float
 ) -> list[float]:
     if isinstance(waveform, ContinuousWaveform):
         return []
     if not isinstance(waveform, SquarePulseWaveform):
         assert_never(waveform)
-    origin = start_s if waveform.origin_s is None else waveform.origin_s
+    origin = start_s if waveform.time_reference == "step_start" else run_start_s
     phase = origin + waveform.phase_s
     if waveform.duty_cycle == 0.0:
         return []
@@ -241,12 +213,14 @@ def _square_pulse_boundaries(
     return values
 
 
-def _waveform_is_on(waveform: Waveform, time_s: float, step_start_s: float) -> bool:
+def _waveform_is_on(
+    waveform: Waveform, time_s: float, step_start_s: float, *, run_start_s: float
+) -> bool:
     if isinstance(waveform, ContinuousWaveform):
         return True
     if not isinstance(waveform, SquarePulseWaveform):
         assert_never(waveform)
-    origin = step_start_s if waveform.origin_s is None else waveform.origin_s
+    origin = step_start_s if waveform.time_reference == "step_start" else run_start_s
     relative = time_s - origin - waveform.phase_s
     if relative < 0.0 or waveform.duty_cycle == 0.0:
         return False
@@ -256,163 +230,27 @@ def _waveform_is_on(waveform: Waveform, time_s: float, step_start_s: float) -> b
     return (relative % period) < waveform.duty_cycle * period
 
 
-def _resolved_prescribed_power_command(
-    port: PowerPortConfig,
-    command: PowerPortCommand,
-    *,
-    enabled: bool,
-) -> CompiledPowerCommand | None:
-    if not isinstance(command, PrescribedPowerCommandConfig):
-        raise CaseValidationError(
-            f"power port {port.port_id!r} command does not match prescribed_power"
-        )
-    if not enabled:
-        return CompiledPowerCommand(kind="off")
-    if command.absorbed_power_W is None:
-        return None
-    return CompiledPowerCommand(kind="power", power_W=command.absorbed_power_W)
-
-
-def _resolved_dc_series_command(
-    port: PowerPortConfig,
-    model: DCSeriesModel,
-    command: PowerPortCommand,
-    *,
-    enabled: bool,
-) -> CompiledPowerCommand | None:
-    if not isinstance(command, DCSeriesCommandConfig):
-        raise CaseValidationError(
-            f"power port {port.port_id!r} command does not match dc_series"
-        )
-    value = command.source_voltage_V
-    if value is None:
-        value = model.source_voltage_V
-    if not enabled:
-        value = command.off_voltage_V
-    if value is None:
-        return None
-    return CompiledPowerCommand(kind="voltage", voltage_V=value)
-
-
-def _resolved_external_table_command(
-    port: PowerPortConfig,
-    model: ExternalTableModel,
-    command: PowerPortCommand,
+def bind_step_power_tables(
+    commands: dict[str, PowerPortCommand],
+    ports: Mapping[str, PowerDefinition],
     external_tables: ExternalTableStore,
-) -> CompiledPowerCommand:
-    if not isinstance(command, ExternalTableCommand):
-        raise CaseValidationError(
-            f"power port {port.port_id!r} command does not match external_table"
-        )
-    return CompiledPowerCommand(
-        kind="external_table",
-        external_table=compile_external_binding(model, external_tables, command),
-    )
-
-
-def _resolved_experimental_icp_command(
-    port: PowerPortConfig,
-    command: PowerPortCommand,
     *,
-    enabled: bool,
-) -> CompiledPowerCommand | None:
-    if not isinstance(command, ExperimentalICPCommand):
-        raise CaseValidationError(
-            f"power port {port.port_id!r} command does not match experimental.icp"
-        )
-    if not enabled:
-        return CompiledPowerCommand(kind="off")
-    if command.delivered_power_W is None:
-        return None
-    return CompiledPowerCommand(kind="power", power_W=command.delivered_power_W)
-
-
-def _resolved_experimental_rf_command(
-    port: PowerPortConfig,
-    model: ExperimentalRFEnvelopeModel | ExperimentalCCPModel,
-    command: PowerPortCommand,
-    *,
-    enabled: bool,
-) -> CompiledPowerCommand | None:
-    if isinstance(model, ExperimentalRFEnvelopeModel):
-        if not isinstance(command, ExperimentalRFEnvelopeCommand):
-            raise CaseValidationError(
-                f"power port {port.port_id!r} command does not match "
-                "experimental.rf_envelope"
-            )
-        voltage_rms_V = command.voltage_rms_V
-        absorbed_power_W = command.absorbed_power_W
-    else:
-        if not isinstance(command, ExperimentalCCPCommand):
-            raise CaseValidationError(
-                f"power port {port.port_id!r} command does not match experimental.ccp"
-            )
-        voltage_rms_V = command.voltage_rms_V
-        absorbed_power_W = command.absorbed_power_W
-    if not enabled:
-        return CompiledPowerCommand(kind="off")
-    if model.control == "voltage":
-        if voltage_rms_V is None:
-            return None
-        return CompiledPowerCommand(kind="voltage", voltage_V=voltage_rms_V)
-    if absorbed_power_W is None:
-        return None
-    return CompiledPowerCommand(kind="power", power_W=absorbed_power_W)
-
-
-def _resolved_port_command(
-    port: PowerPortConfig,
-    command: PowerPortCommand,
-    *,
-    enabled: bool,
-    external_tables: ExternalTableStore,
-) -> CompiledPowerCommand | None:
-    """Resolve one schema command against its port's compiled command kind."""
-
-    model = port.model
-    if isinstance(model, PrescribedPowerModel):
-        return _resolved_prescribed_power_command(port, command, enabled=enabled)
-    if isinstance(model, DCSeriesModel):
-        return _resolved_dc_series_command(port, model, command, enabled=enabled)
-    if isinstance(model, ExternalTableModel):
-        return _resolved_external_table_command(
-            port,
-            model,
-            command,
-            external_tables,
-        )
-    if isinstance(model, ExperimentalICPModel):
-        return _resolved_experimental_icp_command(port, command, enabled=enabled)
-    if isinstance(model, (ExperimentalRFEnvelopeModel, ExperimentalCCPModel)):
-        return _resolved_experimental_rf_command(
-            port,
-            model,
-            command,
-            enabled=enabled,
-        )
-    assert_never(model)
-
-
-def _external_bindings_for_step(
-    step: RecipeStepConfig,
-    ports: dict[str, PowerPortConfig],
-    external_tables: ExternalTableStore,
-    start_s: float,
-    end_s: float,
-) -> tuple[dict[str, ExternalTableBinding], set[float]]:
+    run_start_s: float,
+    step_start_s: float,
+) -> dict[str, ExternalTableBinding]:
     bindings: dict[str, ExternalTableBinding] = {}
-    boundaries: set[float] = set()
     for port_id, port in ports.items():
-        model = port.model
-        if not isinstance(model, ExternalTableModel):
-            continue
-        command = step.commands.power_ports.get(port_id)
-        if command is not None and not isinstance(command, ExternalTableCommand):
-            raise TypeError(
-                f"external-table port {port_id!r} has an invalid command type"
+        if isinstance(port.model, ExternalTableModel):
+            command = commands.get(port_id)
+            if command is not None and not isinstance(command, ExternalTableCommand):
+                raise CaseValidationError(
+                    f"power port {port_id!r} requires an external table command"
+                )
+            bindings[port_id] = compile_external_binding(
+                port.model,
+                external_tables,
+                command,
+                run_start_s=run_start_s,
+                step_start_s=step_start_s,
             )
-        binding = compile_external_binding(model, external_tables, command)
-        binding.validate_interval(start_s, end_s)
-        bindings[port_id] = binding
-        boundaries.update(_external_binding_boundaries(binding, start_s, end_s))
-    return bindings, boundaries
+    return bindings

@@ -43,6 +43,5 @@ boundary_reactions:
 surface_reactions: []
 rate_models: {}
 cross_sections: []
-experimental: {}
 provenance:
   fixture: canonical-minimal

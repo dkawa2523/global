@@ -12,7 +12,7 @@ import numpy as np
 from plasma_global.errors import ModelDomainError
 from plasma_global.models._surface_kernels import _coverage_multiplier, _Kernel
 
-_EMPTY_RATES: Mapping[str, float] = MappingProxyType({})
+_EMPTY_RATES: Mapping[tuple[str, str], float] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,7 +20,7 @@ class _SurfaceRuntimeResult:
     gas_derivative_m3_s: np.ndarray
     coverage_derivative_s_inv: np.ndarray
     gas_heating_J_m3_s: np.ndarray
-    rates_m2_s: Mapping[str, float]
+    rates_m2_s: Mapping[tuple[str, str], float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,13 +237,13 @@ class _SurfaceRuntime:
         gas_rhs = np.zeros_like(gas)
         coverage_rhs = np.zeros_like(coverage)
         gas_heating = np.zeros(self.zone_count, dtype=float)
-        rates: dict[str, float] | None = {} if collect_rates else None
+        rates: dict[tuple[str, str], float] | None = {} if collect_rates else None
         for kernel in self.kernels:
             rate = self._evaluate_kernel(
                 kernel, reactive_state, free_coverages, context
             )
             if rates is not None:
-                rates[kernel.rate_id] = rate
+                rates[kernel.event_key] = rate
             self._accumulate_kernel(kernel, rate, gas_rhs, coverage_rhs, gas_heating)
         return _SurfaceRuntimeResult(
             gas_rhs,

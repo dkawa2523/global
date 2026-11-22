@@ -35,27 +35,17 @@ def _validate_wall_energy_arrays(
 
 
 @dataclass(frozen=True, slots=True)
-class HeavyEnergyClosure:
-    """Convert between mixture temperature and internal energy density."""
+class HeavyParticleThermodynamics:
+    """Constant species heat capacities and the ideal-mixture energy law."""
 
     cv_over_kb: np.ndarray
-    wall_temperature_K: np.ndarray
-    wall_relaxation_s_inv: np.ndarray
 
     def __post_init__(self) -> None:
         cv = np.asarray(self.cv_over_kb, dtype=float)
-        wall_temperature = np.asarray(self.wall_temperature_K, dtype=float)
-        relaxation = np.asarray(self.wall_relaxation_s_inv, dtype=float)
         _validate_heat_capacities(cv)
-        _validate_wall_energy_arrays(wall_temperature, relaxation)
-        for name, array in (
-            ("cv_over_kb", cv),
-            ("wall_temperature_K", wall_temperature),
-            ("wall_relaxation_s_inv", relaxation),
-        ):
-            frozen = np.array(array, copy=True)
-            frozen.setflags(write=False)
-            object.__setattr__(self, name, frozen)
+        frozen = np.array(cv, copy=True)
+        frozen.setflags(write=False)
+        object.__setattr__(self, "cv_over_kb", frozen)
 
     def heat_capacity_J_m3_K(self, densities_m3: np.ndarray) -> np.ndarray:
         densities = np.asarray(densities_m3, dtype=float)
@@ -89,12 +79,100 @@ class HeavyEnergyClosure:
             )
         if np.any(capacity <= 0.0):
             raise ModelDomainError("gas temperature is undefined for an empty mixture")
-        return energy / capacity
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            return energy / capacity
 
-    def wall_exchange_J_m3_s(
+    def enthalpy_J_m3(
         self, densities_m3: np.ndarray, energy_J_m3: np.ndarray
     ) -> np.ndarray:
-        equilibrium = self.energy_J_m3(densities_m3, self.wall_temperature_K)
+        """Return U+p, the energy carried by an ideal-mixture volume flow."""
+
+        density = np.asarray(densities_m3, dtype=float)
+        if np.any(density < 0.0):
+            raise ModelDomainError(
+                "heavy-particle enthalpy requires nonnegative densities"
+            )
+        self.heat_capacity_J_m3_K(density)
+        capacity_over_kb = density @ self.cv_over_kb
+        if np.any(capacity_over_kb <= 0.0):
+            raise ModelDomainError(
+                "heavy-particle enthalpy is undefined for an empty mixture"
+            )
+        energy = np.asarray(energy_J_m3, dtype=float)
+        return energy + energy * np.sum(density, axis=1) / capacity_over_kb
+
+    def species_enthalpy_J(self, temperature_K: float) -> np.ndarray:
+        if not math.isfinite(temperature_K) or temperature_K <= 0.0:
+            raise ModelDomainError("inlet gas temperature must be finite and positive")
+        return BOLTZMANN_J_K * temperature_K * (self.cv_over_kb + 1.0)
+
+    def internal_energy_source_J_m3_s(
+        self, species_rhs_m3_s: np.ndarray, temperature_K: np.ndarray
+    ) -> np.ndarray:
+        """Energy carried by species entering or leaving at mixture temperature."""
+
+        return BOLTZMANN_J_K * temperature_K * (species_rhs_m3_s @ self.cv_over_kb)
+
+
+@dataclass(frozen=True, slots=True)
+class HeavyEnergyClosure:
+    """Evolved gas energy with a mixture EOS and wall relaxation law."""
+
+    thermodynamics: HeavyParticleThermodynamics
+    wall_temperature_K: np.ndarray
+    wall_relaxation_s_inv: np.ndarray
+
+    def __post_init__(self) -> None:
+        wall = np.asarray(self.wall_temperature_K, dtype=float)
+        relaxation = np.asarray(self.wall_relaxation_s_inv, dtype=float)
+        _validate_wall_energy_arrays(wall, relaxation)
+        for name, array in (
+            ("wall_temperature_K", wall),
+            ("wall_relaxation_s_inv", relaxation),
+        ):
+            frozen = np.array(array, copy=True)
+            frozen.setflags(write=False)
+            object.__setattr__(self, name, frozen)
+
+    @property
+    def cv_over_kb(self) -> np.ndarray:
+        return self.thermodynamics.cv_over_kb
+
+    def heat_capacity_J_m3_K(self, densities_m3: np.ndarray) -> np.ndarray:
+        return self.thermodynamics.heat_capacity_J_m3_K(densities_m3)
+
+    def energy_J_m3(
+        self, densities_m3: np.ndarray, temperature_K: np.ndarray
+    ) -> np.ndarray:
+        return self.thermodynamics.energy_J_m3(densities_m3, temperature_K)
+
+    def temperature_K(
+        self, densities_m3: np.ndarray, energy_J_m3: np.ndarray
+    ) -> np.ndarray:
+        return self.thermodynamics.temperature_K(densities_m3, energy_J_m3)
+
+    def validate_energy(
+        self, densities_m3: np.ndarray, energy_J_m3: np.ndarray
+    ) -> None:
+        temperature = self.temperature_K(densities_m3, energy_J_m3)
+        if np.any(np.asarray(energy_J_m3) <= 0.0):
+            raise ModelDomainError("gas internal energy is nonpositive")
+        if not np.all(np.isfinite(temperature)) or np.any(temperature <= 0.0):
+            raise ModelDomainError("gas temperature is not finite and positive")
+
+    def wall_exchange_J_m3_s(
+        self,
+        densities_m3: np.ndarray,
+        energy_J_m3: np.ndarray,
+        *,
+        wall_temperature_K: np.ndarray | None = None,
+    ) -> np.ndarray:
+        wall = (
+            self.wall_temperature_K
+            if wall_temperature_K is None
+            else wall_temperature_K
+        )
+        equilibrium = self.energy_J_m3(densities_m3, wall)
         return -self.wall_relaxation_s_inv * (np.asarray(energy_J_m3) - equilibrium)
 
 
@@ -139,5 +217,6 @@ def elastic_electron_heating_J_m3_s(
 __all__ = [
     "BOLTZMANN_J_K",
     "HeavyEnergyClosure",
+    "HeavyParticleThermodynamics",
     "elastic_electron_heating_J_m3_s",
 ]

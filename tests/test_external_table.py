@@ -52,7 +52,7 @@ def test_load_external_table_preserves_numeric_array_contract(tmp_path: Path) ->
             values[0] = 0.0
 
 
-def test_voltage_current_schema_derives_power_and_defaults_optional_columns(
+def test_voltage_current_table_keeps_source_columns_until_they_are_bound(
     tmp_path: Path,
 ) -> None:
     path = _write_table(
@@ -62,7 +62,7 @@ def test_voltage_current_schema_derives_power_and_defaults_optional_columns(
 
     table = load_external_table(path)
 
-    np.testing.assert_array_equal(table.electron_power_W, [6.0, 20.0])
+    assert table.electron_power_W is None
     np.testing.assert_array_equal(table.gas_power_W, [0.0, 0.0])
     assert table.reduced_field_Td is None
     np.testing.assert_array_equal(table.voltage_V, [-2.0, 4.0])
@@ -76,6 +76,10 @@ def test_voltage_current_schema_derives_power_and_defaults_optional_columns(
         (
             "time_s,electron_power_W,absorbed_power_W\n0,1,1\n1,2,2\n",
             "has ambiguous power columns",
+        ),
+        (
+            "time_s,voltage_V,plasma_voltage_V,current_A\n0,1,1,1\n1,2,2,2\n",
+            "has ambiguous voltage columns",
         ),
         (
             "time_s,voltage_V\n0,1\n1,2\n",

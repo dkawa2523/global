@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from plasma_global._identifiers import validate_identifier
 from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.walls import (
     CompiledWallBoundary,
@@ -102,6 +103,11 @@ def compile_wall_boundary_data(
 ) -> CompiledWallBoundary:
     """Resolve one wall's species indices and reaction branches."""
 
+    try:
+        for species_id in species_ids:
+            validate_identifier(species_id)
+    except ValueError as exc:
+        raise ModelConfigurationError(f"wall species identifier: {exc}") from exc
     charge_values = np.asarray(charges, dtype=float)
     mass_values = np.asarray(masses_kg, dtype=float)
     expected = (len(species_ids),)

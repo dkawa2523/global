@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: argon-rtol-1e-6
   description: 低圧Arの許容差収束。rtol=1e-06、保存間隔10 μs。装置精度の検証には用いない。

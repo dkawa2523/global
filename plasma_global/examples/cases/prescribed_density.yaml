@@ -1,0 +1,121 @@
+schema_version: 5
+case:
+  name: prescribed_density
+  description: 合成した電子密度時系列を入力し、電子係数・DC回路・励起応答を計算する小例。電子密度は外部指定で、電荷残差は自己無撞着解との違いを示す。測定データではない。
+chemistry:
+  species:
+  - id: e
+    charge: -1
+    mass_amu: 0.00054858
+    state_tags:
+    - electron
+  - id: Ar
+    mass_amu: 39.948
+    elements:
+      Ar: 1
+  - id: Ar_plus
+    charge: 1
+    mass_amu: 39.948
+    elements:
+      Ar: 1
+  - id: Ar_star
+    mass_amu: 39.948
+    elements:
+      Ar: 1
+  gas_reactions:
+  - id: excite
+    equation: e + Ar -> e + Ar_star
+    rate:
+      kind: electron_table
+      rate_id: ar_excitation
+    electron_energy_transfer_eV: -11.55
+reactor:
+  zones:
+    plasma:
+      volume_m3: 0.01
+      initial:
+        pressure_Pa: 13.3
+        gas_temperature_K: 300.0
+        mole_fractions:
+          Ar: 1.0
+        seed_densities_m3:
+          Ar_plus: 2.0e16
+  power_ports:
+    drive:
+      zone_id: plasma
+      model:
+        kind: dc_series
+        gap_m: 0.004
+        ballast_resistance_ohm: 1000.0
+        electrode_area_m2: 0.0001
+run:
+  steps:
+  - label: powered
+    duration_s: 5.0e-08
+    commands:
+      power_ports:
+        drive:
+          source_voltage_V: 36.31927549349394
+  - label: 'off'
+    duration_s: 5.0e-08
+    commands:
+      power_ports:
+        drive:
+          source_voltage_V: 0.0
+models:
+  electrons:
+    kind: local_field
+    coefficients:
+      file: ../data/swarm_argon_dc/electrons.csv
+      provenance:
+        source_repository: https://github.com/dkawa2523/swarm
+        source_case: examples/two_term.yaml
+        source_revision: 27ada94
+        export_from_working_tree: true
+        source_manifest_sha256: 0198c8ba8507db6c4d2eb2002cc13c29ed4a3301f3609c227c9d3b1b3effac56
+        cross_sections: examples/cross_sections/argon_minimal.csv
+        cross_sections_sha256: 57b431d67788dbe09a0f6ee7c549e337195eee3705f7bf9a1f593faf0210f63d
+        solver: two_term
+        fields_Td:
+        - 40
+        - 50
+        - 60
+        gas_temperature_K: 300.0
+        pressure_Pa: 13.3
+        mole_fractions:
+          Ar: 1.0
+        rate_id: ar_excitation
+        process: Ar excitation lumped 11.55 eV
+        target: Ar
+        coefficient_basis: lumped_event
+        mobility: flux_drift_over_field
+  electron_density:
+    kind: experimental.prescribed_profile
+    file: ../data/prescribed_density/density.csv
+    zone_columns:
+      plasma: ne_m3
+    interpolation: linear
+    bounds: error
+solver:
+  sample_interval_s: 1.0e-08
+  rtol: 1.0e-08
+output:
+  probes:
+    circuit:
+      power_port: drive
+      quantities:
+      - reduced_field_Td
+      - current_A
+      - plasma_voltage_V
+      - electron_power_W
+  observables:
+  - electron_density_m3[plasma]
+  - mean_energy_eV[plasma]
+  - gas_temperature_K[plasma]
+  - gas_reaction_rate_m3_s[plasma,excite]
+  summary_series:
+  - probe[circuit,reduced_field_Td]
+  - probe[circuit,current_A]
+  - n[plasma,Ar_star]
+  - charge_residual_m3[plasma]
+  csv: true

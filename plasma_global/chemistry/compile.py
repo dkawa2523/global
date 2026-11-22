@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from plasma_global._input_sources import InputSourceStore
 from plasma_global.chemistry._compile_validation import (
     validate_gas_rate_dimensions,
     validate_non_gas_reactions,
@@ -29,8 +30,12 @@ from plasma_global.chemistry._rate_evaluators import (
 )
 from plasma_global.chemistry._rate_evaluators import EV_TO_K as EV_TO_K
 from plasma_global.chemistry._rate_evaluators import (
-    compile_rate_evaluator,
     load_rate_table,
+)
+from plasma_global.chemistry._rate_models import (
+    compile_rate_evaluator,
+    rate_dependency,
+    validate_rate_model,
 )
 from plasma_global.chemistry.data import (
     ChemistryData,
@@ -71,12 +76,6 @@ def _readonly_bool(values: np.ndarray) -> np.ndarray:
     return result
 
 
-def _legacy_energy_loss_view(chemistry: CompiledChemistry) -> np.ndarray:
-    """Expose the historic nonnegative loss array without mutable storage."""
-
-    return _readonly(np.maximum(-chemistry.electron_energy_transfer_eV, 0.0))
-
-
 @dataclass(frozen=True, slots=True)
 class CompiledBoundaryReaction:
     id: str
@@ -109,8 +108,6 @@ class CompiledChemistry:
     cross_sections: Mapping[str, CrossSectionData]
     provenance: Mapping[str, Any]
 
-    energy_loss_eV = property(_legacy_energy_loss_view)
-
 
 @dataclass(frozen=True, slots=True)
 class _CompiledGasReactions:
@@ -123,12 +120,14 @@ class _CompiledGasReactions:
 
 
 def _rate_evaluator(
-    model: RateModelData, cross_sections: Mapping[str, CrossSectionData]
+    model: RateModelData,
+    cross_sections: Mapping[str, CrossSectionData],
+    sources: InputSourceStore | None,
 ) -> tuple[RateEvaluator, float | None]:
     evaluator, transfer = compile_rate_evaluator(
         model,
         cross_sections,
-        table_loader=load_rate_table,
+        table_loader=lambda path: load_rate_table(path, sources=sources),
     )
     return evaluator, transfer
 
@@ -189,26 +188,13 @@ def _compile_boundary(
 
 
 def _explicit_reaction_electron_transfer(reaction: ReactionData) -> float | None:
-    legacy_loss = reaction.energy_loss_eV
     signed_transfer = reaction.electron_energy_transfer_eV
-    if legacy_loss is not None and signed_transfer is not None:
-        raise ChemistryError(
-            f"reaction {reaction.id!r} must define at most one of "
-            "energy_loss_eV or electron_energy_transfer_eV"
-        )
     if signed_transfer is not None:
         if not math.isfinite(signed_transfer):
             raise ChemistryError(
                 f"reaction {reaction.id!r} electron_energy_transfer_eV must be finite"
             )
         return signed_transfer
-    if legacy_loss is not None:
-        if not math.isfinite(legacy_loss) or legacy_loss < 0.0:
-            raise ChemistryError(
-                f"reaction {reaction.id!r} energy_loss_eV must be finite and "
-                "nonnegative"
-            )
-        return -legacy_loss
     return None
 
 
@@ -216,7 +202,7 @@ def _reaction_electron_energy_transfer(
     reaction: ReactionData,
     default_transfer_eV: float | None,
 ) -> float:
-    """Resolve positive electron gain while retaining legacy positive loss."""
+    """Resolve signed electron energy deposited per reaction event."""
 
     explicit_transfer = _explicit_reaction_electron_transfer(reaction)
     transfer = explicit_transfer
@@ -243,6 +229,7 @@ def _compile_gas_reactions(
     data: ChemistryData,
     species_by_id: Mapping[str, SpeciesData],
     gas_species: tuple[SpeciesData, ...],
+    sources: InputSourceStore | None,
 ) -> _CompiledGasReactions:
     gas_ids = tuple(item.id for item in gas_species)
     gas_index = {species_id: index for index, species_id in enumerate(gas_ids)}
@@ -262,7 +249,7 @@ def _compile_gas_reactions(
     ):
         compiled_rate = evaluator_by_model_id.get(rate_model.id)
         if compiled_rate is None:
-            compiled_rate = _rate_evaluator(rate_model, data.cross_sections)
+            compiled_rate = _rate_evaluator(rate_model, data.cross_sections, sources)
             evaluator_by_model_id[rate_model.id] = compiled_rate
         evaluator, default_transfer = compiled_rate
         evaluators.append(evaluator)
@@ -324,29 +311,18 @@ def _compile_jacobian_species_pattern(
     charged = np.asarray([item.charge != 0 for item in gas_species], dtype=bool)
     for row, reaction in enumerate(data.gas_reactions):
         model = data.rate_models[str(reaction.rate_model)]
-        if electron_orders[row] != 0.0 or model.kind in {
-            "electron_impact",
-            "electron_table",
-            "experimental.electron_temperature_power_law",
-        }:
+        dependency = rate_dependency(model)
+        if electron_orders[row] != 0.0 or dependency == "electron":
             dependencies[row, charged] = True
-        if model.kind == "arrhenius":
+        if dependency == "gas":
             dependencies[row, :] = True
-        if model.kind == "tabulated_1d":
-            axis = str(model.parameters["axis"])
-            if axis in {"pressure_Pa", "gas_temperature_K"}:
-                dependencies[row, :] = True
-            elif axis in {
-                "mean_energy_eV",
-                "electron_temperature_eV",
-                "reduced_field_Td",
-            }:
-                dependencies[row, charged] = True
     changed = stoichiometry != 0.0
     return changed.T @ dependencies
 
 
-def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
+def compile_chemistry(
+    data: ChemistryData, *, sources: InputSourceStore | None = None
+) -> CompiledChemistry:
     """Validate conservation and compile all gas reactions once."""
 
     validate_unique_ids([item.id for item in data.species], "species")
@@ -356,8 +332,10 @@ def compile_chemistry(data: ChemistryData) -> CompiledChemistry:
         *data.surface_reactions,
     ]
     validate_unique_ids([item.id for item in all_reactions], "reaction")
+    for model in data.rate_models.values():
+        validate_rate_model(model)
     species_by_id, gas_species = validate_species(data)
-    gas = _compile_gas_reactions(data, species_by_id, gas_species)
+    gas = _compile_gas_reactions(data, species_by_id, gas_species, sources)
     validate_non_gas_reactions(data, species_by_id)
     element_names, element_matrix = _compile_element_matrix(gas_species)
     jacobian_species_pattern = _compile_jacobian_species_pattern(

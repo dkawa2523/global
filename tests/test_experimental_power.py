@@ -8,10 +8,16 @@ from plasma_global.experimental.power import (
     CCPPowerPort,
     ICPPowerPort,
     RFEnvelopePort,
-    SquarePulse,
 )
+from plasma_global.input._compile_recipe_power import (
+    parse_step_power_commands,
+    power_step_boundaries,
+    resolved_step_power_commands,
+)
+from plasma_global.input.schema import PowerDefinition, RunStep
 from plasma_global.models.power import (
     CompiledPowerCommand,
+    PowerCoordinator,
     PowerState,
 )
 
@@ -32,17 +38,79 @@ def test_rf_envelope_is_finite_conservative_and_obeys_square_pulse() -> None:
         role="bias",
         coupling_efficiency=0.65,
         reduced_field_per_sqrt_W_Td=3.0,
-        pulse=SquarePulse(repetition_Hz=1.0e3, duty_cycle=0.5),
     )
-    command = CompiledPowerCommand(kind="power", power_W=100.0)
-    on = port.evaluate(0.0, _state(), command)
-    off = port.evaluate(0.75e-3, _state(), command)
+    ports = {
+        "lf": PowerDefinition.model_validate(
+            {"zone_id": "plasma", "model": {"kind": "experimental.rf_envelope"}}
+        )
+    }
+    step = RunStep.model_validate(
+        {
+            "duration_s": 1e-3,
+            "commands": {
+                "power_ports": {
+                    "lf": {
+                        "absorbed_power_W": 100.0,
+                        "waveform": {
+                            "kind": "square_pulse",
+                            "repetition_Hz": 1e3,
+                            "duty_cycle": 0.5,
+                        },
+                    }
+                }
+            },
+        }
+    )
+    parsed = parse_step_power_commands(step, ports)
+    assert power_step_boundaries(parsed, {}, 0.0, 1e-3, run_start_s=0.0) == {0.5e-3}
+    on_commands = resolved_step_power_commands(
+        parsed, ports, {}, 0.25e-3, run_start_s=0.0, step_start_s=0.0, step_id="pulse"
+    )
+    off_commands = resolved_step_power_commands(
+        parsed, ports, {}, 0.75e-3, run_start_s=0.0, step_start_s=0.0, step_id="pulse"
+    )
+    coordinator = PowerCoordinator((port,), ("plasma",))
+    state = _state()
+
+    def evaluate(time_s, commands):
+        return coordinator.evaluate(
+            time_s=time_s,
+            commands=commands,
+            electron_density_m3_by_zone={"plasma": state.electron_density_m3},
+            neutral_density_m3_by_zone={"plasma": state.neutral_density_m3},
+            mean_energy_eV_by_zone={"plasma": 1.5 * state.electron_temperature_eV},
+        ).port_results["lf"]
+
+    on = evaluate(0.25e-3, on_commands)
+    off = evaluate(0.75e-3, off_commands)
 
     assert 0.0 <= on.electron_power_W <= on.observables["delivered_power_W"]
     assert on.observables["self_bias_V"] < 0.0
     assert np.isfinite([on.electron_power_W, *on.observables.values()]).all()
     assert off.electron_power_W == 0.0
     assert off.reduced_field_Td == 0.0
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        CompiledPowerCommand(kind="power", power_W=0.0),
+        CompiledPowerCommand(kind="voltage", voltage_V=0.0),
+    ],
+)
+def test_rf_zero_drive_disables_calibrated_field_and_potential(command) -> None:
+    port = RFEnvelopePort(
+        port_id="source",
+        zone_id="plasma",
+        frequency_Hz=13.56e6,
+        base_reduced_field_Td=25.0,
+        plasma_potential_offset_V=7.0,
+    )
+    result = port.evaluate(0.0, _state(), command)
+
+    assert result.electron_power_W == 0.0
+    assert result.reduced_field_Td == 0.0
+    assert result.observables["plasma_potential_V"] == 0.0
 
 
 def test_rf_power_command_is_absorbed_power_not_delivered_power() -> None:
@@ -104,10 +172,6 @@ def test_ccp_power_and_ion_energy_increase_with_voltage() -> None:
     assert (
         high.observables["estimated_mean_ion_energy_eV"]
         > low.observables["estimated_mean_ion_energy_eV"]
-    )
-    assert (
-        high.observables["mean_ion_energy_eV"]
-        == high.observables["estimated_mean_ion_energy_eV"]
     )
     assert high.observables["self_bias_V"] < 0.0
     assert high.electron_power_W <= high.observables["delivered_power_W"]
@@ -216,9 +280,10 @@ def test_ccp_zero_command_has_a_cold_zero_electron_boundary() -> None:
     )
     assert zero.electron_power_W == 0.0
     assert zero.reduced_field_Td == 0.0
-    assert zero.observables["estimated_mean_ion_energy_eV"] == 0.0
-    assert zero.observables["plasma_potential_V"] == 0.0
-    assert zero.observables["ion_flux_m2_s"] == 0.0
+    assert zero.observables["rf_voltage_rms_V"] == 0.0
+    assert zero.observables["rf_current_rms_A"] == 0.0
+    assert "estimated_mean_ion_energy_eV" not in zero.observables
+    assert "powered_sheath_thickness_m" not in zero.observables
 
 
 def test_icp_coupling_trend_and_zone_split_conserve_absorbed_power() -> None:
@@ -231,7 +296,9 @@ def test_icp_coupling_trend_and_zone_split_conserve_absorbed_power() -> None:
     command = CompiledPowerCommand(kind="power", power_W=300.0)
     low_density = port.evaluate(0.0, _state(1.0e15), command)
     high_density = port.evaluate(0.0, _state(3.0e17), command)
-    distribution = port.power_by_zone(high_density)
+    distribution = {
+        item.zone_id: item.electron_power_W for item in high_density.contributions
+    }
 
     assert (
         high_density.observables["coupling_efficiency"]
@@ -262,6 +329,7 @@ def test_icp_has_continuous_zero_density_and_zero_power_limits() -> None:
         _state(),
         CompiledPowerCommand(kind="power", power_W=1.0e-12),
     )
+    off = port.evaluate(0.0, _state(), CompiledPowerCommand(kind="power", power_W=0.0))
 
     assert vacuum.electron_power_W == 0.0
     assert vacuum.reduced_field_Td == 0.0
@@ -269,6 +337,9 @@ def test_icp_has_continuous_zero_density_and_zero_power_limits() -> None:
     assert weak.electron_power_W < 1.0e-12
     assert weak.reduced_field_Td < 1.0e-9
     assert weak.observables["plasma_potential_V"] < 1.0e-9
+    assert off.electron_power_W == 0.0
+    assert off.observables["frequency_Hz"] == port.frequency_Hz
+    assert "coupling_efficiency" not in off.observables
 
 
 def test_icp_absorbed_power_is_continuous_across_the_e_h_transition() -> None:

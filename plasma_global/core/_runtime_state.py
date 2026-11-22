@@ -13,7 +13,11 @@ from plasma_global.core._runtime_assembly import (
 )
 from plasma_global.core.domain import RecipeSegment, Zone
 from plasma_global.errors import ModelConfigurationError, StateDomainError
-from plasma_global.models.electrons import ElectronState, resolved_electron_density
+from plasma_global.models.electrons import (
+    ElectronEnergyClosure,
+    ElectronState,
+    resolved_electron_density,
+)
 
 if TYPE_CHECKING:
     from plasma_global.core.compiled import CompiledGlobalModel
@@ -206,10 +210,13 @@ class RuntimeStatePreparer:
         closure_energy = max(energy, 0.0)
         if electron_density == 0.0 and closure_energy <= 10.0 * energy_atol:
             closure_energy = 0.0
-        electron_state = self.model.electron_closure.evaluate(
+        closure = self.model.electron_closure
+        if not isinstance(closure, ElectronEnergyClosure):
+            raise ModelConfigurationError("Electron-energy state requires its closure")
+        electron_state = closure.evaluate(
             net_heavy_charge_density_m3=net_charge,
             energy_density_J_m3=closure_energy,
-            reduced_field_Td=segment.reduced_field_Td_by_zone.get(zone.zone_id),
+            reduced_field_Td=None,
             electron_density_m3=electron_density,
         )
         return energy, closure_energy, electron_state

@@ -21,6 +21,9 @@ def build_summary(result: SimulationResult) -> dict[str, Any]:
 
     metadata = to_plain_mapping(result.metadata)
     final_names = metadata.get("summary_series", ())
+    reached = float(result.time_s[-1]) if result.n_times else None
+    boundaries = metadata.get("run_step_boundaries_s", ())
+    requested = metadata.get("requested_end_s", boundaries[-1] if boundaries else None)
     return {
         "format": RESULT_FORMAT,
         "format_version": RESULT_FORMAT_VERSION,
@@ -32,7 +35,10 @@ def build_summary(result: SimulationResult) -> dict[str, Any]:
         "time": {
             "count": result.n_times,
             "start_s": float(result.time_s[0]) if result.n_times else None,
-            "end_s": float(result.time_s[-1]) if result.n_times else None,
+            "end_s": reached,
+            "requested_end_s": requested,
+            "reached_end_s": metadata.get("reached_end_s", reached),
+            "failure_time_s": metadata.get("failure_time_s"),
         },
         "model_ids": plain_value(metadata.get("model_ids", {})),
         "final": {name: result.final_value(name) for name in final_names},

@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: argon_maxwellian
   description: Standard single-zone Ar example with absorbed power and afterglow.

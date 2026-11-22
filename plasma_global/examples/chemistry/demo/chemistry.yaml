@@ -223,7 +223,7 @@ species:
     display_name: source:F*
 gas_reactions:
 - id: G0000
-  energy_loss_eV: 15.8
+  electron_energy_transfer_eV: -15.8
   gas_heating_eV: 0.0
   zones:
   - source
@@ -234,7 +234,7 @@ gas_reactions:
   equation: e + Ar -> Ar_plus + 2 e
   rate: RM_E_AR_ION
 - id: G0001
-  energy_loss_eV: 12.5
+  electron_energy_transfer_eV: -12.5
   gas_heating_eV: 0.0
   zones:
   - source
@@ -245,7 +245,7 @@ gas_reactions:
   equation: e + CF4 -> CF3 + F + e
   rate: RM_E_CF4_DISS
 - id: G0002
-  energy_loss_eV: 6.0
+  electron_energy_transfer_eV: -6.0
   gas_heating_eV: 0.0
   zones:
   - source
@@ -256,7 +256,7 @@ gas_reactions:
   equation: e + O2 -> 2 O + e
   rate: RM_E_O2_DISS
 - id: G0003
-  energy_loss_eV: 4.5
+  electron_energy_transfer_eV: -4.5
   gas_heating_eV: 0.0
   zones:
   - source
@@ -418,14 +418,14 @@ rate_models:
     activation_eV: 0.25
   RM_S_F_LH_RECOMB:
     kind: langmuir_hinshelwood
-    A_m2_s_inv: 5000.0
+    A_m2_s: 5000.0
     activation_eV: 0.05
 cross_sections:
 - id: xs_ar_mt
   kind: momentum_transfer
   target: Ar
   threshold_eV: 0.0
-  energy_loss_eV: 0.0
+  electron_energy_transfer_eV: 0.0
   metadata:
     demo_data: true
     note: synthetic demo table for reader testing
@@ -434,7 +434,7 @@ cross_sections:
   kind: momentum_transfer
   target: CF4
   threshold_eV: 0.0
-  energy_loss_eV: 0.0
+  electron_energy_transfer_eV: 0.0
   metadata:
     demo_data: true
     note: synthetic demo table for reader testing
@@ -443,7 +443,7 @@ cross_sections:
   kind: momentum_transfer
   target: O2
   threshold_eV: 0.0
-  energy_loss_eV: 0.0
+  electron_energy_transfer_eV: 0.0
   metadata:
     demo_data: true
     note: synthetic demo table for reader testing
@@ -452,7 +452,7 @@ cross_sections:
   kind: ionization
   target: Ar
   threshold_eV: 15.76
-  energy_loss_eV: 15.76
+  electron_energy_transfer_eV: -15.76
   metadata:
     demo_data: true
     note: synthetic demo table for reader testing
@@ -461,7 +461,7 @@ cross_sections:
   kind: dissociation
   target: CF4
   threshold_eV: 12.5
-  energy_loss_eV: 12.5
+  electron_energy_transfer_eV: -12.5
   metadata:
     demo_data: true
     note: synthetic demo table for reader testing
@@ -470,7 +470,7 @@ cross_sections:
   kind: dissociation
   target: O2
   threshold_eV: 6.0
-  energy_loss_eV: 6.0
+  electron_energy_transfer_eV: -6.0
   metadata:
     demo_data: true
     note: synthetic demo table for reader testing
@@ -479,9 +479,8 @@ cross_sections:
   kind: attachment
   target: O2
   threshold_eV: 4.5
-  energy_loss_eV: 4.5
+  electron_energy_transfer_eV: -4.5
   metadata:
     demo_data: true
     note: synthetic demo table for reader testing
   file: cross_sections.csv
-experimental: {}

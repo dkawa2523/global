@@ -7,8 +7,6 @@ from dataclasses import asdict, dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from plasma_global.core.result import to_plain_mapping
-
 
 @dataclass(frozen=True, slots=True)
 class AuditIssue:
@@ -67,48 +65,13 @@ class AuditReport:
 
 @dataclass(frozen=True, slots=True)
 class CaseAssessment:
-    """Supported feature envelope and actionable compile-time warnings."""
+    """Model assumptions and actionable compile-time warnings."""
 
-    classification: str
+    assumptions: tuple[str, ...] = ()
     issues: tuple[AuditIssue, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "classification": self.classification,
+            "assumptions": list(self.assumptions),
             "issues": [asdict(issue) for issue in self.issues],
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class CaseAuditReport:
-    """Case assessment, provenance, and completed simulation information."""
-
-    assessment: CaseAssessment
-    model_ids: Mapping[str, Any]
-    provenance: Mapping[str, Any]
-    inventory: Mapping[str, int]
-    simulation: Mapping[str, Any]
-
-    @property
-    def issues(self) -> tuple[AuditIssue, ...]:
-        return self.assessment.issues
-
-    @property
-    def classification(self) -> str:
-        return self.assessment.classification
-
-    @property
-    def passed(self) -> bool:
-        return bool(self.simulation["status"]["success"]) and not any(
-            issue.level == "ERROR" for issue in self.issues
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "passed": self.passed,
-            **self.assessment.to_dict(),
-            "model_ids": to_plain_mapping(self.model_ids),
-            "provenance": to_plain_mapping(self.provenance),
-            "inventory": dict(self.inventory),
-            "simulation": to_plain_mapping(self.simulation),
         }

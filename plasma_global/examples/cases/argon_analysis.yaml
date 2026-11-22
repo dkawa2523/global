@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: argon_analysis
   description: Standard Ar with named region probes, composition plots and Graphviz

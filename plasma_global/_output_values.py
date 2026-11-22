@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import cast
+
 import numpy as np
 
 from plasma_global.core.compiled import CompiledGlobalModel, ModelEvaluation
 from plasma_global.core.domain import RecipeSegment
+from plasma_global.models._power_coupling import (
+    command_field_capability,
+    off_observables,
+)
+from plasma_global.models.power import (
+    CompiledPowerCommand,
+    PowerPort,
+)
 from plasma_global.models.walls import WallBoundary
 
 BOLTZMANN_J_K = 1.380649e-23
@@ -22,41 +33,44 @@ LEDGER_QUANTITIES = {
     "transport_heavy_power_W_m3": "transport_heavy_energy_J_m3_s",
     "inlet_heavy_power_W_m3": "inlet_heavy_energy_J_m3_s",
     "wall_heavy_power_W_m3": "wall_heavy_energy_exchange_J_m3_s",
+    "wall_species_power_W_m3": "wall_species_energy_J_m3_s",
+    "surface_species_power_W_m3": "surface_species_energy_J_m3_s",
 }
 
-PORT_UNITS = {
+_PORT_UNITS = {
     "electron_power_W": "W",
     "gas_power_W": "W",
-    "absorbed_power_W": "W",
-    "source_voltage_V": "V",
-    "plasma_voltage_V": "V",
-    "voltage_rms_V": "V",
-    "current_A": "A",
-    "current_rms_A": "A",
-    "dc_self_bias_V": "V",
-    "delivered_power_W": "W",
-    "source_power_W": "W",
-    "commanded_power_W": "W",
-    "apparent_power_VA": "VA",
-    "reduced_field_Td": "Td",
-    "ion_energy_eV": "eV",
-    "plasma_potential_V": "V",
-    "self_bias_V": "V",
-    "frequency_Hz": "Hz",
-    "rf_voltage_rms_V": "V",
-    "rf_current_rms_A": "A",
-    "coil_voltage_rms_V": "V",
-    "coil_current_rms_A": "A",
-    "downstream_power_W": "W",
-    "reflected_power_W": "W",
-    "coupling_efficiency": "1",
-    "bulk_resistance_ohm": "ohm",
-    "sheath_reactance_ohm": "ohm",
-    "powered_sheath_thickness_m": "m",
-    "grounded_sheath_thickness_m": "m",
-    "powered_ion_energy_eV": "eV",
-    "grounded_ion_energy_eV": "eV",
 }
+
+
+def port_series_units(
+    model: CompiledGlobalModel, segment: RecipeSegment
+) -> dict[str, str]:
+    if model.power_coordinator is None:
+        return {}
+    units: dict[str, str] = {}
+    for port in model.power_coordinator.ports:
+        identity = str(port.port_id)
+        command = segment.port_commands.get(identity)
+        scalars = dict(_PORT_UNITS)
+        if command_field_capability(port, command):
+            scalars["reduced_field_Td"] = "Td"
+        scalars.update(_model_port_units(port, command))
+        units.update(
+            {f"port_{name}[{identity}]": unit for name, unit in scalars.items()}
+        )
+    return units
+
+
+def _model_port_units(
+    port: PowerPort, command: CompiledPowerCommand | None
+) -> Mapping[str, str]:
+    units = cast(Mapping[str, str], getattr(port, "observable_units", {}))
+    if command is not None and command.kind == "off":
+        return {name: units[name] for name in off_observables(port) if name in units}
+    if command is not None and command.external_table is not None:
+        return command.external_table.observable_units
+    return units
 
 
 def zone_values(
@@ -212,10 +226,6 @@ def port_values(evaluated: ModelEvaluation) -> dict[str, float]:
         if port.reduced_field_Td is not None:
             scalars["reduced_field_Td"] = port.reduced_field_Td
         values.update(
-            {
-                f"port_{name}[{identity}]": value
-                for name, value in scalars.items()
-                if name in PORT_UNITS
-            }
+            {f"port_{name}[{identity}]": value for name, value in scalars.items()}
         )
     return values

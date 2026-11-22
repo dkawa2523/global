@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: argon-pressure-minus10
   description: 低圧Arの局所感度。初期圧力を基準の0.9倍に変更し、他の入力を固定する。

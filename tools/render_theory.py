@@ -185,7 +185,9 @@ class TheoryRenderer:
         ]
         columns = len(rows[0])
         widths = _column_widths(columns, self.width)
-        table = self.flow.Table(rows, colWidths=widths, repeatRows=1, hAlign="LEFT")
+        table = self.flow.Table(
+            rows, colWidths=widths, repeatRows=1, hAlign="LEFT", splitByRow=0
+        )
         table.setStyle(
             self.flow.TableStyle(
                 [
@@ -201,7 +203,7 @@ class TheoryRenderer:
             )
         )
         table.spaceBefore, table.spaceAfter = 6, 12
-        return self.flow.KeepTogether([table])
+        return table
 
     def figure(self, node: Any, source: Path) -> Any:
         path = (source.parent / str(node.get("src"))).resolve()

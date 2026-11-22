@@ -6,7 +6,12 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from plasma_global.input._schema_base import Identifier, NonNegativeFloat, StrictModel
+from plasma_global.input._schema_base import (
+    Identifier,
+    NonemptyText,
+    NonNegativeFloat,
+    StrictModel,
+)
 
 ArtifactName = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")]
 
@@ -36,7 +41,7 @@ class ProbeConfig(StrictModel):
 
 class PlotConfig(StrictModel):
     kind: Literal["series", "composition"] = "series"
-    series: list[Identifier] = Field(default_factory=list)
+    series: list[NonemptyText] = Field(default_factory=list)
     zone: Identifier | None = None
     species: list[Identifier] | Literal["all"] = "all"
     quantity: Literal["number_density_m3", "mole_fraction"] = "number_density_m3"
@@ -108,7 +113,6 @@ class OutputConfig(StrictModel):
     plots: dict[ArtifactName, PlotConfig] = Field(default_factory=dict)
     networks: dict[ArtifactName, NetworkConfig] = Field(default_factory=dict)
     csv: bool = False
-    units: dict[Identifier, Identifier] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def valid_series_selection(self) -> Self:

@@ -5,7 +5,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from _model_fixtures import constant_field_port, constant_mean_energy_table
 
+from plasma_global import case_from_mapping, load_case, simulate, write_result
 from plasma_global.chemistry.compile import compile_chemistry
 from plasma_global.chemistry.data import (
     ChemistryData,
@@ -15,6 +17,7 @@ from plasma_global.chemistry.data import (
 )
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
+from plasma_global.core.result import series_unit
 from plasma_global.core.solver import solve_compiled_model
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
 from plasma_global.models.elastic import compile_elastic_heating
@@ -22,10 +25,15 @@ from plasma_global.models.electrons import (
     ELEMENTARY_CHARGE_C,
     ElectronEnergyClosure,
     LocalFieldClosure,
-    TabulatedMeanEnergy,
 )
-from plasma_global.models.gas_energy import BOLTZMANN_J_K, HeavyEnergyClosure
+from plasma_global.models.gas_energy import (
+    BOLTZMANN_J_K,
+    HeavyEnergyClosure,
+    HeavyParticleThermodynamics,
+)
+from plasma_global.models.power import PowerCoordinator
 from plasma_global.models.walls import BoundaryReaction, WallBoundary
+from plasma_global.output import read_result_h5
 
 
 @dataclass(frozen=True)
@@ -38,7 +46,7 @@ class ChemistryFixture:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[object, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
     element_names: tuple[str, ...] = ()
@@ -68,7 +76,7 @@ def _inert_pair() -> ChemistryFixture:
         reactant_orders=np.zeros((0, 2)),
         electron_orders=np.zeros(0),
         rate_evaluators=(),
-        energy_loss_eV=np.zeros(0),
+        electron_energy_transfer_eV=np.zeros(0),
         gas_heating_eV=np.zeros(0),
         reaction_zones=(),
     )
@@ -90,7 +98,7 @@ def test_closed_system_element_and_charge_drift_are_below_1e_8() -> None:
         reactant_orders=np.array([[0.0, 1.0, 1.0, 0.0]]),
         electron_orders=np.array([0.0]),
         rate_evaluators=(1.0e-18,),
-        energy_loss_eV=np.array([0.0]),
+        electron_energy_transfer_eV=np.array([0.0]),
         gas_heating_eV=np.zeros(1),
         reaction_zones=((),),
         element_names=("X", "Y"),
@@ -140,7 +148,6 @@ def test_cstr_matches_constant_inlet_and_pump_analytic_solution_to_1e_6() -> Non
         "cstr",
         0.0,
         2.0,
-        reduced_field_Td_by_zone={"cstr": 1.0},
         transport=SegmentTransport(
             particle_source_m3_s=np.array([[particle_source, 0.0]]),
             inlet_heavy_energy_J_m3_s=np.zeros(1),
@@ -150,7 +157,11 @@ def test_cstr_matches_constant_inlet_and_pump_analytic_solution_to_1e_6() -> Non
         chemistry=_inert_pair(),
         zones=(Zone("cstr", 1.0),),
         segments=(segment,),
-        electron_closure=LocalFieldClosure(TabulatedMeanEnergy((1.0, 2.0), (3.0, 3.0))),
+        electron_closure=LocalFieldClosure(),
+        electron_kinetics_by_zone={"cstr": constant_mean_energy_table(3.0)},
+        power_coordinator=PowerCoordinator(
+            (constant_field_port("cstr", 1.0),), ("cstr",)
+        ),
         transport=transport,
     )
     initial_density = 2.0
@@ -177,7 +188,7 @@ def test_adiabatic_monatomic_filling_uses_inlet_enthalpy() -> None:
     particle_source = 1.0e20
     duration_s = 0.5
     closure = HeavyEnergyClosure(
-        cv_over_kb=np.array([cv_over_kb, cv_over_kb]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([cv_over_kb, cv_over_kb])),
         wall_temperature_K=np.array([initial_temperature_K]),
         wall_relaxation_s_inv=np.zeros(1),
     )
@@ -188,13 +199,12 @@ def test_adiabatic_monatomic_filling_uses_inlet_enthalpy() -> None:
         edge_to=np.array([], dtype=int),
         edge_conductance_m3_s=np.array([]),
         n_species=2,
-        heavy_cv_over_kb=closure.cv_over_kb,
+        thermodynamics=closure.thermodynamics,
     )
     segment = RecipeSegment(
         "fill",
         0.0,
         duration_s,
-        reduced_field_Td_by_zone={"vessel": 1.0},
         transport=SegmentTransport(
             particle_source_m3_s=np.array([[particle_source, 0.0]]),
             inlet_heavy_energy_J_m3_s=np.array(
@@ -211,7 +221,11 @@ def test_adiabatic_monatomic_filling_uses_inlet_enthalpy() -> None:
         chemistry=_inert_pair(),
         zones=(Zone("vessel", 1.0),),
         segments=(segment,),
-        electron_closure=LocalFieldClosure(TabulatedMeanEnergy((1.0, 2.0), (3.0, 3.0))),
+        electron_closure=LocalFieldClosure(),
+        electron_kinetics_by_zone={"vessel": constant_mean_energy_table(3.0)},
+        power_coordinator=PowerCoordinator(
+            (constant_field_port("vessel", 1.0),), ("vessel",)
+        ),
         transport=transport,
         heavy_energy_closure=closure,
     )
@@ -248,7 +262,6 @@ def test_bohm_wall_loss_matches_exponential_decay_to_1e_5() -> None:
         "bohm",
         0.0,
         1.0,
-        reduced_field_Td_by_zone={"plasma": 1.0},
     )
     wall = WallBoundary(
         zone_id="plasma",
@@ -260,8 +273,12 @@ def test_bohm_wall_loss_matches_exponential_decay_to_1e_5() -> None:
         chemistry=_inert_pair(),
         zones=(Zone("plasma", 1.0),),
         segments=(segment,),
-        electron_closure=LocalFieldClosure(
-            TabulatedMeanEnergy((1.0, 2.0), (mean_energy_eV, mean_energy_eV))
+        electron_closure=LocalFieldClosure(),
+        electron_kinetics_by_zone={
+            "plasma": constant_mean_energy_table(mean_energy_eV)
+        },
+        power_coordinator=PowerCoordinator(
+            (constant_field_port("plasma", 1.0),), ("plasma",)
         ),
         wall_boundaries=(wall,),
     )
@@ -359,7 +376,7 @@ def test_solver_tolerance_halving_stays_within_acceptance_limits() -> None:
         reactant_orders=np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]]),
         electron_orders=np.zeros(2),
         rate_evaluators=(k1, k2),
-        energy_loss_eV=np.zeros(2),
+        electron_energy_transfer_eV=np.zeros(2),
         gas_heating_eV=np.zeros(2),
         reaction_zones=((), ()),
     )
@@ -411,3 +428,100 @@ def test_solver_tolerance_halving_stays_within_acceptance_limits() -> None:
     assert np.max(relative_change) <= 0.01
     assert abs(coarse_peak_time - fine_peak_time) / fine_peak_time <= 0.02
     assert abs(fine_peak_time - analytic_peak_time) / analytic_peak_time <= 0.02
+
+
+def test_public_gas_heating_flow_matches_temperature_analytic_and_hdf(
+    tmp_path: Path,
+) -> None:
+    path = (
+        Path(__file__).parents[1] / "plasma_global/examples/cases/gas_heating_flow.yaml"
+    )
+    source = load_case(path)
+    final_states = []
+    total_density = 2.0e20 + 1.0e12
+    decay = 5.0 / 3.0 * 0.1 + 2.0
+    equilibrium = (
+        (5.0 / 3.0 * 0.1) * 400.0
+        + 2.0 * 350.0
+        + 0.01 / (0.01 * 1.5 * BOLTZMANN_J_K * total_density)
+    ) / decay
+    for index, interval in enumerate((1.0e-3, 4.0e-4)):
+        document = source.to_dict()
+        document["solver"]["sample_interval_s"] = interval
+        case = case_from_mapping(document, base_directory=source.base_directory)
+        result = simulate(case)
+        paths = write_result(result, tmp_path / f"gas-{index}")
+        assert paths.artifacts.success
+        assert paths.result_csv is not None
+        assert paths.result_csv.is_file()
+        restored = read_result_h5(paths.result_h5)
+        assert restored.status.success
+        assert restored.time_s[-1] == 0.02
+        np.testing.assert_array_equal(restored.state, result.state)
+        expected = equilibrium + (300.0 - equilibrium) * np.exp(
+            -decay * restored.time_s
+        )
+        np.testing.assert_allclose(
+            restored.series("gas_temperature_K[plasma]"), expected, rtol=1.0e-7
+        )
+        np.testing.assert_allclose(
+            restored.series("n[plasma,Ar]") + restored.series("n[plasma,Ar_plus]"),
+            total_density,
+            rtol=1.0e-9,
+        )
+        assert np.all(restored.state >= 0.0)
+        assert (
+            series_unit("gas_temperature_K[plasma]", restored.metadata["series_units"])
+            == "K"
+        )
+        final_states.append(restored.state[-1])
+    np.testing.assert_allclose(final_states[0], final_states[1], rtol=1.0e-10)
+
+
+def test_public_surface_inventory_conserves_atoms_and_film_conversion(
+    tmp_path: Path,
+) -> None:
+    path = (
+        Path(__file__).parents[1]
+        / "plasma_global/examples/cases/surface_inventory.yaml"
+    )
+    source = load_case(path)
+    final_states = []
+    site_particles = 1.0e19 * 0.01
+    for index, interval in enumerate((5.0e-5, 2.0e-5)):
+        document = source.to_dict()
+        document["solver"]["sample_interval_s"] = interval
+        document["output"]["observables"] = ["coverage[wall,site]"]
+        result = simulate(
+            case_from_mapping(document, base_directory=source.base_directory)
+        )
+        paths = write_result(result, tmp_path / f"surface-{index}")
+        assert paths.artifacts.success
+        assert paths.result_csv is not None
+        assert paths.result_csv.is_file()
+        restored = read_result_h5(paths.result_h5)
+        assert restored.status.success
+        assert restored.time_s[-1] == 0.001
+        np.testing.assert_array_equal(restored.state, result.state)
+        gas = (
+            restored.series("n[plasma,Ar]") + restored.series("n[plasma,Ar_plus]")
+        ) * 0.01
+        adsorbed = restored.series("coverage[wall,Ar_ads]") * site_particles
+        deposited = restored.series("inventory[wall,deposited_Ar]")
+        total = gas + adsorbed + deposited
+        np.testing.assert_allclose(total, total[0], rtol=1.0e-10)
+        film_particles = restored.series("film[wall]") / 3.0e-10 * site_particles
+        np.testing.assert_allclose(film_particles, deposited, rtol=1.0e-10)
+        free = restored.series("coverage[wall,site]")
+        assert np.all((free >= 0.0) & (free <= 1.0))
+        assert np.all(restored.state >= 0.0)
+        assert deposited[-1] > 0.0
+        assert series_unit("film[wall]", restored.metadata["series_units"]) == "m"
+        assert (
+            series_unit(
+                "inventory[wall,deposited_Ar]", restored.metadata["series_units"]
+            )
+            == "1"
+        )
+        final_states.append(restored.state[-1])
+    np.testing.assert_allclose(final_states[0], final_states[1], rtol=1.0e-10)

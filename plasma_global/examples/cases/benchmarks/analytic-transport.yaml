@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: analytic-transport
   description: 異なる2容積間の一方向移送。解析解と体積積分した粒子数を比較する。

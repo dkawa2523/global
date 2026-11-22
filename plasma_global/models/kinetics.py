@@ -11,6 +11,7 @@ from types import MappingProxyType
 
 import numpy as np
 
+from plasma_global._input_sources import InputSourceStore
 from plasma_global._numeric_csv import read_numeric_csv
 from plasma_global.errors import CaseValidationError, ModelDomainError
 from plasma_global.models._kinetics_table import (
@@ -198,10 +199,13 @@ class TabulatedElectronKinetics:
         mobility_reference_neutral_density_m3: float | None = None,
         require_mobility: bool = False,
         columns: Mapping[str, str] | None = None,
+        sources: InputSourceStore | None = None,
     ) -> TabulatedElectronKinetics:
         source = Path(path).resolve()
         validate_table_modes(lookup, bounds)
-        values = read_numeric_csv(source, columns=columns)
+        values = read_numeric_csv(
+            source, columns=columns, sources=sources, role="electron_kinetics_table"
+        )
         axis, mean, field = _csv_coordinates(source, values, lookup)
         mobility, reduced, reference = _csv_mobility(
             values, mobility_reference_neutral_density_m3
@@ -269,7 +273,7 @@ class TabulatedElectronKinetics:
             density
         )
 
-    def _query(self, value: float) -> float:
+    def query_value(self, value: float) -> float:
         query = value
         if not math.isfinite(query):
             raise ModelDomainError("electron table lookup value must be finite")
@@ -294,7 +298,7 @@ class TabulatedElectronKinetics:
             raise ModelDomainError(
                 f"{self.lookup} electron table lookup value is required"
             )
-        query = self._query(supplied)
+        query = self.query_value(supplied)
 
         def interpolate(values: np.ndarray) -> float:
             return float(np.interp(query, self.axis, values))
@@ -332,13 +336,17 @@ class TabulatedElectronKinetics:
             rate_coefficients=dict.fromkeys(self.rate_tables, 0.0),
         )
 
-    def mean_energy_from_field(self, reduced_field_Td: float) -> float:
+    def evaluate_local_field(
+        self, reduced_field_Td: float, *, neutral_density_m3: float
+    ) -> ElectronKineticsResult:
+        """Use the explicit 0 Td row when present, otherwise the cold closure."""
         if self.lookup != "local_field":
-            raise ModelDomainError(
-                "mean_energy_from_field requires a local_field table"
-            )
-        query = self._query(reduced_field_Td)
-        return float(np.interp(query, self.axis, self.mean_energy_eV))
+            raise ModelDomainError("local-field evaluation requires an E/N table")
+        if reduced_field_Td == 0.0 and self.axis[0] > 0.0:
+            return self.zero_field_result(neutral_density_m3=neutral_density_m3)
+        return self.evaluate(
+            reduced_field_Td=reduced_field_Td, neutral_density_m3=neutral_density_m3
+        )
 
 
 __all__ = ["ElectronKineticsResult", "TabulatedElectronKinetics"]

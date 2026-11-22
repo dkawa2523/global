@@ -13,43 +13,25 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from plasma_global.chemistry._contracts import (
+    chemistry_identifier,
+    validate_rate_identifiers,
+    validate_species_record,
+)
 from plasma_global.errors import ChemistryError
+
+if TYPE_CHECKING:
+    from plasma_global._input_sources import InputSourceStore
 
 AMU_TO_KG = 1.66053906660e-27
 
 
 def _empty_metadata() -> Mapping[str, Any]:
     return MappingProxyType({})
-
-
-def _resolved_reaction_electron_energy_transfer(
-    reaction: ReactionData,
-) -> float | None:
-    """Return signed electron gain, migrating legacy positive loss to a sink."""
-
-    if reaction.electron_energy_transfer_eV is not None:
-        return reaction.electron_energy_transfer_eV
-    if reaction.energy_loss_eV is None:
-        return None
-    return -reaction.energy_loss_eV
-
-
-def _resolved_cross_section_electron_energy_transfer(
-    cross_section: CrossSectionData,
-) -> float:
-    """Return signed electron gain, migrating legacy positive loss to a sink."""
-
-    if cross_section.electron_energy_transfer_eV is not None:
-        return cross_section.electron_energy_transfer_eV
-    if cross_section.energy_loss_eV is None:
-        raise ChemistryError(
-            f"cross section {cross_section.id!r} has no electron-energy transfer"
-        )
-    return -cross_section.energy_loss_eV
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +46,13 @@ class SpeciesData:
     cv_over_kb: float | None = None
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
+    def __post_init__(self) -> None:
+        validate_species_record(self)
+        object.__setattr__(self, "elements", MappingProxyType(dict(self.elements)))
+        object.__setattr__(self, "state_tags", frozenset(self.state_tags))
+        object.__setattr__(self, "surfaces", tuple(self.surfaces))
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
     @property
     def mass_kg(self) -> float:
         return self.mass_amu * AMU_TO_KG
@@ -75,16 +64,28 @@ class ReactionData:
     reactants: Mapping[str, float]
     products: Mapping[str, float]
     rate_model: str | None
-    energy_loss_eV: float | None
+    electron_energy_transfer_eV: float | None
     gas_heating_eV: float = 0.0
     zones: tuple[str, ...] = ()
     surfaces: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
-    electron_energy_transfer_eV: float | None = None
 
-    resolved_electron_energy_transfer_eV = property(
-        _resolved_reaction_electron_energy_transfer
-    )
+    def __post_init__(self) -> None:
+        label = f"reaction {self.id!r}"
+        chemistry_identifier(self.id, f"{label}.id")
+        for name, values in (
+            ("reactants", self.reactants),
+            ("products", self.products),
+        ):
+            for species in values:
+                chemistry_identifier(species, f"{label}.{name}")
+            object.__setattr__(self, name, MappingProxyType(dict(values)))
+        if self.rate_model is not None:
+            chemistry_identifier(self.rate_model, f"{label}.rate_model")
+        for name, values in (("zones", self.zones), ("surfaces", self.surfaces)):
+            for identifier in values:
+                chemistry_identifier(identifier, f"{label}.{name}")
+            object.__setattr__(self, name, tuple(values))
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +94,16 @@ class RateModelData:
     kind: str
     parameters: Mapping[str, Any]
 
+    def __post_init__(self) -> None:
+        label = f"rate model {self.id!r}"
+        chemistry_identifier(self.id, f"{label}.id")
+        validate_rate_identifiers(self.parameters, label)
+        parameters = dict(self.parameters)
+        coverage = parameters.get("coverage")
+        if isinstance(coverage, Mapping):
+            parameters["coverage"] = MappingProxyType(dict(coverage))
+        object.__setattr__(self, "parameters", MappingProxyType(parameters))
+
 
 @dataclass(frozen=True, slots=True)
 class CrossSectionData:
@@ -100,15 +111,14 @@ class CrossSectionData:
     kind: str
     target: str
     threshold_eV: float
-    energy_loss_eV: float | None
+    electron_energy_transfer_eV: float
     energy_eV: np.ndarray
     sigma_m2: np.ndarray
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
-    electron_energy_transfer_eV: float | None = None
 
-    resolved_electron_energy_transfer_eV = property(
-        _resolved_cross_section_electron_energy_transfer
-    )
+    def __post_init__(self) -> None:
+        chemistry_identifier(self.id, "cross section id")
+        chemistry_identifier(self.target, f"cross section {self.id!r}.target")
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,15 +130,25 @@ class ChemistryData:
     surface_reactions: tuple[ReactionData, ...]
     rate_models: Mapping[str, RateModelData]
     cross_sections: Mapping[str, CrossSectionData]
-    experimental: Mapping[str, Any] = field(default_factory=_empty_metadata)
     provenance: Mapping[str, Any] = field(default_factory=_empty_metadata)
     source_files: tuple[Path, ...] = ()
+
+    def __post_init__(self) -> None:
+        for name, records in (
+            ("rate_models", self.rate_models),
+            ("cross_sections", self.cross_sections),
+        ):
+            for identifier in records:
+                chemistry_identifier(identifier, f"chemistry.{name} key")
+            object.__setattr__(self, name, MappingProxyType(dict(records)))
 
 
 _TERM = re.compile(r"^\s*(?:(\d+(?:\.\d+)?)\s+)?([^\s].*?)\s*$")
 
 
-def parse_equation(equation: str) -> tuple[Mapping[str, float], Mapping[str, float]]:
+def parse_equation(
+    equation: str, *, allow_wall_absorption: bool = False
+) -> tuple[Mapping[str, float], Mapping[str, float]]:
     """Parse one irreversible equation without aliases or implicit species."""
 
     if equation.count("->") != 1:
@@ -151,20 +171,27 @@ def parse_equation(equation: str) -> tuple[Mapping[str, float], Mapping[str, flo
         return MappingProxyType(values)
 
     lhs, rhs = equation.split("->")
-    reactants, products = side(lhs), side(rhs)
+    reactants = side(lhs)
     if not reactants:
         raise ChemistryError(f"reaction has no reactants: {equation!r}")
+    if allow_wall_absorption and rhs.strip() == "0":
+        return reactants, MappingProxyType({})
+    products = side(rhs)
+    if allow_wall_absorption and not products:
+        raise ChemistryError(f"write '-> 0' for wall absorption: {equation!r}")
     return reactants, products
 
 
-def load_chemistry(path: str | Path) -> ChemistryData:
+def load_chemistry(
+    path: str | Path, *, sources: InputSourceStore | None = None
+) -> ChemistryData:
     """Load a schema-v4 chemistry definition and its referenced SI data."""
 
     # The private loader imports these public data classes.  Deferring this
     # implementation import keeps the dependency one-way at module load time.
     from plasma_global.chemistry._data_manifest import load_chemistry as load
 
-    return load(path)
+    return load(path, sources=sources)
 
 
 __all__ = [

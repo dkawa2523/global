@@ -23,7 +23,11 @@ from plasma_global.errors import (
 )
 from plasma_global.experimental.power import CCPPowerPort
 from plasma_global.models.electrons import ElectronEnergyClosure, ElectronState
-from plasma_global.models.gas_energy import BOLTZMANN_J_K, HeavyEnergyClosure
+from plasma_global.models.gas_energy import (
+    BOLTZMANN_J_K,
+    HeavyEnergyClosure,
+    HeavyParticleThermodynamics,
+)
 from plasma_global.models.power import (
     CompiledPowerCommand,
     PowerCoordinator,
@@ -32,7 +36,6 @@ from plasma_global.models.power import (
 from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
 from plasma_global.models.walls import (
     BoundaryReaction,
-    CompiledWallBoundary,
     WallBoundary,
     WallEvaluation,
     compile_wall_boundary,
@@ -41,19 +44,6 @@ from plasma_global.models.walls import (
 
 E_CHARGE = 1.602176634e-19
 ELECTRON_MASS_KG = 9.1093837139e-31
-
-
-def test_compiled_wall_boundary_keeps_legacy_positional_constructor() -> None:
-    compiled = CompiledWallBoundary(
-        WallBoundary("z", 1.0),
-        np.array([1]),
-        np.array([1.0]),
-        np.array([6.6e-26]),
-        ((),),
-        True,
-    )
-
-    assert compiled.neutral_indices.size == 0
 
 
 def _evaluate_compiled_wall(
@@ -91,7 +81,7 @@ class ChemistryFixture:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[object, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
     gas_heating_eV: np.ndarray
 
@@ -113,7 +103,7 @@ def inert_chemistry() -> ChemistryFixture:
         reactant_orders=np.zeros((0, 2)),
         electron_orders=np.zeros(0),
         rate_evaluators=(),
-        energy_loss_eV=np.zeros(0),
+        electron_energy_transfer_eV=np.zeros(0),
         reaction_zones=(),
         gas_heating_eV=np.zeros(0),
     )
@@ -134,16 +124,23 @@ def initial_state(
     )
 
 
-def test_evolved_gas_internal_energy_matches_wall_relaxation_analytic() -> None:
+@pytest.mark.parametrize("wall_temperature_K", [300.0, 450.0])
+def test_evolved_gas_internal_energy_matches_wall_relaxation_analytic(
+    wall_temperature_K: float,
+) -> None:
     closure = HeavyEnergyClosure(
-        cv_over_kb=np.array([1.5, 1.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([1.5, 1.5])),
         wall_temperature_K=np.array([300.0]),
         wall_relaxation_s_inv=np.array([2.0]),
     )
     model = CompiledGlobalModel(
         chemistry=inert_chemistry(),
         zones=(Zone("z", 1.0, 300.0),),
-        segments=(RecipeSegment("cool", 0.0, 0.5),),
+        segments=(
+            RecipeSegment(
+                "cool", 0.0, 0.5, wall_temperature_K_by_zone={"z": wall_temperature_K}
+            ),
+        ),
         electron_closure=ElectronEnergyClosure(),
         heavy_energy_closure=closure,
     )
@@ -158,9 +155,9 @@ def test_evolved_gas_internal_energy_matches_wall_relaxation_analytic() -> None:
     )
     evaluated = model.evaluate(0.0, state0, model.segments[0])
     initial_energy = state0[model.layout.heavy_energy_indices["z"]]
-    equilibrium = closure.energy_J_m3(np.array([[1.0e20, 1.0e15]]), np.array([300.0]))[
-        0
-    ]
+    equilibrium = closure.energy_J_m3(
+        np.array([[1.0e20, 1.0e15]]), np.array([wall_temperature_K])
+    )[0]
     assert evaluated.derivative[
         model.layout.heavy_energy_indices["z"]
     ] == pytest.approx(-2.0 * (initial_energy - equilibrium))
@@ -182,7 +179,7 @@ def test_evolved_gas_internal_energy_matches_wall_relaxation_analytic() -> None:
 
 def test_evolved_gas_rejects_mismatched_transport_heat_capacities() -> None:
     closure = HeavyEnergyClosure(
-        cv_over_kb=np.array([1.5, 1.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([1.5, 1.5])),
         wall_temperature_K=np.array([300.0]),
         wall_relaxation_s_inv=np.zeros(1),
     )
@@ -193,7 +190,7 @@ def test_evolved_gas_rejects_mismatched_transport_heat_capacities() -> None:
         edge_to=np.array([], dtype=int),
         edge_conductance_m3_s=np.array([]),
         n_species=2,
-        heavy_cv_over_kb=np.array([2.5, 2.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([2.5, 2.5])),
     )
 
     with pytest.raises(ModelConfigurationError, match="heat capacities to match"):
@@ -217,12 +214,12 @@ def test_heavy_energy_ledger_composes_power_reaction_flow_and_elastic_terms() ->
         reactant_orders=np.array([[1.0, 0.0, 0.0]]),
         electron_orders=np.array([0.0]),
         rate_evaluators=(2.0,),
-        energy_loss_eV=np.array([0.0]),
+        electron_energy_transfer_eV=np.array([0.0]),
         gas_heating_eV=np.array([0.5]),
         reaction_zones=((),),
     )
     closure = HeavyEnergyClosure(
-        cv_over_kb=np.array([1.5, 1.5, 1.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([1.5, 1.5, 1.5])),
         wall_temperature_K=np.array([300.0]),
         wall_relaxation_s_inv=np.array([0.0]),
     )
@@ -255,7 +252,7 @@ def test_heavy_energy_ledger_composes_power_reaction_flow_and_elastic_terms() ->
             edge_to=np.zeros(0, dtype=int),
             edge_conductance_m3_s=np.zeros(0),
             n_species=3,
-            heavy_cv_over_kb=closure.cv_over_kb,
+            thermodynamics=closure.thermodynamics,
         ),
         power_coordinator=coordinator,
         heavy_energy_closure=closure,
@@ -313,9 +310,9 @@ def surface_chemistry(
         reaction = ReactionData(
             id="etch",
             reactants={"ion": 1.0, "Ads": 1.0},
-            products={"A": 1.0, "site": 1.0},
+            products={"ion": 1.0, "A": 1.0, "site": 1.0},
             rate_model="ion",
-            energy_loss_eV=None,
+            electron_energy_transfer_eV=None,
             surfaces=("wall",),
         )
         model = RateModelData(
@@ -334,7 +331,7 @@ def surface_chemistry(
             reactants={"A": 1.0, "site": 1.0},
             products={"Ads": 1.0},
             rate_model="stick",
-            energy_loss_eV=None,
+            electron_energy_transfer_eV=None,
             gas_heating_eV=gas_heating_eV,
             surfaces=("wall",),
         )
@@ -380,7 +377,7 @@ def compiled_surface(
 def test_wall_and_surface_particle_fluxes_carry_species_internal_energy() -> None:
     gas_temperature_K = 400.0
     closure = HeavyEnergyClosure(
-        cv_over_kb=np.array([2.5, 1.5]),
+        thermodynamics=HeavyParticleThermodynamics(np.array([2.5, 1.5])),
         wall_temperature_K=np.array([gas_temperature_K]),
         wall_relaxation_s_inv=np.zeros(1),
     )
@@ -415,7 +412,7 @@ def test_wall_and_surface_particle_fluxes_carry_species_internal_energy() -> Non
     density_slice = model.layout.density_slices["z"]
     energy_index = model.layout.heavy_energy_indices["z"]
     incident_rate = ledger.wall_fluxes[0].incident_rate_m3_s
-    surface_rate = ledger.surface_rates_m2_s["stick@wall"]
+    surface_rate = ledger.surface_rates_m2_s["stick", "wall"]
     expected_wall_energy = (
         BOLTZMANN_J_K
         * gas_temperature_K
@@ -459,7 +456,7 @@ def test_surface_sticking_adds_independent_coverage_and_conserves_event_rate() -
     evaluated = model.evaluate(0.0, state, model.segments[0])
 
     coverage_index = model.layout.surface_coverage_indices[("wall", "Ads")]
-    rate = evaluated.ledger_by_zone["z"].surface_rates_m2_s["stick@wall"]
+    rate = evaluated.ledger_by_zone["z"].surface_rates_m2_s["stick", "wall"]
     assert state[coverage_index] == 0.25
     assert np.array_equal(state, original)
     assert evaluated.derivative[
@@ -501,7 +498,7 @@ def test_stiff_surface_adsorption_saturates_without_leaving_site_simplex() -> No
 
     invalid = model.initial_state(initial_state(ads_coverage=0.0))
     invalid[coverage_index] = 1.01
-    with pytest.raises(ModelConfigurationError, match="surface coverage domain"):
+    with pytest.raises(ModelConfigurationError, match="free-site coverage"):
         solve_compiled_model(model, invalid)
 
 
@@ -622,7 +619,7 @@ def test_wall_flux_is_shared_with_ion_assisted_surface_without_double_ion_loss()
     evaluated = model.evaluate(0.0, state, model.segments[0])
     ledger = evaluated.ledger_by_zone["z"]
     record = ledger.wall_fluxes[0]
-    event_rate_m2_s = ledger.surface_rates_m2_s["etch@wall"]
+    event_rate_m2_s = ledger.surface_rates_m2_s["etch", "wall"]
     ion_index = model.layout.density_slices["z"].start + 1
     neutral_index = model.layout.density_slices["z"].start
     incident_rate_m3_s = 1.0e15 * 0.5
@@ -631,10 +628,6 @@ def test_wall_flux_is_shared_with_ion_assisted_surface_without_double_ion_loss()
 
     assert record.surface_id == "wall"
     assert ccp.observables["estimated_mean_ion_energy_eV"] != pytest.approx(10.0)
-    assert (
-        ccp.observables["mean_ion_energy_eV"]
-        == ccp.observables["estimated_mean_ion_energy_eV"]
-    )
     assert record.incident_flux_m2_s == pytest.approx(incident_rate_m3_s / 2.0)
     assert event_rate_m2_s == pytest.approx(record.incident_flux_m2_s * 0.5)
     assert evaluated.derivative[ion_index] == pytest.approx(-incident_rate_m3_s)
@@ -664,6 +657,17 @@ def test_wall_flux_is_shared_with_ion_assisted_surface_without_double_ion_loss()
                 diffusion_length_m=0.4,
             ),
             5.0,
+        ),
+        (
+            WallBoundary(
+                "z",
+                2.0,
+                transport_kind="ambipolar",
+                diffusion_coefficient_m2_s=0.8,
+                diffusion_length_m=0.4,
+                electron_temperature_reference_eV=4.0,
+            ),
+            2.5,
         ),
     ],
 )
@@ -932,3 +936,17 @@ def test_fixed_gas_rejects_an_initial_gas_energy_state() -> None:
     )
     with pytest.raises(ModelConfigurationError, match="Fixed gas energy"):
         model.initial_state(initial_state(gas_temperature_K=300.0))
+
+
+@pytest.mark.parametrize(
+    "identity", ["wall,part", "wall[part]", " wall", "wall ", "wall\x00", "wall\n"]
+)
+def test_wall_component_identifiers_are_rejected_before_evaluation(
+    identity: str,
+) -> None:
+    with pytest.raises(ModelConfigurationError, match="identifier"):
+        WallBoundary("z", 1.0, surface_id=identity)
+    with pytest.raises(ModelConfigurationError, match="identifier"):
+        BoundaryReaction(identity, "ion")
+    with pytest.raises(ModelConfigurationError, match="identifier"):
+        BoundaryReaction("return", "ion", products={identity: 1.0})

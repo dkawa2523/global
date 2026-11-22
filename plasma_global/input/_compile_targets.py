@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from plasma_global.chemistry.data import ChemistryData, ReactionData
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._resolved_case import ResolvedCase
+from plasma_global.input.schema import CaseSpec
 
 
-def validate_chemistry_targets(case: ResolvedCase, chemistry: ChemistryData) -> None:
+def validate_chemistry_targets(case: CaseSpec, chemistry: ChemistryData) -> None:
     """Reject misspelled selectors and empty zone/surface intersections."""
 
-    zones = {zone.zone_id for zone in case.reactor.zones}
+    zones = set(case.reactor.zones)
     surface_zones = {
-        surface.surface_id: surface.zone_id for surface in case.reactor.surfaces
+        surface_id: surface.zone_id
+        for surface_id, surface in case.reactor.surfaces.items()
     }
     families = (
         ("gas", chemistry.gas_reactions),

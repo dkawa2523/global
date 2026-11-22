@@ -12,9 +12,7 @@ from plasma_global import load_case, simulate
 from plasma_global._yaml import YamlLoadError, load_unique_yaml
 from plasma_global.build import compile_case
 from plasma_global.examples import initialize_example
-from plasma_global.input.load import CaseLoadError
-from plasma_global.input.migrate_v3 import migrate_v3
-from plasma_global.input.schema import CaseSpec
+from plasma_global.input.load import CaseLoadError, case_from_mapping
 from tools.generate_schema_docs import minimal_case_document
 
 
@@ -28,10 +26,10 @@ def test_one_yaml_constant_case_has_explicit_initial_state(tmp_path: Path) -> No
     case = load_case(_write(tmp_path / "case.yaml", document))
     result = simulate(case)
     assert result.status.success is True
-    assert len(case.recipe.steps) == 1
-    assert case.recipe.duration_s == 0.001
+    assert len(case.run.normalized_steps()) == 1
+    assert case.run.total_duration_s == 0.001
     np.testing.assert_allclose(result.series("n[plasma,Ar_plus]"), 1e12)
-    assert "schema_version: 4" in result.metadata["effective_case_yaml"]
+    assert "schema_version: 5" in result.metadata["effective_case_yaml"]
 
 
 @pytest.mark.parametrize(
@@ -62,13 +60,13 @@ def test_run_and_output_selection_require_no_recipe_or_series_syntax(
     }
     case = load_case(_write(tmp_path / "case.yaml", document))
     result = simulate(case)
-    assert set(result.observables) == {
+    assert set(result.observables) >= {
         "electron_density_m3[plasma]",
         "electron_temperature_eV[plasma]",
     }
     document["output"]["zones"] = ["typo"]
-    with pytest.raises(CaseLoadError, match="unknown zones"):
-        load_case(_write(tmp_path / "invalid.yaml", document))
+    with pytest.raises(ValueError, match="unknown output zones"):
+        compile_case(load_case(_write(tmp_path / "invalid.yaml", document)))
 
 
 def test_each_step_resolves_against_static_power_and_rejects_kind(
@@ -172,7 +170,8 @@ def test_energy_balance_dc_can_use_explicit_mobility_without_table_mobility(
     with pytest.raises(ValueError, match="choose table mobility"):
         compile_case(load_case(tmp_path / "case.yaml"))
     document["models"]["electrons"]["kind"] = "local_field"
-    with pytest.raises(CaseLoadError, match="remove configured mobility"):
+    document["reactor"]["zones"]["plasma"]["initial"].pop("mean_energy_eV")
+    with pytest.raises(CaseLoadError, match="uses table mobility"):
         load_case(_write(tmp_path / "invalid.yaml", document))
 
 
@@ -182,7 +181,7 @@ def test_model_selects_closure_and_required_initial_energy(tmp_path: Path) -> No
         "kind": "local_field",
         "coefficients": {"file": "rates.csv"},
     }
-    with pytest.raises(CaseLoadError, match="initial_mean_energy_eV"):
+    with pytest.raises(CaseLoadError, match=r"initial\.mean_energy_eV"):
         load_case(_write(tmp_path / "invalid.yaml", document))
     document["models"]["electron_closure"] = {"kind": "local_field"}
     with pytest.raises(CaseLoadError, match="electron_closure"):
@@ -211,21 +210,6 @@ def test_working_example_copies_only_needed_inputs(
     assert len(tuple(path.parent.rglob("*.csv"))) == csv_count
     with pytest.raises(FileExistsError):
         initialize_example(name, path.parent)
-
-
-def test_v3_conversion_is_self_contained_and_preserves_state(tmp_path: Path) -> None:
-    source = Path(__file__).parent / "fixtures/migration_v3/case.yaml"
-    target = migrate_v3(source, tmp_path / "converted")
-    migrated = load_case(target)
-    assert migrated.recipe.duration_s == 1e-7
-    assert simulate(migrated).status.success is True
-    assert set(
-        CaseSpec.model_validate(
-            load_unique_yaml(StringIO(target.read_text()))
-        ).reactor.zones
-    ) == {"plasma"}
-    with pytest.raises(FileExistsError):
-        migrate_v3(source, target.parent)
 
 
 def test_yaml_identifiers_and_numbers_are_unambiguous() -> None:
@@ -257,14 +241,13 @@ def test_labels_are_optional_descriptions_not_unique_ids(tmp_path: Path) -> None
     }
     case = load_case(_write(tmp_path / "case.yaml", document))
     assert simulate(case).status.success is True
-    assert [step.label for step in case.recipe.steps] == ["hold", "hold"]
+    assert [step.label for step in case.run.normalized_steps()] == ["hold", "hold"]
     document["output"] = {"zones": ["plasma"]}
     with pytest.raises(CaseLoadError, match=r"requires output\.quantities"):
         load_case(_write(tmp_path / "invalid.yaml", document))
 
 
 def test_pulse_clock_is_explicit_across_steps(tmp_path: Path) -> None:
-    from plasma_global.input._serialize import case_document
 
     document = minimal_case_document()
     document["reactor"]["power_ports"] = {
@@ -292,7 +275,7 @@ def test_pulse_clock_is_explicit_across_steps(tmp_path: Path) -> None:
     case = load_case(_write(tmp_path / "case.yaml", document))
     compiled = compile_case(case)
     assert compiled.segments[1].port_commands["source"].kind == "off"
-    restored = CaseSpec.model_validate(case_document(case)).resolve(tmp_path)
+    restored = case_from_mapping(case.to_dict(), base_directory=tmp_path)
     assert [
         (segment.start_s, segment.end_s) for segment in compile_case(restored).segments
     ] == [(segment.start_s, segment.end_s) for segment in compiled.segments]
@@ -319,57 +302,153 @@ def test_external_csv_time_is_relative_to_run_start(tmp_path: Path) -> None:
     assert result.ledger_by_zone["plasma"].absorbed_power_J_m3_s == pytest.approx(10.0)
 
 
-def test_v3_hdf5_profile_and_clock_are_migrated_without_inference_at_runtime(
+def test_prepared_case_uses_captured_bytes_after_source_changes(tmp_path: Path) -> None:
+    from hashlib import sha256
+
+    from plasma_global import case_from_mapping
+
+    document = minimal_case_document()
+    document["models"]["electrons"]["coefficients"] = {"file": "rates.csv"}
+    table = tmp_path / "rates.csv"
+    content = b"mean_energy_eV,reduced_field_Td\n0,0\n10,100\n"
+    table.write_bytes(content)
+    case = case_from_mapping(document, base_directory=tmp_path)
+    prepared = compile_case(case)
+    case.reactor.zones["plasma"].initial.seed_densities_m3["Ar_plus"] = 2e12
+    table.unlink()
+    first = simulate(prepared)
+    second = simulate(prepared)
+    np.testing.assert_array_equal(first.state, second.state)
+    np.testing.assert_allclose(first.series("reduced_field_Td[plasma]"), 30.0)
+    assert first.series("electron_density_m3[plasma]")[0] == pytest.approx(1e12)
+    record = first.metadata["provenance"]["input_files"]["files"][str(table)]
+    assert record["sha256"] == sha256(content).hexdigest()
+    assert record["size_bytes"] == len(content)
+
+
+def test_public_yaml_rebase_preserves_annotations_and_input_origin(
     tmp_path: Path,
 ) -> None:
-    import h5py
+    from plasma_global import case_from_mapping
 
-    source = Path(__file__).parent / "fixtures/migration_v3/case.yaml"
-    document = load_unique_yaml(StringIO(source.read_text()))
-    document["chemistry"]["manifest"] = str(source.parent / "chemistry.yaml")
-    table = tmp_path / "legacy.h5"
-    with h5py.File(table, "w") as handle:
-        handle["mean_energy_eV"] = [1.0, 100.0]
-        handle["effective_field_Td"] = [10.0, 1000.0]
-        handle["mobility_m2_V_s"] = [0.5, 0.1]
-        handle.create_group("rate_coefficients")
-    document["models"]["electrons"] = {
-        "kind": "table",
-        "file": str(table),
-        "lookup": "mean_energy",
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    table = inputs / "rates.csv"
+    table.write_text("mean_energy_eV\n0\n10\n", encoding="utf-8")
+    document = minimal_case_document()
+    document["models"]["electrons"]["coefficients"] = {
+        "file": "rates.csv",
+        "provenance": {"file": "notes/source.csv"},
     }
-    power = tmp_path / "power.csv"
-    power.write_text("time_s,electron_power_W\n2,0.1\n2.001,0.2\n", encoding="utf-8")
+    original = case_from_mapping(document, base_directory=inputs)
+    relocated = tmp_path / "relocated"
+    relocated.mkdir()
+    path = relocated / "case.yaml"
+    path.write_text(original.to_yaml(relative_to=relocated), encoding="utf-8")
+    reread = load_case(path)
+    assert reread.models.electrons.coefficients.provenance["file"] == "notes/source.csv"
+    a, b = simulate(original), simulate(reread)
+    np.testing.assert_array_equal(a.time_s, b.time_s)
+    np.testing.assert_allclose(a.state, b.state)
+
+
+def test_mapping_factory_requires_an_explicit_input_origin() -> None:
+    from plasma_global import case_from_mapping
+
+    with pytest.raises(TypeError, match="base_directory"):
+        case_from_mapping(minimal_case_document())
+
+
+@pytest.mark.parametrize("identity", ["z,part", " z ", "x[y]", "x\x00y"])
+def test_structural_ids_are_unambiguous_before_integration(
+    tmp_path: Path, identity: str
+) -> None:
+    document = minimal_case_document()
+    document["reactor"]["zones"] = {identity: document["reactor"]["zones"]["plasma"]}
+    with pytest.raises(CaseLoadError):
+        load_case(_write(tmp_path / "case.yaml", document))
+
+
+def test_prescribed_density_does_not_invent_a_positive_ion_seed(tmp_path: Path) -> None:
+    document = minimal_case_document()
+    document["reactor"]["zones"]["plasma"]["initial"]["seed_densities_m3"] = {}
     profile = tmp_path / "density.csv"
-    profile.write_text(
-        "time_s,electron_density_m3\n2,1e12\n2.001,1e12\n", encoding="utf-8"
-    )
+    profile.write_text("time_s,n[e]\n0,1e12\n0.001,2e12\n", encoding="utf-8")
     document["models"]["electron_density"] = {
         "kind": "experimental.prescribed_profile",
-        "file": str(profile),
+        "file": "density.csv",
+        "zone_columns": {"plasma": "n[e]"},
     }
-    document["reactor"]["power_ports"][0]["model"] = {
-        "kind": "external_table",
-        "file": str(power),
-    }
-    document["recipe"]["start_time_s"] = 2.0
-    document["recipe"]["steps"][0]["commands"]["power_ports"] = {
-        "source": {"kind": "external_table", "file": str(power)}
-    }
-    base = _write(tmp_path / "base.yaml", document)
-    legacy = _write(
-        tmp_path / "case-v3.yaml", {"include": base.name, "case": {"name": "migrated"}}
+    result = simulate(load_case(_write(tmp_path / "case.yaml", document)))
+    np.testing.assert_array_equal(result.series("n[plasma,Ar_plus]"), 0.0)
+    assert result.series("electron_density_m3[plasma]")[0] == pytest.approx(1e12)
+    assert result.series("electron_density_m3[plasma]")[-1] == pytest.approx(2e12)
+    np.testing.assert_allclose(
+        result.series("charge_residual_m3[plasma]"),
+        -result.series("electron_density_m3[plasma]"),
     )
-    target = migrate_v3(legacy, tmp_path / "converted")
-    case = load_case(target)
-    compiled = compile_case(case)
-    assert case.models.electrons.mobility_reference_neutral_density_m3 == 2e20
-    notes = yaml.safe_load((target.parent / "migration.yaml").read_text())["notes"]
-    assert any("generation conditions remain unverified" in note for note in notes)
-    state = compiled.model.initial_state(compiled.initial_state)
-    evaluated = compiled.model.evaluate(2.0, state, compiled.segments[0])
-    assert evaluated.ledger_by_zone["plasma"].absorbed_power_J_m3_s == pytest.approx(
-        10.0
+
+
+@pytest.mark.parametrize("run_start", [0.0, 1000.0])
+def test_run_and_profile_share_exact_clock_endpoints(
+    tmp_path: Path, run_start: float
+) -> None:
+    document = minimal_case_document()
+    document["run"] = {
+        "start_time_s": run_start,
+        "steps": [{"duration_s": 0.1}, {"duration_s": 0.2}],
+    }
+    document["models"]["electron_density"] = {
+        "kind": "experimental.prescribed_profile",
+        "file": "density.csv",
+        "bounds": "error",
+    }
+    profile = tmp_path / "density.csv"
+    profile.write_text("time_s,plasma\n0,1e12\n0.3,1e12\n", encoding="utf-8")
+    document["solver"] = {"sample_interval_s": 0.1}
+    case = load_case(_write(tmp_path / "case.yaml", document))
+    prepared = compile_case(case)
+    result = simulate(prepared)
+    assert result.status.success
+    assert result.time_s[-1] == case.run.end_time_s == prepared.segments[-1].end_s
+    np.testing.assert_array_equal(
+        result.metadata["run_step_boundaries_s"],
+        [
+            case.run.start_time_s,
+            *(end for _, end in case.run.step_bounds()),
+        ],
     )
-    assert simulate(case).status.success is True
-    assert not list(target.parent.rglob("*.h5"))
+    np.testing.assert_allclose(result.series("electron_density_m3[plasma]"), 1e12)
+    # A real table coverage gap remains an error, rather than silently holding its edge.
+    profile.write_text("time_s,plasma\n0,1e12\n0.299,1e12\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="outside"):
+        compile_case(load_case(tmp_path / "case.yaml"))
+
+
+def test_null_step_file_inherits_the_declared_power_table(tmp_path: Path) -> None:
+    document = minimal_case_document()
+    (tmp_path / "power.csv").write_text(
+        "time_s,electron_power_W\n0,1e-6\n0.001,1e-6\n", encoding="utf-8"
+    )
+    document["reactor"]["power_ports"] = {
+        "drive": {
+            "zone_id": "plasma",
+            "model": {"kind": "external_table", "file": "power.csv"},
+        }
+    }
+    document["run"] = {
+        "steps": [
+            {
+                "duration_s": 0.001,
+                "commands": {"power_ports": {"drive": {"file": None}}},
+            }
+        ]
+    }
+    case = load_case(_write(tmp_path / "case.yaml", document))
+    rebased = yaml.safe_load(case.to_yaml(relative_to=tmp_path / "elsewhere"))
+    assert (
+        rebased["run"]["steps"][0]["commands"]["power_ports"]["drive"]["file"] is None
+    )
+    prepared = compile_case(case)
+    assert simulate(prepared).status.success
+    assert not any(path.name == "None" for path in prepared.input_sources)

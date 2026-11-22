@@ -33,7 +33,7 @@ class EventChannel:
         if self.domain == "gas":
             return ledger.reaction_rates_m3_s[self.reaction]
         if self.domain == "surface":
-            return ledger.surface_rates_m2_s[f"{self.reaction}@{self.region}"]
+            return ledger.surface_rates_m2_s[self.reaction, self.region]
         # Boundary branch rates are volume-normalized, not incident fluxes.
         return sum(
             record.branch_rates_m3_s.get(self.reaction, 0.0)

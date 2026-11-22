@@ -1,47 +1,5 @@
 {
   "$defs": {
-    "AbsorbedPower": {
-      "additionalProperties": false,
-      "properties": {
-        "absorbed_power_W": {
-          "anyOf": [
-            {
-              "minimum": 0.0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Absorbed Power W"
-        },
-        "electron_fraction": {
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Electron Fraction",
-          "type": "number"
-        },
-        "gas_fraction": {
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Gas Fraction",
-          "type": "number"
-        },
-        "kind": {
-          "const": "prescribed_power",
-          "title": "Kind",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "electron_fraction",
-        "gas_fraction"
-      ],
-      "title": "AbsorbedPower",
-      "type": "object"
-    },
     "AmbipolarWallTransport": {
       "additionalProperties": false,
       "properties": {
@@ -51,6 +9,11 @@
           "type": "number"
         },
         "diffusion_length_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Diffusion Length M",
+          "type": "number"
+        },
+        "electron_temperature_reference_eV": {
           "anyOf": [
             {
               "exclusiveMinimum": 0.0,
@@ -61,7 +24,7 @@
             }
           ],
           "default": null,
-          "title": "Diffusion Length M"
+          "title": "Electron Temperature Reference Ev"
         },
         "kind": {
           "const": "ambipolar",
@@ -71,39 +34,10 @@
       },
       "required": [
         "kind",
-        "diffusion_coefficient_m2_s"
+        "diffusion_coefficient_m2_s",
+        "diffusion_length_m"
       ],
       "title": "AmbipolarWallTransport",
-      "type": "object"
-    },
-    "ApproximateTwoTermElectronModel": {
-      "additionalProperties": false,
-      "properties": {
-        "cache": {
-          "$ref": "#/$defs/CacheConfig"
-        },
-        "energy_grid": {
-          "$ref": "#/$defs/EnergyGridConfig"
-        },
-        "kind": {
-          "const": "experimental.approximate_two_term",
-          "title": "Kind",
-          "type": "string"
-        },
-        "max_shape_iterations": {
-          "default": 48,
-          "exclusiveMinimum": 0,
-          "title": "Max Shape Iterations",
-          "type": "integer"
-        },
-        "reduced_field_grid": {
-          "$ref": "#/$defs/ReducedFieldGridConfig"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "title": "ApproximateTwoTermElectronModel",
       "type": "object"
     },
     "BohmWallTransport": {
@@ -169,76 +103,6 @@
       "title": "BohmWallTransport",
       "type": "object"
     },
-    "CCPPower": {
-      "additionalProperties": false,
-      "properties": {
-        "absorbed_power_W": {
-          "anyOf": [
-            {
-              "minimum": 0.0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Absorbed Power W"
-        },
-        "control": {
-          "default": "absorbed_power",
-          "enum": [
-            "absorbed_power",
-            "voltage"
-          ],
-          "title": "Control",
-          "type": "string"
-        },
-        "frequency_Hz": {
-          "default": 2000000.0,
-          "exclusiveMinimum": 0.0,
-          "title": "Frequency Hz",
-          "type": "number"
-        },
-        "kind": {
-          "const": "experimental.ccp",
-          "title": "Kind",
-          "type": "string"
-        },
-        "voltage_rms_V": {
-          "anyOf": [
-            {
-              "minimum": 0.0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Voltage Rms V"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "title": "CCPPower",
-      "type": "object"
-    },
-    "CacheConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "max_entries": {
-          "default": 12,
-          "description": "Maximum exact full-target mole-fraction vectors retained.",
-          "exclusiveMinimum": 0,
-          "title": "Max Entries",
-          "type": "integer"
-        }
-      },
-      "title": "CacheConfig",
-      "type": "object"
-    },
     "CaseMetadata": {
       "additionalProperties": false,
       "properties": {
@@ -276,7 +140,7 @@
         "electron_mobility_m2_V_s": {
           "anyOf": [
             {
-              "minimum": 0.0,
+              "exclusiveMinimum": 0.0,
               "type": "number"
             },
             {
@@ -369,10 +233,15 @@
           "type": "number"
         },
         "zone_columns": {
-          "additionalProperties": {
-            "minLength": 1,
-            "pattern": ".*\\S.*",
-            "type": "string"
+          "patternProperties": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
+              "minLength": 1,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            }
+          },
+          "propertyNames": {
+            "minLength": 1
           },
           "title": "Zone Columns",
           "type": "object"
@@ -395,13 +264,13 @@
         },
         "from_zone": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "From Zone",
           "type": "string"
         },
         "to_zone": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "To Zone",
           "type": "string"
         }
@@ -440,31 +309,6 @@
       "title": "EnergyBalanceElectrons",
       "type": "object"
     },
-    "EnergyGridConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "max_eV": {
-          "default": 160.0,
-          "exclusiveMinimum": 0.0,
-          "title": "Max Ev",
-          "type": "number"
-        },
-        "min_eV": {
-          "default": 0.001,
-          "exclusiveMinimum": 0.0,
-          "title": "Min Ev",
-          "type": "number"
-        },
-        "n": {
-          "default": 360,
-          "minimum": 32,
-          "title": "N",
-          "type": "integer"
-        }
-      },
-      "title": "EnergyGridConfig",
-      "type": "object"
-    },
     "EvolvedGasEnergy": {
       "additionalProperties": false,
       "properties": {
@@ -488,20 +332,90 @@
       "title": "EvolvedGasEnergy",
       "type": "object"
     },
-    "ExperimentalConfig": {
+    "ExperimentalCCPModel": {
       "additionalProperties": false,
       "properties": {
-        "extensions": {
+        "absorbed_power_W": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ExperimentalExtensionsConfig"
+              "minimum": 0.0,
+              "type": "number"
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Absorbed Power W"
         },
+        "control": {
+          "default": "absorbed_power",
+          "enum": [
+            "absorbed_power",
+            "voltage"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "dominant_ion": {
+          "minLength": 1,
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
+          "title": "Dominant Ion",
+          "type": "string"
+        },
+        "electrode_gap_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Electrode Gap M",
+          "type": "number"
+        },
+        "frequency_Hz": {
+          "default": 2000000.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "grounded_area_m2": {
+          "exclusiveMinimum": 0.0,
+          "title": "Grounded Area M2",
+          "type": "number"
+        },
+        "kind": {
+          "const": "experimental.ccp",
+          "title": "Kind",
+          "type": "string"
+        },
+        "powered_area_m2": {
+          "exclusiveMinimum": 0.0,
+          "title": "Powered Area M2",
+          "type": "number"
+        },
+        "voltage_rms_V": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voltage Rms V"
+        }
+      },
+      "required": [
+        "kind",
+        "electrode_gap_m",
+        "powered_area_m2",
+        "grounded_area_m2",
+        "dominant_ion"
+      ],
+      "title": "ExperimentalCCPModel",
+      "type": "object"
+    },
+    "ExperimentalConfig": {
+      "additionalProperties": false,
+      "properties": {
         "film": {
           "anyOf": [
             {
@@ -528,13 +442,6 @@
       "title": "ExperimentalConfig",
       "type": "object"
     },
-    "ExperimentalExtensionsConfig": {
-      "additionalProperties": false,
-      "description": "Presence enables experimental chemistry extension state and terms.",
-      "properties": {},
-      "title": "ExperimentalExtensionsConfig",
-      "type": "object"
-    },
     "ExperimentalFilmConfig": {
       "additionalProperties": false,
       "description": "Presence enables chemistry-declared film state.",
@@ -549,12 +456,67 @@
       "title": "ExperimentalFilmConfig",
       "type": "object"
     },
+    "ExperimentalICPModel": {
+      "additionalProperties": false,
+      "properties": {
+        "delivered_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delivered Power W"
+        },
+        "downstream_fraction": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Downstream Fraction",
+          "type": "number"
+        },
+        "downstream_zone_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Downstream Zone Id"
+        },
+        "frequency_Hz": {
+          "default": 13560000.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "kind": {
+          "const": "experimental.icp",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalICPModel",
+      "type": "object"
+    },
     "ExperimentalInventoryEventConfig": {
       "additionalProperties": false,
       "properties": {
         "inventory_particles_per_event": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "type": "number"
             }
           },
@@ -566,13 +528,13 @@
         },
         "reaction_id": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "Reaction Id",
           "type": "string"
         },
         "surface_id": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "Surface Id",
           "type": "string"
         }
@@ -583,6 +545,114 @@
         "inventory_particles_per_event"
       ],
       "title": "ExperimentalInventoryEventConfig",
+      "type": "object"
+    },
+    "ExperimentalRFEnvelopeModel": {
+      "additionalProperties": false,
+      "properties": {
+        "absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Absorbed Power W"
+        },
+        "base_reduced_field_Td": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Base Reduced Field Td",
+          "type": "number"
+        },
+        "control": {
+          "default": "absorbed_power",
+          "enum": [
+            "absorbed_power",
+            "voltage"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "coupling_efficiency": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Coupling Efficiency",
+          "type": "number"
+        },
+        "effective_impedance_ohm": {
+          "default": 50.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Effective Impedance Ohm",
+          "type": "number"
+        },
+        "frequency_Hz": {
+          "default": 13560000.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "kind": {
+          "const": "experimental.rf_envelope",
+          "title": "Kind",
+          "type": "string"
+        },
+        "plasma_potential_offset_V": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Plasma Potential Offset V",
+          "type": "number"
+        },
+        "plasma_potential_per_sqrt_W": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Plasma Potential Per Sqrt W",
+          "type": "number"
+        },
+        "reduced_field_per_sqrt_W_Td": {
+          "default": 0.0,
+          "minimum": 0.0,
+          "title": "Reduced Field Per Sqrt W Td",
+          "type": "number"
+        },
+        "role": {
+          "default": "source",
+          "enum": [
+            "source",
+            "bias"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "self_bias_fraction": {
+          "default": 0.35,
+          "minimum": 0.0,
+          "title": "Self Bias Fraction",
+          "type": "number"
+        },
+        "voltage_rms_V": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voltage Rms V"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ExperimentalRFEnvelopeModel",
       "type": "object"
     },
     "ExperimentalWallInventoryConfig": {
@@ -611,7 +681,7 @@
       "title": "ExperimentalWallInventoryConfig",
       "type": "object"
     },
-    "ExternalPower": {
+    "ExternalTableModel": {
       "additionalProperties": false,
       "properties": {
         "bounds": {
@@ -712,7 +782,7 @@
         "kind",
         "file"
       ],
-      "title": "ExternalPower",
+      "title": "ExternalTableModel",
       "type": "object"
     },
     "FixedGasEnergy": {
@@ -746,40 +816,6 @@
         "flow_sccm"
       ],
       "title": "GasInletCommand",
-      "type": "object"
-    },
-    "ICPPower": {
-      "additionalProperties": false,
-      "properties": {
-        "delivered_power_W": {
-          "anyOf": [
-            {
-              "minimum": 0.0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Delivered Power W"
-        },
-        "frequency_Hz": {
-          "default": 13560000.0,
-          "exclusiveMinimum": 0.0,
-          "title": "Frequency Hz",
-          "type": "number"
-        },
-        "kind": {
-          "const": "experimental.icp",
-          "title": "Kind",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "title": "ICPPower",
       "type": "object"
     },
     "InitialConditions": {
@@ -874,7 +910,7 @@
         },
         "zone_id": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "Zone Id",
           "type": "string"
         }
@@ -890,15 +926,7 @@
       "additionalProperties": false,
       "properties": {
         "coefficients": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TableCoefficients"
-            },
-            {
-              "$ref": "#/$defs/ApproximateTwoTermElectronModel"
-            }
-          ],
-          "title": "Coefficients"
+          "$ref": "#/$defs/TableCoefficients"
         },
         "kind": {
           "const": "local_field",
@@ -1055,7 +1083,7 @@
         "species": {
           "items": {
             "minLength": 1,
-            "pattern": ".*\\S.*",
+            "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
             "type": "string"
           },
           "title": "Species",
@@ -1064,7 +1092,7 @@
         "surfaces": {
           "items": {
             "minLength": 1,
-            "pattern": ".*\\S.*",
+            "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
             "type": "string"
           },
           "title": "Surfaces",
@@ -1086,7 +1114,7 @@
         "zones": {
           "items": {
             "minLength": 1,
-            "pattern": ".*\\S.*",
+            "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
             "type": "string"
           },
           "title": "Zones",
@@ -1153,20 +1181,19 @@
           "title": "Probes",
           "type": "object"
         },
+        "profile": {
+          "default": "basic",
+          "enum": [
+            "basic",
+            "minimal"
+          ],
+          "title": "Profile",
+          "type": "string"
+        },
         "quantities": {
           "items": {
-            "enum": [
-              "electron_density_m3",
-              "electron_temperature_eV",
-              "mean_energy_eV",
-              "gas_temperature_K",
-              "absorbed_power_W",
-              "reduced_field_Td",
-              "charge_residual_m3",
-              "pressure_Pa",
-              "neutral_density_m3",
-              "heavy_density_m3"
-            ],
+            "minLength": 1,
+            "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
             "type": "string"
           },
           "title": "Quantities",
@@ -1184,24 +1211,10 @@
           "title": "Summary Series",
           "type": "array"
         },
-        "units": {
-          "patternProperties": {
-            ".*\\S.*": {
-              "minLength": 1,
-              "pattern": ".*\\S.*",
-              "type": "string"
-            }
-          },
-          "propertyNames": {
-            "minLength": 1
-          },
-          "title": "Units",
-          "type": "object"
-        },
         "zones": {
           "items": {
             "minLength": 1,
-            "pattern": ".*\\S.*",
+            "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
             "type": "string"
           },
           "title": "Zones",
@@ -1262,7 +1275,7 @@
             {
               "items": {
                 "minLength": 1,
-                "pattern": ".*\\S.*",
+                "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
                 "type": "string"
               },
               "type": "array"
@@ -1323,7 +1336,7 @@
           "anyOf": [
             {
               "minLength": 1,
-              "pattern": ".*\\S.*",
+              "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
               "type": "string"
             },
             {
@@ -1340,48 +1353,43 @@
     "PowerDefinition": {
       "additionalProperties": false,
       "properties": {
-        "coupling_target": {
-          "default": "",
-          "title": "Coupling Target",
-          "type": "string"
-        },
         "model": {
           "discriminator": {
             "mapping": {
               "dc_series": "#/$defs/DCSeriesModel",
-              "experimental.ccp": "#/$defs/CCPPower",
-              "experimental.icp": "#/$defs/ICPPower",
-              "experimental.rf_envelope": "#/$defs/RFPower",
-              "external_table": "#/$defs/ExternalPower",
-              "prescribed_power": "#/$defs/AbsorbedPower"
+              "experimental.ccp": "#/$defs/ExperimentalCCPModel",
+              "experimental.icp": "#/$defs/ExperimentalICPModel",
+              "experimental.rf_envelope": "#/$defs/ExperimentalRFEnvelopeModel",
+              "external_table": "#/$defs/ExternalTableModel",
+              "prescribed_power": "#/$defs/PrescribedPowerModel"
             },
             "propertyName": "kind"
           },
           "oneOf": [
             {
-              "$ref": "#/$defs/AbsorbedPower"
+              "$ref": "#/$defs/PrescribedPowerModel"
             },
             {
               "$ref": "#/$defs/DCSeriesModel"
             },
             {
-              "$ref": "#/$defs/ExternalPower"
+              "$ref": "#/$defs/ExternalTableModel"
             },
             {
-              "$ref": "#/$defs/RFPower"
+              "$ref": "#/$defs/ExperimentalRFEnvelopeModel"
             },
             {
-              "$ref": "#/$defs/CCPPower"
+              "$ref": "#/$defs/ExperimentalCCPModel"
             },
             {
-              "$ref": "#/$defs/ICPPower"
+              "$ref": "#/$defs/ExperimentalICPModel"
             }
           ],
           "title": "Model"
         },
         "zone_id": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "Zone Id",
           "type": "string"
         }
@@ -1414,6 +1422,48 @@
       "title": "PrescribedFrequencyWallTransport",
       "type": "object"
     },
+    "PrescribedPowerModel": {
+      "additionalProperties": false,
+      "properties": {
+        "absorbed_power_W": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Absorbed Power W"
+        },
+        "electron_fraction": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Electron Fraction",
+          "type": "number"
+        },
+        "gas_fraction": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Gas Fraction",
+          "type": "number"
+        },
+        "kind": {
+          "const": "prescribed_power",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "electron_fraction",
+        "gas_fraction"
+      ],
+      "title": "PrescribedPowerModel",
+      "type": "object"
+    },
     "ProbeConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1421,7 +1471,7 @@
           "anyOf": [
             {
               "minLength": 1,
-              "pattern": ".*\\S.*",
+              "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
               "type": "string"
             },
             {
@@ -1434,7 +1484,7 @@
         "quantities": {
           "items": {
             "minLength": 1,
-            "pattern": ".*\\S.*",
+            "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
             "type": "string"
           },
           "title": "Quantities",
@@ -1445,7 +1495,7 @@
             {
               "items": {
                 "minLength": 1,
-                "pattern": ".*\\S.*",
+                "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
                 "type": "string"
               },
               "type": "array"
@@ -1462,7 +1512,7 @@
           "anyOf": [
             {
               "minLength": 1,
-              "pattern": ".*\\S.*",
+              "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
               "type": "string"
             },
             {
@@ -1476,7 +1526,7 @@
           "anyOf": [
             {
               "minLength": 1,
-              "pattern": ".*\\S.*",
+              "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
               "type": "string"
             },
             {
@@ -1500,7 +1550,7 @@
         },
         "zone_id": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "Zone Id",
           "type": "string"
         }
@@ -1527,113 +1577,6 @@
       "title": "QuasiNeutralElectronDensity",
       "type": "object"
     },
-    "RFPower": {
-      "additionalProperties": false,
-      "properties": {
-        "absorbed_power_W": {
-          "anyOf": [
-            {
-              "minimum": 0.0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Absorbed Power W"
-        },
-        "base_reduced_field_Td": {
-          "default": 0.0,
-          "minimum": 0.0,
-          "title": "Base Reduced Field Td",
-          "type": "number"
-        },
-        "control": {
-          "default": "absorbed_power",
-          "enum": [
-            "absorbed_power",
-            "voltage"
-          ],
-          "title": "Control",
-          "type": "string"
-        },
-        "coupling_efficiency": {
-          "default": 1.0,
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Coupling Efficiency",
-          "type": "number"
-        },
-        "effective_impedance_ohm": {
-          "default": 50.0,
-          "exclusiveMinimum": 0.0,
-          "title": "Effective Impedance Ohm",
-          "type": "number"
-        },
-        "frequency_Hz": {
-          "default": 13560000.0,
-          "exclusiveMinimum": 0.0,
-          "title": "Frequency Hz",
-          "type": "number"
-        },
-        "kind": {
-          "const": "experimental.rf_envelope",
-          "title": "Kind",
-          "type": "string"
-        },
-        "plasma_potential_offset_V": {
-          "default": 0.0,
-          "title": "Plasma Potential Offset V",
-          "type": "number"
-        },
-        "plasma_potential_per_sqrt_W": {
-          "default": 0.0,
-          "minimum": 0.0,
-          "title": "Plasma Potential Per Sqrt W",
-          "type": "number"
-        },
-        "reduced_field_per_sqrt_W_Td": {
-          "default": 0.0,
-          "minimum": 0.0,
-          "title": "Reduced Field Per Sqrt W Td",
-          "type": "number"
-        },
-        "role": {
-          "default": "source",
-          "enum": [
-            "source",
-            "bias"
-          ],
-          "title": "Role",
-          "type": "string"
-        },
-        "self_bias_fraction": {
-          "default": 0.35,
-          "minimum": 0.0,
-          "title": "Self Bias Fraction",
-          "type": "number"
-        },
-        "voltage_rms_V": {
-          "anyOf": [
-            {
-              "minimum": 0.0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Voltage Rms V"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "title": "RFPower",
-      "type": "object"
-    },
     "ReactorDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -1651,7 +1594,7 @@
         },
         "edges": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/EdgeDefinition"
             }
           },
@@ -1663,7 +1606,7 @@
         },
         "gas_inlets": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/InletDefinition"
             }
           },
@@ -1675,7 +1618,7 @@
         },
         "power_ports": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/PowerDefinition"
             }
           },
@@ -1687,7 +1630,7 @@
         },
         "pumps": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/PumpDefinition"
             }
           },
@@ -1699,7 +1642,7 @@
         },
         "surfaces": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/SurfaceDefinition"
             }
           },
@@ -1711,7 +1654,7 @@
         },
         "zones": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/ZoneDefinition"
             }
           },
@@ -1728,37 +1671,12 @@
       "title": "ReactorDefinition",
       "type": "object"
     },
-    "ReducedFieldGridConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "max_Td": {
-          "default": 100.0,
-          "exclusiveMinimum": 0.0,
-          "title": "Max Td",
-          "type": "number"
-        },
-        "min_Td": {
-          "default": 1.0,
-          "exclusiveMinimum": 0.0,
-          "title": "Min Td",
-          "type": "number"
-        },
-        "n": {
-          "default": 48,
-          "minimum": 2,
-          "title": "N",
-          "type": "integer"
-        }
-      },
-      "title": "ReducedFieldGridConfig",
-      "type": "object"
-    },
     "RunCommands": {
       "additionalProperties": false,
       "properties": {
         "gas_inlets": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/GasInletCommand"
             }
           },
@@ -1770,7 +1688,7 @@
         },
         "power_ports": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "additionalProperties": true,
               "type": "object"
             }
@@ -1783,7 +1701,7 @@
         },
         "surfaces": {
           "patternProperties": {
-            ".*\\S.*": {
+            "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$": {
               "$ref": "#/$defs/SurfaceCommand"
             }
           },
@@ -1852,8 +1770,6 @@
         "label": {
           "anyOf": [
             {
-              "minLength": 1,
-              "pattern": ".*\\S.*",
               "type": "string"
             },
             {
@@ -2033,7 +1949,7 @@
         },
         "zone_id": {
           "minLength": 1,
-          "pattern": ".*\\S.*",
+          "pattern": "^[^\\s\\[\\],\\x00\\r\\n](?:[^\\[\\],\\x00\\r\\n]*[^\\s\\[\\],\\x00\\r\\n])?$",
           "title": "Zone Id",
           "type": "string"
         }
@@ -2170,7 +2086,7 @@
       "$ref": "#/$defs/RunDefinition"
     },
     "schema_version": {
-      "const": 4,
+      "const": 5,
       "title": "Schema Version",
       "type": "integer"
     },

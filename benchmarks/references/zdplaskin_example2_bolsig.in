@@ -1,0 +1,50 @@
+! BOLSIG+ 07/2024. Original example2 cross sections.
+NOSCREEN
+NOLOGFILE
+
+READCOLLISIONS
+bolsigdb.dat         / From ZDPlasKin example2 at the revision in the summary YAML
+Ar Ar*
+1                    / Cross section extrapolation
+
+CONDITIONS
+10.                  / E/N in Td, replaced by RUNSERIES
+0.                   / DC
+0.                   / No magnetic field
+300.                 / Gas temperature, K
+300.                 / Excitation temperature, K
+0.                   / Transition energy
+0.                   / Ionization degree
+3.218830947284555e24  / Neutral density, m^-3
+1.                   / Ion charge parameter
+1.                   / Ion/neutral mass ratio
+0                    / Coulomb collision model
+1                    / Equal energy sharing
+1                    / Temporal growth
+0.                   / Solve the EEDF
+650                  / Energy grid points
+0                    / Automatic energy grid
+200.                 / Maximum for manual grid
+1e-11                / Precision
+1e-6                 / Convergence
+1000                 / Iteration limit
+1. 0.                / Ar and Ar* fractions; evaluate both targets
+1                    / Normalize fractions
+
+RUNSERIES
+1                    / E/N
+1.5 85.
+641
+3                    / Exponential grid
+
+SAVERESULTS
+independent.dat
+3                    / E/N tabulation
+1                    / Conditions
+1                    / Transport
+1                    / Collision rates
+0                    / Reverse rate section
+0                    / Energy loss section
+0                    / Distribution
+0                    / Keep failed runs visible
+0                    / Cross sections

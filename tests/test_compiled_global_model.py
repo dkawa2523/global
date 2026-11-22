@@ -1,23 +1,33 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 import pytest
+from _model_fixtures import constant_field_port
 
 import plasma_global.core.compiled as compiled_module
-from plasma_global.core.compiled import CompiledGlobalModel
+from plasma_global.core.compiled import CompiledGlobalModel, StateLayout
 from plasma_global.core.domain import InitialState, RecipeSegment, SolverSettings, Zone
 from plasma_global.core.solver import solve_compiled_model
-from plasma_global.errors import QuasineutralityError, StateDomainError
+from plasma_global.errors import (
+    ModelConfigurationError,
+    ModelDomainError,
+    QuasineutralityError,
+    StateDomainError,
+)
 from plasma_global.models.electrons import (
     ELEMENTARY_CHARGE_C,
     ElectronEnergyClosure,
     LocalFieldClosure,
-    TabulatedMeanEnergy,
 )
 from plasma_global.models.kinetics import TabulatedElectronKinetics
+from plasma_global.models.power import (
+    CompiledPowerCommand,
+    PowerCoordinator,
+    PrescribedPowerPort,
+)
 from plasma_global.models.walls import (
     ELECTRON_MASS_KG,
     BoundaryReaction,
@@ -35,10 +45,9 @@ class ChemistryFixture:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[object, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
-    electron_energy_transfer_eV: np.ndarray | None = None
 
     @property
     def jacobian_species_pattern(self) -> np.ndarray:
@@ -61,7 +70,7 @@ def inert_argon() -> ChemistryFixture:
         reactant_orders=np.zeros((0, 2)),
         electron_orders=np.zeros(0),
         rate_evaluators=(),
-        energy_loss_eV=np.zeros(0),
+        electron_energy_transfer_eV=np.zeros(0),
         gas_heating_eV=np.zeros(0),
         reaction_zones=(),
     )
@@ -71,12 +80,12 @@ def test_compiled_facade_preserves_immutability_and_evaluation_paths() -> None:
     model = CompiledGlobalModel(
         chemistry=inert_argon(),
         zones=(Zone("plasma", 2.0),),
-        segments=(
-            RecipeSegment(
-                "powered", 0.0, 1.0, absorbed_power_W_by_zone={"plasma": 6.0}
-            ),
-        ),
+        segments=(RecipeSegment("powered", 0.0, 1.0),),
         electron_closure=ElectronEnergyClosure(),
+        power_coordinator=PowerCoordinator(
+            (PrescribedPowerPort("source", "plasma", absorbed_power_W=6.0),),
+            ("plasma",),
+        ),
     )
     state = model.initial_state(
         InitialState(
@@ -101,6 +110,8 @@ def test_compiled_facade_preserves_immutability_and_evaluation_paths() -> None:
         model._walls_by_zone["other"] = ()
     with pytest.raises(AttributeError, match="immutable after compilation"):
         model.segments = ()
+    with pytest.raises((AttributeError, TypeError)):
+        model.state_blocks[0].domain.nonnegative = False
 
 
 def test_standard_electron_energy_closure_is_evaluated_once_per_zone(
@@ -168,24 +179,25 @@ def test_quasineutral_closure_rejects_negative_electron_density_without_floor() 
 
 
 def test_local_field_is_algebraic_and_rejects_out_of_table_domain() -> None:
-    closure = LocalFieldClosure(
-        TabulatedMeanEnergy(
-            reduced_field_Td=(10.0, 30.0),
-            mean_energy_eV=(1.5, 4.5),
-        )
+    kinetics = TabulatedElectronKinetics(
+        source=Path("local-field.csv"),
+        lookup="local_field",
+        bounds="error",
+        axis=np.array([10.0, 30.0]),
+        mean_energy_eV=np.array([1.5, 4.5]),
+        mobility_m2_V_s=None,
+        effective_field_Td=np.array([10.0, 30.0]),
+        rate_tables={},
     )
     model = CompiledGlobalModel(
         chemistry=inert_argon(),
         zones=(Zone("plasma", 1.0),),
-        segments=(
-            RecipeSegment(
-                "field",
-                0.0,
-                1.0,
-                reduced_field_Td_by_zone={"plasma": 20.0},
-            ),
+        segments=(RecipeSegment("field", 0.0, 1.0),),
+        electron_closure=LocalFieldClosure(),
+        electron_kinetics_by_zone={"plasma": kinetics},
+        power_coordinator=PowerCoordinator(
+            (constant_field_port("plasma", 20.0),), ("plasma",)
         ),
-        electron_closure=closure,
     )
     initial = InitialState(
         densities_m3_by_zone={"plasma": {"Ar": 1.0e20, "Ar_plus": 1.0e15}}
@@ -197,12 +209,18 @@ def test_local_field_is_algebraic_and_rejects_out_of_table_domain() -> None:
     assert not any("electron_energy" in label for label in model.layout.labels)
     assert evaluated.electron_states["plasma"].mean_energy_eV == pytest.approx(3.0)
     assert evaluated.electron_states["plasma"].temperature_eV == pytest.approx(2.0)
-    with pytest.raises(StateDomainError, match="outside table bounds"):
-        closure.evaluate(
-            net_heavy_charge_density_m3=1.0e15,
-            energy_density_J_m3=None,
-            reduced_field_Td=31.0,
-        )
+    outside_model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=model.zones,
+        segments=model.segments,
+        electron_closure=LocalFieldClosure(),
+        electron_kinetics_by_zone={"plasma": kinetics},
+        power_coordinator=PowerCoordinator(
+            (constant_field_port("plasma", 31.0),), ("plasma",)
+        ),
+    )
+    with pytest.raises(ModelDomainError, match="outside"):
+        outside_model.evaluate(0.0, state, outside_model.segments[0])
 
 
 def test_explicit_zero_field_uses_the_same_cold_boundary_as_an_off_port() -> None:
@@ -219,19 +237,10 @@ def test_explicit_zero_field_uses_the_same_cold_boundary_as_an_off_port() -> Non
     model = CompiledGlobalModel(
         chemistry=inert_argon(),
         zones=(Zone("plasma", 1.0),),
-        segments=(
-            RecipeSegment(
-                "off",
-                0.0,
-                1.0,
-                reduced_field_Td_by_zone={"plasma": 0.0},
-            ),
-        ),
-        electron_closure=LocalFieldClosure(
-            TabulatedMeanEnergy(
-                reduced_field_Td=(0.0, 2.0),
-                mean_energy_eV=(0.0, 2.0),
-            )
+        segments=(RecipeSegment("off", 0.0, 1.0),),
+        electron_closure=LocalFieldClosure(),
+        power_coordinator=PowerCoordinator(
+            (constant_field_port("plasma", 0.0),), ("plasma",)
         ),
         electron_kinetics_by_zone={"plasma": kinetics},
     )
@@ -298,7 +307,7 @@ def test_mass_action_bdf_matches_first_order_analytic_solution() -> None:
         reactant_orders=np.array([[1.0, 0.0, 0.0]]),
         electron_orders=np.array([0.0]),
         rate_evaluators=(rate_s_inv,),
-        energy_loss_eV=np.array([0.0]),
+        electron_energy_transfer_eV=np.array([0.0]),
         gas_heating_eV=np.zeros(1),
         reaction_zones=((),),
     )
@@ -343,7 +352,7 @@ def test_zero_electron_density_skips_electron_rate_coefficient_lookup() -> None:
         reactant_orders=np.array([[1.0, 0.0]]),
         electron_orders=np.array([1.0]),
         rate_evaluators=(unavailable_at_zero_energy,),
-        energy_loss_eV=np.array([15.76]),
+        electron_energy_transfer_eV=np.array([-15.76]),
         gas_heating_eV=np.array([0.0]),
         reaction_zones=((),),
     )
@@ -376,7 +385,7 @@ def test_zero_electron_density_skips_mean_energy_kinetics_lookup() -> None:
         reactant_orders=np.array([[1.0, 0.0]]),
         electron_orders=np.array([1.0]),
         rate_evaluators=(lambda _context: 1.0,),
-        energy_loss_eV=np.array([15.76]),
+        electron_energy_transfer_eV=np.array([-15.76]),
         gas_heating_eV=np.array([0.0]),
         reaction_zones=((),),
     )
@@ -416,10 +425,27 @@ def test_recipe_segments_bind_endpoint_forcing_and_integrate_power_balance() -> 
         chemistry=inert_argon(),
         zones=(Zone("plasma", 2.0),),
         segments=(
-            RecipeSegment("low", 0.0, 1.0, absorbed_power_W_by_zone={"plasma": 2.0}),
-            RecipeSegment("high", 1.0, 2.0, absorbed_power_W_by_zone={"plasma": 6.0}),
+            RecipeSegment(
+                "low",
+                0.0,
+                1.0,
+                port_commands={
+                    "source": CompiledPowerCommand(kind="power", power_W=2.0)
+                },
+            ),
+            RecipeSegment(
+                "high",
+                1.0,
+                2.0,
+                port_commands={
+                    "source": CompiledPowerCommand(kind="power", power_W=6.0)
+                },
+            ),
         ),
         electron_closure=ElectronEnergyClosure(),
+        power_coordinator=PowerCoordinator(
+            (PrescribedPowerPort("source", "plasma"),), ("plasma",)
+        ),
     )
     initial = InitialState(
         densities_m3_by_zone={"plasma": {"Ar": 1.0e20, "Ar_plus": 1.0e15}},
@@ -521,12 +547,12 @@ def test_evaluation_ledger_reconstructs_energy_derivative() -> None:
     model = CompiledGlobalModel(
         chemistry=inert_argon(),
         zones=(Zone("plasma", 2.0),),
-        segments=(
-            RecipeSegment(
-                "powered", 0.0, 1.0, absorbed_power_W_by_zone={"plasma": 6.0}
-            ),
-        ),
+        segments=(RecipeSegment("powered", 0.0, 1.0),),
         electron_closure=ElectronEnergyClosure(),
+        power_coordinator=PowerCoordinator(
+            (PrescribedPowerPort("source", "plasma", absorbed_power_W=6.0),),
+            ("plasma",),
+        ),
     )
     state = model.initial_state(
         InitialState(
@@ -560,9 +586,7 @@ def test_excitation_deexcitation_pair_conserves_electron_and_internal_energy() -
         reactant_orders=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
         electron_orders=np.ones(2),
         rate_evaluators=(1.0e-16, 1.0e-16),
-        # The canonical signed transfer takes precedence.  The legacy view
-        # remains nonnegative for old chemistry sources.
-        energy_loss_eV=np.array([energy_gap_eV, 0.0]),
+        # Excitation and superelastic events exchange the same internal energy.
         electron_energy_transfer_eV=np.array([-energy_gap_eV, energy_gap_eV]),
         gas_heating_eV=np.zeros(2),
         reaction_zones=((), ()),
@@ -684,3 +708,75 @@ def test_wall_flux_and_boundary_return_share_one_ledger() -> None:
     assert evaluated.ledger_by_zone["plasma"].wall_energy_loss_J_m3_s == pytest.approx(
         expected_rate * (4.0 + floating_sheath_eV) * ELEMENTARY_CHARGE_C
     )
+
+
+def test_rhs_retry_is_independent_of_evaluation_history_and_preserves_inputs() -> None:
+    model = CompiledGlobalModel(
+        chemistry=inert_argon(),
+        zones=(Zone("plasma", 2.0),),
+        segments=(RecipeSegment("powered", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+        power_coordinator=PowerCoordinator(
+            (PrescribedPowerPort("source", "plasma", absorbed_power_W=6.0),),
+            ("plasma",),
+        ),
+    )
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={"plasma": {"Ar": 1.0e20, "Ar_plus": 1.0e15}},
+            mean_energy_eV_by_zone={"plasma": 3.0},
+        )
+    )
+    saved = state.copy()
+    rhs = model.bind_segment(model.segments[0])
+    reference = rhs(0.2, state)
+    other = state * 1.25
+    rhs(0.8, other)
+    repeated = rhs(0.2, state)
+    np.testing.assert_array_equal(repeated, reference)
+    np.testing.assert_array_equal(state, saved)
+    np.testing.assert_array_equal(other, saved * 1.25)
+    assert not reference.flags.writeable
+
+
+@pytest.mark.parametrize(
+    "identity", ["z,part", "z[part]", " z", "z ", "z\x00", "z\n", "z\r", ""]
+)
+def test_component_identifiers_reject_series_delimiters(identity: str) -> None:
+    with pytest.raises(ModelConfigurationError, match="identifier"):
+        Zone(identity, 1.0)
+    with pytest.raises(ModelConfigurationError, match="identifier"):
+        StateLayout(("Ar",), (identity,), False)
+    chemistry = replace(inert_argon(), species_ids=(identity, "Ar_plus"))
+    with pytest.raises(ModelConfigurationError, match="identifier"):
+        CompiledGlobalModel(
+            chemistry=chemistry,
+            zones=(Zone("z", 1.0),),
+            segments=(RecipeSegment("step_1[0001]", 0.0, 1.0),),
+            electron_closure=ElectronEnergyClosure(),
+        )
+
+
+def test_unicode_and_chemical_identifiers_are_preserved_in_result_series() -> None:
+    zone = "領域:源+"
+    chemistry = replace(inert_argon(), species_ids=("Ar*", "Ar+"))
+    model = CompiledGlobalModel(
+        chemistry=chemistry,
+        zones=(Zone(zone, 1.0),),
+        segments=(RecipeSegment("step_1[0001]", 0.0, 1.0),),
+        electron_closure=ElectronEnergyClosure(),
+    )
+    result = solve_compiled_model(
+        model,
+        InitialState(
+            densities_m3_by_zone={zone: {"Ar*": 2.0e20, "Ar+": 1.0e12}},
+            mean_energy_eV_by_zone={zone: 3.0},
+        ),
+        SolverSettings(save_at_s=(0.0, 1.0)),
+    )
+    assert result.state_labels == (
+        f"n[{zone},Ar*]",
+        f"n[{zone},Ar+]",
+        f"electron_energy[{zone}]",
+    )
+    np.testing.assert_array_equal(result.series(f"n[{zone},Ar+]"), [1.0e12, 1.0e12])

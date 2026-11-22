@@ -6,31 +6,34 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
+import yaml
 
+from plasma_global import simulate
 from plasma_global.build import compile_case
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._resolved_case import (
+from plasma_global.input._schema_power import (
     ExternalTableCommand,
     ExternalTableModel,
-    ResolvedCase,
 )
 from plasma_global.input.compile_reactor import (
     compile_external_binding,
     compile_initial_densities,
 )
-from plasma_global.input.load import load_case
+from plasma_global.input.load import case_from_mapping, load_case
+from plasma_global.input.schema import CaseSpec
 from plasma_global.models.external_table import ExternalTableStore
+from tools.generate_schema_docs import minimal_case_document
 
 FIXTURE = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
 
 
 def _updated_case(
-    case: ResolvedCase,
+    case: CaseSpec,
     update: Callable[[dict[str, Any]], None],
-) -> ResolvedCase:
+) -> CaseSpec:
     data = case.model_dump(mode="python")
     update(data)
-    return ResolvedCase.model_validate(data)
+    return case_from_mapping(data, base_directory=case.base_directory)
 
 
 def test_initial_densities_keep_read_only_mapping_and_state_array_contract() -> None:
@@ -48,10 +51,27 @@ def test_initial_densities_keep_read_only_mapping_and_state_array_contract() -> 
     assert state.dtype == np.float64
 
 
+@pytest.mark.parametrize("use_mole_fractions", [True, False])
+def test_an_added_species_starts_at_zero_when_omitted_from_initial_state(
+    tmp_path: Path, use_mole_fractions: bool
+) -> None:
+    document = minimal_case_document()
+    document["chemistry"]["species"].append({"id": "Ar_star", "mass_amu": 39.948})
+    if not use_mole_fractions:
+        initial = document["reactor"]["zones"]["plasma"]["initial"]
+        initial["densities_m3"] = {"Ar": 2e20, "Ar_plus": 1e12}
+        initial["pressure_Pa"] = (2e20 + 1e12) * 1.380649e-23 * 300.0
+        del initial["mole_fractions"], initial["seed_densities_m3"]
+    path = tmp_path / "case.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    result = simulate(load_case(path))
+    np.testing.assert_array_equal(result.series("n[plasma,Ar_star]"), 0.0)
+
+
 def test_explicit_density_validation_reports_unknown_species_before_pressure() -> None:
     def update(data: dict[str, Any]) -> None:
-        zone = data["reactor"]["zones"][0]
-        zone["initial_densities_m3"] = {"unknown": 1.0}
+        zone = data["reactor"]["zones"]["plasma"]["initial"]
+        zone["densities_m3"] = {"unknown": 1.0}
 
     case = _updated_case(load_case(FIXTURE), update)
     compiled = compile_case(load_case(FIXTURE))
@@ -65,10 +85,10 @@ def test_explicit_density_validation_reports_unknown_species_before_pressure() -
 
 def test_mole_fraction_validation_reports_unknown_species_before_charge_roles() -> None:
     def update(data: dict[str, Any]) -> None:
-        zone = data["reactor"]["zones"][0]
-        zone.pop("initial_densities_m3")
-        zone["initial_mole_fractions"] = {"unknown": 1.0}
-        zone["initial_seed_densities_m3"] = {"Ar": 1.0}
+        zone = data["reactor"]["zones"]["plasma"]["initial"]
+        zone.pop("densities_m3")
+        zone["mole_fractions"] = {"unknown": 1.0}
+        zone["seed_densities_m3"] = {"Ar": 1.0}
 
     case = _updated_case(load_case(FIXTURE), update)
     compiled = compile_case(load_case(FIXTURE))
@@ -93,7 +113,7 @@ def test_external_table_command_overrides_only_explicit_fields(tmp_path: Path) -
         kind="external_table",
         file=default_path,
         interpolation="linear",
-        bounds_policy="error",
+        bounds="error",
         power_scale=3.0,
         voltage_scale=4.0,
         current_scale=5.0,
@@ -105,7 +125,7 @@ def test_external_table_command_overrides_only_explicit_fields(tmp_path: Path) -
         kind="external_table",
         file=override_path,
         interpolation="previous",
-        bounds_policy="hold",
+        bounds="hold",
         power_scale=7.0,
         time_offset_s=0.25,
     )

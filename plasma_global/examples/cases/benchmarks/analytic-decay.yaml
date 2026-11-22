@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: analytic-decay
   description: 一次反応 Ar_star → Ar の解析解との比較。速度25 s⁻¹、0.2秒。

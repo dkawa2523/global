@@ -152,7 +152,7 @@ class _Kernel:
     reaction: ReactionData
     surface_index: int
     zone_index: int
-    rate_id: str
+    event_key: tuple[str, str]
     rate_kernel: _NumericRateKernel
     coverage_factor: _CoveragePower | None
     surface_mass_action: tuple[_CoveragePower, ...]
@@ -208,7 +208,7 @@ def _thermal_rate(
         )
     if model.kind == "langmuir_hinshelwood":
         return _LangmuirHinshelwoodRate(
-            coefficient_m2_s=_numeric_parameter(model, "A_m2_s_inv"),
+            coefficient_m2_s=_numeric_parameter(model, "A_m2_s"),
             site_density_m2=site_density_m2,
             activation_temperature_K=activation_temperature_K,
         )

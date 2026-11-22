@@ -96,7 +96,7 @@ class RuntimeEvaluator:
         energy = sources.evaluate_energy_terms(segment, prepared, power)
         derivative, ledger_by_zone = RuntimeAssembly(
             model=self.model,
-            extension_rhs=sources.extension_rhs,
+            extension_rhs=sources.extension_rhs(prepared, surface),
             prepared=prepared,
             power=power,
             transport=transport,

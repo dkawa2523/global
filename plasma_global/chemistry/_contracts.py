@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from numbers import Real
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+
+from plasma_global._identifiers import validate_identifier
+from plasma_global.errors import ChemistryError
 
 if TYPE_CHECKING:
     from plasma_global.chemistry.data import (
@@ -28,6 +32,38 @@ _CROSS_SECTION_KINDS = frozenset(
         "ionization",
     }
 )
+
+
+def _validate_electron_energy_transfer(
+    family: Literal["gas", "boundary", "surface"],
+    where: str,
+    signed_transfer_eV: float | None,
+) -> None:
+    if signed_transfer_eV is None:
+        return
+    if not math.isfinite(signed_transfer_eV):
+        raise ChemistryError(f"{where}: electron_energy_transfer_eV must be finite")
+    if family != "gas" and signed_transfer_eV != 0.0:
+        raise ChemistryError(
+            f"{where}: {family} reactions do not support electron-energy fields"
+        )
+
+
+def validate_reaction_energy_fields(
+    family: Literal["gas", "boundary", "surface"],
+    where: str,
+    signed_transfer_eV: float | None,
+    gas_heating_eV: float,
+) -> None:
+    _validate_electron_energy_transfer(family, where, signed_transfer_eV)
+    if not math.isfinite(gas_heating_eV):
+        raise ChemistryError(f"{where}: gas_heating_eV must be finite")
+    if family == "gas" and gas_heating_eV < 0.0:
+        raise ChemistryError(f"{where}: gas_heating_eV must be nonnegative")
+    if family == "boundary" and gas_heating_eV != 0.0:
+        raise ChemistryError(
+            f"{where}: boundary reactions do not support gas_heating_eV"
+        )
 
 
 def _finite_nonnegative_scalar(value: object) -> bool:
@@ -311,12 +347,19 @@ def _flux_surface_shape_error(
             and gas_reactants[0][0].charge > 0
         )
         expected = "positive-ion gas reactant"
-    if valid:
-        return None
-    return (
-        f"{rate_model.kind} surface reaction {reaction.id} must have exactly one "
-        f"unit {expected}"
-    )
+    if not valid:
+        return (
+            f"{rate_model.kind} surface reaction {reaction.id} must have exactly one "
+            f"unit {expected}"
+        )
+    ion = gas_reactants[0][0]
+    if rate_model.kind == "ion_assisted" and reaction.products.get(ion.id) != 1.0:
+        return (
+            f"ion_assisted surface reaction {reaction.id} must preserve the "
+            f"incident ion {ion.id!r} with unit stoichiometry on both sides; "
+            "ion-assisted rates use wall flux as a catalyst, not ion capture"
+        )
+    return None
 
 
 def surface_reaction_shape_error(
@@ -340,3 +383,72 @@ __all__ = [
     "normalized_cross_section_curve",
     "surface_reaction_shape_error",
 ]
+
+
+def chemistry_identifier(value: object, where: str) -> str:
+    """Use the series component contract at each canonical chemistry boundary."""
+    if not isinstance(value, str):
+        raise ChemistryError(f"{where}: identifier must be a string")
+    try:
+        return validate_identifier(value)
+    except ValueError as exc:
+        raise ChemistryError(f"{where}: {exc}") from exc
+
+
+def validate_rate_identifiers(parameters: Mapping[str, object], where: str) -> None:
+    for name in ("cross_section", "rate_id"):
+        if name in parameters:
+            chemistry_identifier(parameters[name], f"{where}.{name}")
+    coverage = parameters.get("coverage")
+    if isinstance(coverage, Mapping):
+        for name in ("species", "site_species"):
+            if name in coverage:
+                chemistry_identifier(coverage[name], f"{where}.coverage.{name}")
+
+
+def _validate_species_identity(species: SpeciesData) -> None:
+    label = f"species {species.id!r}"
+    chemistry_identifier(species.id, f"{label}.id")
+    for surface in species.surfaces:
+        chemistry_identifier(surface, f"{label}.surfaces")
+    if species.phase not in {"gas", "surface"}:
+        raise ChemistryError(f"{label}.phase must be gas or surface")
+    if isinstance(species.charge, bool) or not isinstance(species.charge, int):
+        raise ChemistryError(f"{label}.charge must be an integer")
+    if any(
+        not isinstance(value, str) or not value.strip() for value in species.state_tags
+    ):
+        raise ChemistryError(f"{label} state tags must be non-empty strings")
+
+
+def _validate_species_thermodynamics(species: SpeciesData) -> None:
+    label = f"species {species.id!r}"
+    if not _finite_nonnegative_scalar(species.mass_amu) or (
+        species.phase == "gas" and species.mass_amu == 0.0
+    ):
+        raise ChemistryError(
+            f"{label}.mass_amu must be finite and positive for gas, "
+            "nonnegative for surface"
+        )
+    if species.cv_over_kb is not None and (
+        not _finite_nonnegative_scalar(species.cv_over_kb) or species.cv_over_kb == 0.0
+    ):
+        raise ChemistryError(f"{label}.cv_over_kb must be finite and positive")
+
+
+def _validate_species_composition(species: SpeciesData) -> None:
+    label = f"species {species.id!r}"
+    if not isinstance(species.elements, Mapping):
+        raise ChemistryError(f"{label}.elements must map element names to counts")
+    for name, count in species.elements.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ChemistryError(f"{label}.elements requires non-empty element names")
+        if not _finite_nonnegative_scalar(count) or count == 0.0:
+            raise ChemistryError(f"{label}.elements.{name} must be finite and positive")
+
+
+def validate_species_record(species: SpeciesData) -> None:
+    """Apply the same species contract to CSV, YAML, and Python construction."""
+    _validate_species_identity(species)
+    _validate_species_thermodynamics(species)
+    _validate_species_composition(species)

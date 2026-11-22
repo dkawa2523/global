@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: experimental_argon_rf_envelope_calibration
   description: 'Experimental pure-Ar RF-envelope calibration case for tuning coupling_efficiency,
@@ -130,9 +130,35 @@ models:
   electrons:
     kind: local_field
     coefficients:
-      kind: experimental.approximate_two_term
-      cache:
-        max_entries: 4
+      file: ../data/swarm_argon_rf/electrons.csv
+      provenance:
+        source_repository: https://github.com/dkawa2523/swarm
+        source_revision: 27ada948f9845859fc3b7fc3bbb7ac96b07d5b5c
+        source_working_tree_python_sha256: ae56a74fbbd074e09af88f92d0caf613aac3aec28c8a2f044fa7bdcbef4a0887
+        source_execution_id: a2156f2a314762e85350e467662edc4103e24bcb5e09487b9977cffd085fc97e
+        source_manifest_sha256: 85c1c92932d16de12c5b8e32f8b08e537e357d1cd15ba2a926784ccb50cb1525
+        solver: two_term
+        backend: native_sg
+        gas_temperature_K: 350.0
+        pressure_Pa: 8.0
+        mole_fractions:
+          Ar: 1.0
+        cross_sections_sha256: ce8d45175fa4a738ebc1d56aaec3c6ca12f089b0aec3c40a098d289afe14ab74
+        chemistry_definition_sha256: 573f367686b1bbd85f8aa65c9dd979a79705d8c9da77c69bbeb1c4f68f74d357
+        elastic_threshold_eV: 0.0
+        source_elastic_mass_ratio: 1.36e-05
+        cross_section_source_doi: 10.5281/zenodo.8192503
+        mobility: flux drift over field, exported as mu*N
+        fixed_state_scope: Pure Ar at 350 K. Shared by both example zones; runtime gas
+          temperature does not regenerate the coefficients.
+        purpose: Independent coefficient input for illustrative RF/ICP/CCP coupling; DC
+          coefficients are a local-field approximation, not an RF swarm solution or device
+          validation.
+        fields_Td:
+          min: 1.0
+          max: 200.0
+          points: 82
+        coefficient_csv_sha256: 5e6a90eee6cc19ca2f49b24085807f7690cf697a2c62c3f9d5b67e37d6486e1b
   surface_kinetics:
     kind: mass_action
 solver:

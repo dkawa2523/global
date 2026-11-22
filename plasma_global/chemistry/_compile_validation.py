@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from typing import Literal
 
 from plasma_global.chemistry._contracts import (
     cross_section_data_error,
     cross_section_support_error,
     surface_reaction_shape_error,
+    validate_reaction_energy_fields,
 )
+from plasma_global.chemistry._rate_models import rate_definition
 from plasma_global.chemistry.data import (
     ChemistryData,
     CrossSectionData,
@@ -18,16 +21,6 @@ from plasma_global.chemistry.data import (
     SpeciesData,
 )
 from plasma_global.errors import ChemistryError
-
-_DIMENSIONAL_GAS_RATE_KINDS = frozenset(
-    {
-        "arrhenius",
-        "electron_table",
-        "constant",
-        "experimental.electron_temperature_power_law",
-        "tabulated_1d",
-    }
-)
 
 # Published atomic weights and independently rounded fragment masses commonly
 # differ by a few parts in 1e5.  Larger mismatches are input errors at the
@@ -150,7 +143,8 @@ def _validate_reaction_balance(
             f"reaction {reaction.id} references unknown species: {', '.join(unknown)}"
         )
 
-    _validate_element_balance(reaction, species)
+    if not boundary or reaction.products:
+        _validate_element_balance(reaction, species)
     before_charge = _charge_total(reaction.reactants, species)
     after_charge = _charge_total(reaction.products, species)
     if (
@@ -161,22 +155,13 @@ def _validate_reaction_balance(
 
 
 def _validate_cross_section_energy(cross_section: CrossSectionData) -> None:
-    legacy_loss = cross_section.energy_loss_eV
     signed_transfer = cross_section.electron_energy_transfer_eV
-    has_legacy_loss = legacy_loss is not None
-    has_signed_transfer = signed_transfer is not None
-    if has_legacy_loss == has_signed_transfer:
+    if signed_transfer is None:
         raise ChemistryError(
-            f"cross section {cross_section.id!r} must define exactly one of "
-            "energy_loss_eV or electron_energy_transfer_eV"
+            f"cross section {cross_section.id!r} must define "
+            "electron_energy_transfer_eV"
         )
-    if legacy_loss is not None and (
-        not math.isfinite(legacy_loss) or legacy_loss < 0.0
-    ):
-        raise ChemistryError(
-            f"cross section {cross_section.id!r} has invalid energy_loss_eV"
-        )
-    if signed_transfer is not None and not math.isfinite(signed_transfer):
+    if not math.isfinite(signed_transfer):
         raise ChemistryError(
             f"cross section {cross_section.id!r} has invalid "
             "electron_energy_transfer_eV"
@@ -274,7 +259,7 @@ def _validate_gas_rate_shape(
                 f"reaction {reaction.id} electron_table requires "
                 "one electron and one target"
             )
-        if reaction.resolved_electron_energy_transfer_eV is None:
+        if reaction.electron_energy_transfer_eV is None:
             raise ChemistryError(
                 f"reaction {reaction.id} requires explicit "
                 "electron_energy_transfer_eV, including zero"
@@ -360,7 +345,7 @@ def validate_gas_rate_dimensions(
 ) -> None:
     inferred_order_by_model: dict[str, tuple[float, str]] = {}
     for reaction, rate_model in zip(reactions, rate_models, strict=True):
-        if rate_model.kind not in _DIMENSIONAL_GAS_RATE_KINDS:
+        if not rate_definition(rate_model.kind).dimensional_order:
             continue
         actual_order = _reaction_order(reaction)
         declared_order = _declared_rate_order(rate_model)
@@ -378,7 +363,7 @@ def validate_gas_rate_dimensions(
             previous[0], actual_order, rel_tol=0.0, abs_tol=1.0e-12
         ):
             raise ChemistryError(
-                f"legacy rate model {rate_model.id!r} is reused by reactions "
+                f"rate model {rate_model.id!r} is reused by reactions "
                 f"{previous[1]!r} and {reaction.id!r} with incompatible overall "
                 f"orders {previous[0]:g} ({_rate_coefficient_unit(previous[0])}) "
                 f"and {actual_order:g} ({_rate_coefficient_unit(actual_order)}); "
@@ -405,21 +390,15 @@ def _validate_surface_reaction(
         raise ChemistryError(shape_error)
 
 
-def _validate_non_gas_energy_fields(reaction: ReactionData, *, family: str) -> None:
-    if any(
-        value is not None and value != 0.0
-        for value in (
-            reaction.energy_loss_eV,
-            reaction.electron_energy_transfer_eV,
-        )
-    ):
-        raise ChemistryError(
-            f"{family} reaction {reaction.id!r} does not support electron-energy fields"
-        )
-    if family == "boundary" and reaction.gas_heating_eV != 0.0:
-        raise ChemistryError(
-            f"boundary reaction {reaction.id!r} does not support gas_heating_eV"
-        )
+def _validate_non_gas_energy_fields(
+    reaction: ReactionData, *, family: Literal["surface", "boundary"]
+) -> None:
+    validate_reaction_energy_fields(
+        family,
+        f"{family} reaction {reaction.id!r}",
+        reaction.electron_energy_transfer_eV,
+        reaction.gas_heating_eV,
+    )
 
 
 def validate_non_gas_reactions(
@@ -428,7 +407,8 @@ def validate_non_gas_reactions(
     for reaction in data.boundary_reactions:
         _validate_non_gas_energy_fields(reaction, family="boundary")
         _validate_reaction_balance(reaction, species_by_id, boundary=True)
-        _validate_heavy_mass_balance(reaction, species_by_id)
+        if reaction.products:
+            _validate_heavy_mass_balance(reaction, species_by_id)
     for reaction in data.surface_reactions:
         _validate_non_gas_energy_fields(reaction, family="surface")
         _validate_surface_reaction(data, reaction, species_by_id)

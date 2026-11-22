@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from _model_fixtures import constant_field_port
 
 from plasma_global.errors import CaseValidationError, ModelDomainError
 from plasma_global.models.external_table import (
@@ -44,8 +45,8 @@ def test_rejects_multiple_reduced_field_ports_in_one_zone() -> None:
             ballast_resistance_ohm=1.0e6,
             gap_m=0.1,
             electrode_area_m2=0.01,
-            configured_mobility_m2_V_s=0.5,
-            default_voltage_V=10.0,
+            electron_mobility_m2_V_s=0.5,
+            source_voltage_V=10.0,
         )
         for index in range(2)
     )
@@ -118,6 +119,13 @@ def test_coordinator_keeps_zone_aggregation_and_off_commands_independent() -> No
                 "source", "source_zone", electron_fraction=0.75, gas_fraction=0.25
             ),
             PrescribedPowerPort("bias", "process_zone", electron_fraction=1.0),
+            PrescribedPowerPort(
+                "background_source", "source_zone", absorbed_power_W=2.0
+            ),
+            PrescribedPowerPort(
+                "background_process", "process_zone", absorbed_power_W=3.0
+            ),
+            constant_field_port("process_zone", 12.0),
         ),
         ("source_zone", "process_zone"),
     )
@@ -131,11 +139,6 @@ def test_coordinator_keeps_zone_aggregation_and_off_commands_independent() -> No
         electron_density_m3_by_zone={"source_zone": 1.0e15, "process_zone": 2.0e15},
         neutral_density_m3_by_zone={"source_zone": 1.0e20, "process_zone": 2.0e20},
         mean_energy_eV_by_zone={"source_zone": 3.0, "process_zone": 6.0},
-        prescribed_electron_power_W_by_zone={
-            "source_zone": 2.0,
-            "process_zone": 3.0,
-        },
-        prescribed_reduced_field_Td_by_zone={"process_zone": 12.0},
     )
 
     assert dict(result.electron_power_W_by_zone) == {
@@ -169,14 +172,23 @@ def test_dc_series_obeys_voltage_and_power_balance() -> None:
     assert result.reduced_field_Td is not None
     assert result.reduced_field_Td > 0.0
 
+    vacuum = port.evaluate(
+        0.0,
+        replace(STATE, electron_density_m3=0.0, electron_mobility_m2_V_s=None),
+        command,
+    )
+    assert vacuum.observables["current_A"] == 0.0
+    assert vacuum.observables["plasma_voltage_V"] == 1000.0
+    assert vacuum.electron_power_W == 0.0
+
 
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"configured_mobility_m2_V_s": float("nan")},
-        {"configured_mobility_m2_V_s": float("inf")},
-        {"default_voltage_V": float("nan")},
-        {"default_voltage_V": float("inf")},
+        {"electron_mobility_m2_V_s": float("nan")},
+        {"electron_mobility_m2_V_s": float("inf")},
+        {"source_voltage_V": float("nan")},
+        {"source_voltage_V": float("inf")},
     ],
 )
 def test_dc_series_rejects_nonfinite_optional_parameters(
@@ -194,8 +206,9 @@ def test_dc_series_rejects_nonfinite_optional_parameters(
 
 
 @pytest.mark.parametrize("neutral_density", [1.0e24, 2.0e24])
+@pytest.mark.parametrize("electron_density", [1.0e3, 1.0e17])
 def test_dc_series_solves_local_field_on_prepared_mobility_axis(
-    neutral_density: float,
+    neutral_density: float, electron_density: float
 ) -> None:
     port = DCSeriesPort(
         "dc",
@@ -204,7 +217,6 @@ def test_dc_series_solves_local_field_on_prepared_mobility_axis(
         gap_m=4.0e-3,
         electrode_area_m2=5.0e-5,
     )
-    electron_density = 1.0e17
     kinetics = TabulatedElectronKinetics(
         source=Path("prepared.csv"),
         lookup="local_field",
@@ -334,8 +346,8 @@ def test_dc_field_does_not_report_zero_for_an_undefined_density() -> None:
         ballast_resistance_ohm=1.0,
         gap_m=0.1,
         electrode_area_m2=0.01,
-        configured_mobility_m2_V_s=0.5,
-        default_voltage_V=10.0,
+        electron_mobility_m2_V_s=0.5,
+        source_voltage_V=10.0,
     )
     with pytest.raises(ModelDomainError, match="positive neutral density"):
         port.evaluate(0.0, replace(STATE, neutral_density_m3=0.0), None)

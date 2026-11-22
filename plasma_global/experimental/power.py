@@ -8,6 +8,8 @@ from typing import Literal
 
 from plasma_global.errors import ModelDomainError
 from plasma_global.experimental._ccp_power_kernel import (
+    CCP_OBSERVABLE_UNITS,
+    CCP_OFF_OBSERVABLE_UNITS,
     evaluate_ccp_power_port,
     validate_ccp_power_port,
 )
@@ -17,40 +19,26 @@ from plasma_global.experimental._power_kernels import (
 from plasma_global.experimental._power_kernels import (
     ELEMENTARY_CHARGE_C as ELEMENTARY_CHARGE_C,
 )
+from plasma_global.experimental._power_kernels import (
+    ICP_OBSERVABLE_UNITS,
+    ICP_OFF_OBSERVABLE_UNITS,
+    RF_ENVELOPE_OBSERVABLE_UNITS,
+    evaluate_icp_power_port,
+    evaluate_rf_envelope_port,
+    rf_off_observables,
+    validate_icp_power_port,
+    validate_rf_envelope_port,
+)
 from plasma_global.experimental._power_kernels import TD_TO_V_M2 as TD_TO_V_M2
 from plasma_global.experimental._power_kernels import (
     VACUUM_PERMITTIVITY_F_M as VACUUM_PERMITTIVITY_F_M,
-)
-from plasma_global.experimental._power_kernels import (
-    evaluate_icp_power_port,
-    evaluate_rf_envelope_port,
-    validate_icp_power_port,
-    validate_rf_envelope_port,
-    validate_square_pulse,
 )
 from plasma_global.models.power import (
     CompiledPowerCommand,
     PowerPortResult,
     PowerState,
+    PowerTopology,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class SquarePulse:
-    """A dimensionless square envelope shared by experimental power ports."""
-
-    repetition_Hz: float
-    duty_cycle: float
-    phase_fraction: float = 0.0
-
-    def __post_init__(self) -> None:
-        validate_square_pulse(self)
-
-    def __call__(self, time_s: float) -> float:
-        if not math.isfinite(time_s):
-            raise ValueError("time_s must be finite")
-        phase = (time_s * self.repetition_Hz + self.phase_fraction) % 1.0
-        return 1.0 if phase < self.duty_cycle else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,15 +56,24 @@ class RFEnvelopePort:
     self_bias_fraction: float = 0.35
     plasma_potential_offset_V: float = 0.0
     plasma_potential_per_sqrt_W: float = 0.0
-    default_power_W: float | None = None
-    default_voltage_V: float | None = None
-    pulse: SquarePulse | None = None
+    absorbed_power_W: float | None = None
+    voltage_rms_V: float | None = None
 
-    produces_reduced_field = True
+    observable_units = RF_ENVELOPE_OBSERVABLE_UNITS
+
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id, self.zone_id, (self.zone_id,), (), (self.zone_id,)
+        )
+
+    @property
+    def off_observables(self) -> dict[str, float]:
+        return rf_off_observables(self.frequency_Hz, self.observable_units)
 
     @property
     def time_dependent(self) -> bool:
-        return self.pulse is not None
+        return False
 
     def __post_init__(self) -> None:
         validate_rf_envelope_port(self)
@@ -95,7 +92,6 @@ class CCPPowerPort:
     Power commands specify absorbed bulk watts.  The
     ``estimated_mean_ion_energy_eV`` observable does not drive wall or surface
     kinetics because this lossless circuit has no real sheath-power partition.
-    ``mean_ion_energy_eV`` is its backward-compatible legacy alias.
     """
 
     port_id: str
@@ -107,15 +103,24 @@ class CCPPowerPort:
     electrode_gap_m: float
     dominant_ion_mass_kg: float
     gas_temperature_K: float = 300.0
-    default_power_W: float | None = None
-    default_voltage_V: float | None = None
-    pulse: SquarePulse | None = None
+    absorbed_power_W: float | None = None
+    voltage_rms_V: float | None = None
 
-    produces_reduced_field = True
+    observable_units = CCP_OBSERVABLE_UNITS
+
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id, self.zone_id, (self.zone_id,), (), (self.zone_id,)
+        )
+
+    @property
+    def off_observables(self) -> dict[str, float]:
+        return rf_off_observables(self.frequency_Hz, CCP_OFF_OBSERVABLE_UNITS)
 
     @property
     def time_dependent(self) -> bool:
-        return self.pulse is not None
+        return False
 
     def __post_init__(self) -> None:
         validate_ccp_power_port(self)
@@ -191,14 +196,30 @@ class ICPPowerPort:
     gas_temperature_K: float = 300.0
     downstream_zone_id: str | None = None
     downstream_fraction: float = 0.0
-    default_power_W: float | None = None
-    pulse: SquarePulse | None = None
+    delivered_power_W: float | None = None
 
-    produces_reduced_field = True
+    observable_units = ICP_OBSERVABLE_UNITS
+
+    @property
+    def topology(self) -> PowerTopology:
+        targets = [self.zone_id]
+        if self.downstream_fraction > 0.0 and self.downstream_zone_id is not None:
+            targets.append(self.downstream_zone_id)
+        return PowerTopology(
+            self.port_id,
+            self.zone_id,
+            tuple(dict.fromkeys(targets)),
+            (),
+            (self.zone_id,),
+        )
+
+    @property
+    def off_observables(self) -> dict[str, float]:
+        return rf_off_observables(self.frequency_Hz, ICP_OFF_OBSERVABLE_UNITS)
 
     @property
     def time_dependent(self) -> bool:
-        return self.pulse is not None
+        return False
 
     def __post_init__(self) -> None:
         validate_icp_power_port(self)
@@ -208,22 +229,5 @@ class ICPPowerPort:
     ) -> PowerPortResult:
         return evaluate_icp_power_port(self, time_s, state, command)
 
-    @property
-    def _static_power_target_zone_ids(self) -> tuple[str, ...]:
-        if self.downstream_zone_id is None or self.downstream_fraction == 0.0:
-            return ()
-        return (self.downstream_zone_id,)
 
-    def power_by_zone(self, result: PowerPortResult) -> dict[str, float]:
-        """Expand one ICP evaluation into the zone powers consumed by a core adapter."""
-
-        values = {self.zone_id: result.electron_power_W}
-        if self.downstream_zone_id is not None:
-            downstream = result.observables.get("downstream_power_W", 0.0)
-            values[self.downstream_zone_id] = (
-                values.get(self.downstream_zone_id, 0.0) + downstream
-            )
-        return values
-
-
-__all__ = ["CCPPowerPort", "ICPPowerPort", "RFEnvelopePort", "SquarePulse"]
+__all__ = ["CCPPowerPort", "ICPPowerPort", "RFEnvelopePort"]

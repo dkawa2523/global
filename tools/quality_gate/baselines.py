@@ -72,13 +72,26 @@ def _complexity_exceptions(payload: dict[str, Any]) -> dict[str, int]:
     return {str(key): int(value) for key, value in raw.items() if int(value) > 10}
 
 
+def _bandit_review_budget(payload: dict[str, Any]) -> Counter[str]:
+    """Keep reviewed rule/severity/message counts independent of file moves.
+
+    Actual scan findings still require the complete reviewed location key.
+    This comparison only prevents growing the reviewed exception budget.
+    """
+    budget: Counter[str] = Counter()
+    for key, count in payload.get("bandit", {}).get("findings", {}).items():
+        tool, rule, _path, _symbol, message = key.split("|", 4)
+        budget[f"{tool}|{rule}|{message}"] += int(count)
+    return budget
+
+
 def _validate_baseline_monotonic(current: dict[str, Any]) -> None:
     previous = _read_base_json("quality/baseline.json")
     if previous is None:
         return
     failures = []
-    old_bandit = Counter(previous.get("bandit", {}).get("findings", {}))
-    new_bandit = Counter(current.get("bandit", {}).get("findings", {}))
+    old_bandit = _bandit_review_budget(previous)
+    new_bandit = _bandit_review_budget(current)
     if new_bandit - old_bandit:
         failures.append("bandit baseline contains new findings")
     old_complexity = _complexity_exceptions(previous)

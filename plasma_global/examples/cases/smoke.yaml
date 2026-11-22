@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: experimental_smoke_maxwell
   description: 'Tail-safe short integration stress case exercising experimental ICP/CCP
@@ -100,9 +100,12 @@ reactor:
         kind: experimental.icp
     wafer_bias:
       zone_id: process
-      coupling_target: wafer
       model:
         kind: experimental.ccp
+        electrode_gap_m: 0.06231823847112588
+        powered_area_m2: 0.0314
+        grounded_area_m2: 0.45
+        dominant_ion: Ar_plus
 run:
   steps:
   - label: ignition

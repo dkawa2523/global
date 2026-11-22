@@ -169,80 +169,66 @@ def _crane(
     _save(plt, figure, axes, target, "crane")
 
 
-def _dc_species(
-    plt: Any, result: SimulationResult, data: dict[str, Any], target: Path
+def _dc_series(
+    axes: Any,
+    actual: Mapping[str, np.ndarray],
+    reference: Mapping[str, np.ndarray],
+    panels: tuple[tuple[str, str], ...],
+    *,
+    logarithmic_density: bool = False,
 ) -> None:
-    saved = data["reference_values"]
-    figure, axis = plt.subplots(figsize=(7.4, 4.1), layout="constrained")
-    for species, label, color, style in [
-        ("Ar_star", "Ar*", GOLD, "-"),
-        ("Ar_plus", "Ar+", BLUE, "--"),
-        ("Ar2_plus", "Ar2+", PURPLE, "-."),
-    ]:
-        values = result.series(f"n[plasma,{species}]")
-        axis.semilogy(
-            result.time_s * 1e3,
-            np.where(values > 0, values, np.nan),
-            color=color,
-            linestyle=style,
-            label=label,
-        )
-        reference = float(saved[f"final_saved_{species}_density_m3"])
+    time_us = reference["time_s"] * 1.0e6
+    for axis, (key, label) in zip(axes.flat, panels, strict=True):
         axis.plot(
-            result.time_s[-1] * 1e3, reference, "o", color=color, fillstyle="none"
-        )
-    axis.semilogy(
-        result.time_s * 1e3,
-        result.series("electron_density_m3[plasma]"),
-        color=REFERENCE,
-        linestyle=":",
-        label="Electron",
-    )
-    axis.plot(
-        float(saved["peak_saved_electron_density_time_s"]) * 1e3,
-        float(saved["peak_saved_electron_density_m3"]),
-        "x",
-        color=REFERENCE,
-        markersize=8,
-        label="Reference saved electron peak",
-    )
-    axis.set(
-        xlabel="Time [ms]",
-        ylabel="Density [m$^{-3}$]",
-        title="Computed histories; open circles: reference endpoints",
-    )
-    axis.legend(fontsize=8)
-    _save(plt, figure, axis, target, "dc-species")
-
-
-def _dc_circuit(plt: Any, data: dict[str, Any], target: Path) -> None:
-    actual, reference = data["circuit_trace"], data["circuit_reference"]
-    figure, axes = plt.subplots(
-        3, 1, figsize=(7.4, 6.5), sharex=True, layout="constrained"
-    )
-    for axis, key, ref_key, label in zip(
-        axes,
-        ("plasma_voltage_V", "current_A", "reduced_field_Td"),
-        ("voltage_V", "current_A", "reduced_field_Td"),
-        ("Plasma voltage [V]", "Current [A]", "Reduced field [Td]"),
-        strict=True,
-    ):
-        axis.plot(
-            np.asarray(actual["time_s"]) * 1e3,
-            actual[key],
-            color=BLUE,
-            label="This code at saved states",
+            time_us, actual[key], color=BLUE, label="Global, fixed-composition table"
         )
         axis.plot(
-            [row["time_s"] * 1e3 for row in reference],
-            [row[ref_key] for row in reference],
+            time_us,
+            reference[key],
             color=REFERENCE,
             linestyle="--",
-            label="ZDPlaskin saved output",
+            label="ZDPlasKin saved",
         )
-        axis.set_ylabel(label)
-    axes[0].legend(fontsize=8)
-    axes[-1].set_xlabel("Time [ms]")
+        axis.set(xlim=(0, time_us[-1]), ylabel=label)
+        axis.set_xscale("symlog", linthresh=0.1)
+        if logarithmic_density:
+            axis.set_yscale("log", nonpositive="mask")
+            axis.set_ylim(bottom=1.0e10)
+            axis.minorticks_off()
+    axes.flat[0].legend(
+        loc="lower right" if logarithmic_density else "upper right", fontsize=8
+    )
+
+
+def _dc_figures(
+    plt: Any,
+    actual: Mapping[str, np.ndarray],
+    reference: Mapping[str, np.ndarray],
+    target: Path,
+) -> None:
+    density_panels = (
+        ("electron_density_m3", r"Electron density [m$^{-3}$]"),
+        ("Ar_star_density_m3", r"Ar* density [m$^{-3}$]"),
+        ("Ar_plus_density_m3", r"Ar$^+$ density [m$^{-3}$]"),
+        ("Ar2_plus_density_m3", r"Ar$_2^+$ density [m$^{-3}$]"),
+    )
+    figure, axes = plt.subplots(
+        2, 2, figsize=(7.4, 4.8), sharex=True, layout="constrained"
+    )
+    _dc_series(axes, actual, reference, density_panels, logarithmic_density=True)
+    figure.supxlabel("Time [µs]")
+    _save(plt, figure, axes, target, "dc-species")
+
+    circuit_panels = (
+        ("plasma_voltage_V", "Plasma voltage [V]"),
+        ("current_A", "Current [A]"),
+        ("reduced_field_Td", "Reduced field [Td]"),
+    )
+    figure, axes = plt.subplots(
+        3, 1, figsize=(7.4, 5.9), sharex=True, layout="constrained"
+    )
+    _dc_series(axes, actual, reference, circuit_panels)
+    axes[-1].set_xlabel("Time [µs]")
     _save(plt, figure, axes, target, "dc-circuit")
 
 
@@ -341,8 +327,39 @@ def _sensitivity(plt: Any, rows: list[dict[str, Any]], target: Path) -> None:
     _save(plt, figure, axis, target, "sensitivity")
 
 
+def _afterglow(plt: Any, report: dict[str, Any], target: Path) -> None:
+    figure, axis = plt.subplots(figsize=(7.4, 3.8), layout="constrained")
+    data = report["comparison"]
+    time_us = np.asarray(data["time_s"]) * 1.0e6
+    axis.semilogy(
+        time_us,
+        data["volume_mean_density_ratio"],
+        "-",
+        label="Global model, cylindrical diffusion",
+        color=BLUE,
+    )
+    axis.semilogy(
+        time_us,
+        data["mcrs_density_ratio"],
+        "o",
+        fillstyle="none",
+        color=REFERENCE,
+        label="Microwave measurement, digitized",
+    )
+    axis.set(
+        xlabel="Time after EUV pulse maximum [µs]",
+        ylabel=f"Electron density / density at {time_us[0]:g} µs",
+    )
+    axis.legend(fontsize=9)
+    _save(plt, figure, axis, target, "argon-afterglow")
+
+
 def write_figures(
-    report: dict[str, Any], runs: Mapping[str, SimulationResult], target: Path
+    report: dict[str, Any],
+    runs: Mapping[str, SimulationResult],
+    dc_series: Mapping[str, np.ndarray],
+    dc_reference: Mapping[str, np.ndarray],
+    target: Path,
 ) -> None:
     import matplotlib
 
@@ -357,11 +374,9 @@ def write_figures(
     _decay(plt, runs["analytic-decay"], report["analytic"]["decay"], target)
     _transport(plt, runs["analytic-transport"], report["analytic"]["transport"], target)
     _crane(plt, runs["crane_two_reaction_argon"], report["cross_code"]["crane"], target)
-    _dc_species(
-        plt, runs["zdplaskin_example2"], report["cross_code"]["zdplaskin"], target
-    )
-    _dc_circuit(plt, report["cross_code"]["zdplaskin"], target)
+    _dc_figures(plt, dc_series, dc_reference, target)
     _transient(plt, runs["argon-rtol-1e-6"], target)
     _tolerances(plt, runs, target)
     _sampling(plt, report["event_sampling"], target)
     _sensitivity(plt, report["sensitivity"], target)
+    _afterglow(plt, report["argon_afterglow"], target)

@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 case:
   name: argon-sampling-20us
   description: イベント積分の保存間隔依存。保存間隔20 μs、rtol=1e-8固定。

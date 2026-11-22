@@ -15,7 +15,7 @@ from plasma_global import load_case, simulate, write_result
 from plasma_global.core.result import SimulationResult, to_plain_mapping
 from plasma_global.examples import initialize_example
 from plasma_global.input._schema_output import NetworkConfig, PlotConfig
-from plasma_global.output import network_result_h5, read_result_h5
+from plasma_global.output import ResultPaths, network_result_h5, read_result_h5
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "docs/assets"
@@ -59,7 +59,7 @@ def _layout(path: Path) -> dict[str, object]:
 
 def _run(
     name: str, output: Path, plots: dict[str, PlotConfig] | None = None
-) -> tuple[SimulationResult, Path]:
+) -> tuple[SimulationResult, ResultPaths]:
     case = initialize_example(name, output / "inputs" / name)
     if plots:
         document = yaml.safe_load(case.read_text(encoding="utf-8"))
@@ -73,6 +73,8 @@ def _run(
     if result.status.success is not True:
         raise RuntimeError(f"{name}: {result.status.message}")
     paths = write_result(result, output / "runs" / name)
+    if not paths.artifacts.success:
+        raise RuntimeError(f"{name}: artifacts failed: {paths.artifacts}")
     restored = read_result_h5(paths.result_h5)
     if not np.array_equal(result.state, restored.state):
         raise ValueError(f"{name}: saved states differ from the calculation")
@@ -80,12 +82,12 @@ def _run(
         if not np.array_equal(values, restored.series(series)):
             raise ValueError(f"{name}: saved observable differs: {series}")
     print(f"{name}: {result.n_times} saved times, HDF5 round trip verified", flush=True)
-    return restored, paths.result_h5
+    return restored, paths
 
 
 def render(output: Path) -> None:
     output.mkdir(parents=True, exist_ok=False)
-    argon, argon_h5 = _run("argon_analysis", output)
+    argon, argon_paths = _run("argon_analysis", output)
     configured = {
         "dc-circuit": PlotConfig(
             series=[
@@ -96,22 +98,33 @@ def render(output: Path) -> None:
             time_unit="ms",
         )
     }
-    dc, dc_h5 = _run("zdplaskin_example2", output, configured)
-    network_result_h5(
-        argon_h5,
+    dc, dc_paths = _run("zdplaskin_example2", output, configured)
+    mechanism_files = network_result_h5(
+        argon_paths.result_h5,
         output / "ion-mechanism",
         config=NetworkConfig(
             mode="mechanism", species=["Ar_plus"], domains=["gas", "boundary"]
         ),
     )
-    copies = {
-        output / "runs/argon_analysis/plots/plasma.png": "argon-plasma.png",
-        output / "runs/argon_analysis/plots/densities.png": "argon-densities.png",
-        output / "runs/argon_analysis/plots/fractions.png": "argon-fractions.png",
-        output / "runs/argon_analysis/networks/events.svg": "argon-events.svg",
-        output / "ion-mechanism/diagrams/network.svg": "argon-mechanism.svg",
-        output / "runs/zdplaskin_example2/plots/dc-circuit.png": "dc-circuit.png",
+    generated = (
+        *argon_paths.analysis_files,
+        *dc_paths.analysis_files,
+        *mechanism_files,
+    )
+    figure_names = {
+        "plasma.png": "argon-plasma.png",
+        "densities.png": "argon-densities.png",
+        "fractions.png": "argon-fractions.png",
+        "events.svg": "argon-events.svg",
+        "network.svg": "argon-mechanism.svg",
+        "dc-circuit.png": "dc-circuit.png",
     }
+    copies = {}
+    for filename, published in figure_names.items():
+        matches = [path for path in generated if path.name == filename]
+        if len(matches) != 1:
+            raise ValueError(f"expected one generated {filename}, found {matches}")
+        copies[matches[0]] = published
     for source, name in copies.items():
         shutil.copy2(source, ASSETS / name)
     excerpts = {
@@ -133,7 +146,7 @@ def render(output: Path) -> None:
                     "gas_event_count[plasma,G_AR_ION]",
                 ),
             ),
-            "hdf5": _layout(argon_h5),
+            "hdf5": _layout(argon_paths.result_h5),
         },
         "dc": {
             "state_labels": dc.state_labels,
@@ -145,7 +158,7 @@ def render(output: Path) -> None:
                     "electron_density_m3[plasma]",
                 )
             },
-            "hdf5": _layout(dc_h5),
+            "hdf5": _layout(dc_paths.result_h5),
         },
     }
     (output / "values.json").write_text(

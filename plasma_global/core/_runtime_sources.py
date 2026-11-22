@@ -243,7 +243,7 @@ class RuntimeSourceEvaluator:
         *,
         collect_ledger: bool,
     ) -> SurfaceTerms:
-        rates_by_zone: dict[str, dict[str, float]] = (
+        rates_by_zone: dict[str, dict[tuple[str, str], float]] = (
             {zone.zone_id: {} for zone in self.model.zones} if collect_ledger else {}
         )
         if self.model.surface_model is None:
@@ -265,9 +265,9 @@ class RuntimeSourceEvaluator:
                 surface.surface_id: surface.zone_id
                 for surface in self.model.surface_model.surfaces
             }
-            for rate_id, rate in evaluation.rates_m2_s.items():
-                surface_id = rate_id.rsplit("@", 1)[-1]
-                rates_by_zone[surface_zone[surface_id]][rate_id] = rate
+            for event_key, rate in evaluation.rates_m2_s.items():
+                _reaction_id, surface_id = event_key
+                rates_by_zone[surface_zone[surface_id]][event_key] = rate
         return SurfaceTerms(evaluation, rates_by_zone)
 
     def evaluate_energy_terms(
@@ -299,11 +299,10 @@ class RuntimeSourceEvaluator:
             ],
             dtype=float,
         )
-        equilibrium = self.model.heavy_energy_closure.energy_J_m3(
-            prepared.density_by_zone, wall_temperature
-        )
-        return -self.model.heavy_energy_closure.wall_relaxation_s_inv * (
-            prepared.heavy_energy_by_zone - equilibrium
+        return self.model.heavy_energy_closure.wall_exchange_J_m3_s(
+            prepared.density_by_zone,
+            prepared.heavy_energy_by_zone,
+            wall_temperature_K=wall_temperature,
         )
 
     def _elastic_heating(
@@ -336,21 +335,14 @@ class RuntimeSourceEvaluator:
     def extension_rhs(
         self,
         prepared: PreparedEvaluationState,
-        reactions: ReactionWallEvaluation,
         surface: SurfaceTerms,
     ) -> np.ndarray | None:
         if self.model.extension_accumulator is None:
             return None
-        ion_flux_by_surface: dict[str, float] = {}
-        for (surface_id, _species_id), flux in reactions.ion_flux_m2_s.items():
-            ion_flux_by_surface[surface_id] = (
-                ion_flux_by_surface.get(surface_id, 0.0) + flux
-            )
         try:
             extension_rhs = np.asarray(
                 self.model.extension_accumulator.rhs(
                     prepared.values[self.model.layout.extension_slice],
-                    drivers={"ion_flux_m2_s": ion_flux_by_surface},
                     surface_rates_m2_s=(
                         MappingProxyType({})
                         if surface.evaluation is None

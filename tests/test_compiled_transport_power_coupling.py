@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from _model_fixtures import constant_field_port, constant_mean_energy_table
 
 import plasma_global.core.solver as solver_module
 from plasma_global.chemistry.compile import compile_chemistry
@@ -41,9 +42,11 @@ from plasma_global.models.kinetics import (
 from plasma_global.models.power import (
     CompiledPowerCommand,
     ExternalTablePowerPort,
+    PowerContribution,
     PowerCoordinator,
     PowerPortResult,
     PowerState,
+    PowerTopology,
     PrescribedPowerPort,
 )
 from plasma_global.models.rates import RateContext
@@ -59,7 +62,7 @@ class ChemistryFixture:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[object, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
 
@@ -81,7 +84,7 @@ def inert_chemistry() -> ChemistryFixture:
         reactant_orders=np.zeros((0, 2)),
         electron_orders=np.zeros(0),
         rate_evaluators=(),
-        energy_loss_eV=np.zeros(0),
+        electron_energy_transfer_eV=np.zeros(0),
         gas_heating_eV=np.zeros(0),
         reaction_zones=(),
     )
@@ -97,7 +100,7 @@ def reactive_chemistry(rate_evaluator: object) -> ChemistryFixture:
         reactant_orders=np.array([[1.0, 0.0, 0.0]]),
         electron_orders=np.array([0.0]),
         rate_evaluators=(rate_evaluator,),
-        energy_loss_eV=np.array([0.0]),
+        electron_energy_transfer_eV=np.array([0.0]),
         gas_heating_eV=np.zeros(1),
         reaction_zones=((),),
     )
@@ -126,15 +129,13 @@ class _StateDependentDistributor:
         return PowerPortResult(
             self.port_id,
             self.zone_id,
-            electron_power_W=0.0,
+            contributions=(PowerContribution(self.target_zone_id, remote_power_W),),
             observables={"remote_power_W": remote_power_W},
         )
 
-    def power_by_zone(self, result: PowerPortResult) -> dict[str, float]:
-        return {
-            self.zone_id: result.electron_power_W,
-            self.target_zone_id: result.observables["remote_power_W"],
-        }
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(self.port_id, self.zone_id, (self.target_zone_id,))
 
 
 def _icp_downstream_case() -> tuple[CompiledGlobalModel, RecipeSegment, InitialState]:
@@ -319,7 +320,7 @@ def test_icp_downstream_power_jacobian_contains_finite_difference_support() -> N
     assert np.all(structural_support[numerical_support])
 
 
-def test_generic_distributor_only_adds_remote_electron_energy_dependencies() -> None:
+def test_declared_remote_contribution_adds_its_electron_energy_dependencies() -> None:
     port = _StateDependentDistributor("distributed", "source", "process")
     segment = RecipeSegment("powered", 0.0, 1.0)
     model = CompiledGlobalModel(
@@ -493,27 +494,17 @@ def test_derivative_preserves_rf_nonfinite_observable_error() -> None:
 
 
 def test_icp_downstream_power_rejects_an_unknown_zone() -> None:
-    coordinator = PowerCoordinator(
-        (
-            ICPPowerPort(
-                port_id="icp",
-                zone_id="source",
-                downstream_zone_id="missing",
-                downstream_fraction=0.25,
+    with pytest.raises(CaseValidationError, match=r"unknown zones.*missing"):
+        PowerCoordinator(
+            (
+                ICPPowerPort(
+                    port_id="icp",
+                    zone_id="source",
+                    downstream_zone_id="missing",
+                    downstream_fraction=0.25,
+                ),
             ),
-        ),
-        ("source",),
-    )
-
-    with pytest.raises(ModelDomainError, match="unknown zone 'missing'"):
-        coordinator.evaluate(
-            time_s=0.0,
-            commands={
-                "icp": CompiledPowerCommand(kind="power", power_W=300.0),
-            },
-            electron_density_m3_by_zone={"source": 3.0e17},
-            neutral_density_m3_by_zone={"source": 2.4e20},
-            mean_energy_eV_by_zone={"source": 3.0},
+            ("source",),
         )
 
 
@@ -722,6 +713,12 @@ class FixedFieldPort:
     zone_id: str
     field_Td: float
 
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id, self.zone_id, (self.zone_id,), (), (self.zone_id,)
+        )
+
     def evaluate(
         self,
         _time_s: float,
@@ -732,17 +729,18 @@ class FixedFieldPort:
         return PowerPortResult(
             port_id=self.port_id,
             zone_id=self.zone_id,
-            electron_power_W=mobility,
+            contributions=(PowerContribution(self.zone_id, mobility),),
             reduced_field_Td=self.field_Td,
         )
 
 
 def test_local_field_requires_a_source_in_every_zone_before_runtime() -> None:
     coordinator = PowerCoordinator(
-        ports=(FixedFieldPort("source_field", "source", 1.5),),
+        ports=(constant_field_port("source", 1.5),),
         zone_ids=("source", "process"),
     )
     zones = (Zone("source", 1.0), Zone("process", 1.0))
+    kinetics = {zone.zone_id: constant_mean_energy_table(3.0) for zone in zones}
 
     with pytest.raises(
         CaseValidationError, match=r"process.*lacks E/N|lacks E/N.*process"
@@ -751,25 +749,35 @@ def test_local_field_requires_a_source_in_every_zone_before_runtime() -> None:
             chemistry=reactive_chemistry(1.0),
             zones=zones,
             segments=(RecipeSegment("missing", 0.0, 1.0),),
-            electron_closure=LocalFieldClosure(lambda field: field),
+            electron_closure=LocalFieldClosure(),
+            electron_kinetics_by_zone=kinetics,
             power_coordinator=coordinator,
         )
 
     model = CompiledGlobalModel(
         chemistry=reactive_chemistry(1.0),
         zones=zones,
-        segments=(
-            RecipeSegment(
-                "complete",
-                0.0,
-                1.0,
-                reduced_field_Td_by_zone={"process": 2.0},
+        segments=(RecipeSegment("complete", 0.0, 1.0),),
+        electron_closure=LocalFieldClosure(),
+        electron_kinetics_by_zone=kinetics,
+        power_coordinator=PowerCoordinator(
+            ports=(
+                constant_field_port("source", 1.5),
+                constant_field_port("process", 2.0),
             ),
+            zone_ids=("source", "process"),
         ),
-        electron_closure=LocalFieldClosure(lambda field: field),
-        power_coordinator=coordinator,
     )
-    assert model.segments[0].reduced_field_Td_by_zone["process"] == 2.0
+    state = model.initial_state(
+        InitialState(
+            densities_m3_by_zone={
+                zone.zone_id: {"A": 5.0, "B": 0.0, "ion": 1.0} for zone in zones
+            }
+        )
+    )
+    evaluated = model.evaluate(0.0, state, model.segments[0])
+    assert evaluated.electron_states["source"].reduced_field_Td == 1.5
+    assert evaluated.electron_states["process"].reduced_field_Td == 2.0
 
 
 def test_local_field_port_coupling_converges_and_drives_table_rates(
@@ -787,7 +795,7 @@ def test_local_field_port_coupling_converges_and_drives_table_rates(
         ),
         zones=(Zone("z", 1.0),),
         segments=(segment,),
-        electron_closure=LocalFieldClosure(table.mean_energy_from_field),
+        electron_closure=LocalFieldClosure(),
         power_coordinator=coordinator,
         electron_kinetics_by_zone={"z": table},
     )
@@ -813,6 +821,12 @@ class OscillatingFieldPort:
     port_id: str = "oscillating"
     zone_id: str = "z"
 
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id, self.zone_id, (self.zone_id,), (), (self.zone_id,)
+        )
+
     def evaluate(
         self,
         _time_s: float,
@@ -821,7 +835,7 @@ class OscillatingFieldPort:
     ) -> PowerPortResult:
         mobility = float(state.electron_mobility_m2_V_s)
         field = 2.0 if mobility < 1.5 else 1.0
-        return PowerPortResult(self.port_id, self.zone_id, 0.0, reduced_field_Td=field)
+        return PowerPortResult(self.port_id, self.zone_id, reduced_field_Td=field)
 
 
 def test_power_kinetics_coupling_fails_after_twelve_iterations(tmp_path: Path) -> None:

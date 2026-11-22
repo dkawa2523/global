@@ -10,6 +10,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from plasma_global._input_sources import InputSourceStore
+
 _PACKAGE_NAME = "plasma-global-model"
 
 
@@ -21,67 +23,6 @@ def _file_sha256(path: Path) -> tuple[str, int]:
             digest.update(chunk)
             size += len(chunk)
     return digest.hexdigest(), size
-
-
-def _add_input_role(
-    roles: dict[Path, set[str]], path: Path | str | None, role: str
-) -> None:
-    if path is not None:
-        roles.setdefault(Path(path).resolve(), set()).add(role)
-
-
-def _input_roles(case: Any, chemistry_data: Any) -> dict[Path, set[str]]:
-    roles: dict[Path, set[str]] = {}
-    _add_input_role(roles, case.source_path, "case")
-    for path in case.included_files:
-        _add_input_role(roles, path, "case_include")
-    for path in chemistry_data.source_files:
-        _add_input_role(roles, path, "chemistry_input")
-    _add_input_role(
-        roles,
-        getattr(case.models.electrons, "file", None),
-        "electron_kinetics_table",
-    )
-    _add_input_role(
-        roles,
-        getattr(case.models.electron_density, "file", None),
-        "electron_density_profile",
-    )
-    for port in case.reactor.power_ports:
-        _add_input_role(
-            roles, getattr(port.model, "file", None), f"power_port:{port.port_id}"
-        )
-    for step in case.recipe.steps:
-        for port_id, command in step.commands.power_ports.items():
-            _add_input_role(
-                roles,
-                getattr(command, "file", None),
-                f"recipe_power_override:{step.step_id}:{port_id}",
-            )
-    return roles
-
-
-def collect_file_provenance(case: Any, chemistry_data: Any) -> Mapping[str, Any]:
-    """Hash every file whose bytes have been consumed by case compilation."""
-
-    from plasma_global.input._resolved_case import ResolvedCase
-
-    if not isinstance(case, ResolvedCase):
-        raise TypeError("case must be a schema-v4 ResolvedCase")
-    files: dict[str, Any] = {}
-    roles = _input_roles(case, chemistry_data)
-
-    def normalized_path(path: Path) -> str:
-        return str(path).casefold()
-
-    for path in sorted(roles, key=normalized_path):
-        digest, size = _file_sha256(path)
-        files[str(path)] = {
-            "sha256": digest,
-            "size_bytes": size,
-            "roles": sorted(roles[path]),
-        }
-    return MappingProxyType({"algorithm": "sha256", "files": MappingProxyType(files)})
 
 
 def _source_fingerprint(package_directory: Path) -> dict[str, Any] | None:
@@ -155,21 +96,19 @@ def software_provenance() -> Mapping[str, Any]:
 
 
 def build_artifact_provenance(
-    case: Any,
-    chemistry_data: Any,
+    sources: InputSourceStore,
     base: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Enrich domain provenance once, before simulation or audit output."""
 
     return {
         **dict(base),
-        "input_files": collect_file_provenance(case, chemistry_data),
+        "input_files": sources.provenance(),
         "software": software_provenance(),
     }
 
 
 __all__ = [
     "build_artifact_provenance",
-    "collect_file_provenance",
     "software_provenance",
 ]

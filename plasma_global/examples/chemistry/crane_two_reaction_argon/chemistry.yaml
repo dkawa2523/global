@@ -73,4 +73,3 @@ rate_models:
     kind: constant
     value: 1.0e-37
 cross_sections: []
-experimental: {}

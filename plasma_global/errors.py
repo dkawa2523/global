@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from plasma_global.core.result import SimulationResult
+
 
 class PlasmaGlobalError(Exception):
     """Base class for expected, user-facing failures."""
@@ -26,16 +31,25 @@ class CouplingConvergenceError(PlasmaGlobalError, RuntimeError):
 class IntegrationError(PlasmaGlobalError, RuntimeError):
     """The time integrator failed or produced a materially invalid state."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_result: SimulationResult | None = None,
+        failure_time_s: float | None = None,
+        failure_segment_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.partial_result = partial_result
+        self.failure_time_s = failure_time_s
+        self.failure_segment_id = failure_segment_id
 
-class CoreModelError(PlasmaGlobalError):
-    """Base class for failures raised while compiling or evaluating a model."""
 
-
-class ModelConfigurationError(CaseValidationError, CoreModelError):
+class ModelConfigurationError(CaseValidationError):
     """The supplied model cannot define one unambiguous physical system."""
 
 
-class StateDomainError(ModelDomainError, CoreModelError):
+class StateDomainError(ModelDomainError):
     """An evolving state is outside the validity domain of its model."""
 
 
@@ -43,17 +57,11 @@ class QuasineutralityError(StateDomainError):
     """Heavy-particle charge implies a negative electron density."""
 
 
-class MigrationError(PlasmaGlobalError, ValueError):
-    """A legacy case cannot be converted without an explicit user choice."""
-
-
 __all__ = [
     "CaseValidationError",
     "ChemistryError",
-    "CoreModelError",
     "CouplingConvergenceError",
     "IntegrationError",
-    "MigrationError",
     "ModelConfigurationError",
     "ModelDomainError",
     "PlasmaGlobalError",

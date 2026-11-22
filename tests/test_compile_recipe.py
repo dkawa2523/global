@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -8,231 +9,36 @@ import pytest
 from plasma_global.build import compile_case
 from plasma_global.core.transport import SCCM_TO_PARTICLES_PER_S
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._compile_recipe_power import _resolved_port_command
-from plasma_global.input._resolved_case import (
-    DCSeriesCommand,
-    DCSeriesModel,
-    ExperimentalCCPCommand,
-    ExperimentalCCPModel,
-    ExperimentalICPCommand,
-    ExperimentalICPModel,
-    ExperimentalRFEnvelopeCommand,
-    ExperimentalRFEnvelopeModel,
-    ExternalTableCommand,
-    ExternalTableModel,
-    PowerModel,
-    PowerPortCommand,
-    PowerPortConfig,
-    PrescribedPowerCommand,
-    PrescribedPowerModel,
-    ResolvedCase,
-)
-from plasma_global.input.load import load_case
-from plasma_global.models.external_table import ExternalTableStore
+from plasma_global.input.load import case_from_mapping, load_case
 
 FIXTURE = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
 
 
-@pytest.mark.parametrize(
-    ("model", "command", "enabled", "expected"),
-    [
-        (
-            PrescribedPowerModel(
-                kind="prescribed_power",
-                electron_fraction=1.0,
-                gas_fraction=0.0,
-            ),
-            PrescribedPowerCommand(kind="prescribed_power", absorbed_power_W=12.0),
-            True,
-            ("power", 12.0, None),
-        ),
-        (
-            PrescribedPowerModel(
-                kind="prescribed_power",
-                electron_fraction=1.0,
-                gas_fraction=0.0,
-            ),
-            PrescribedPowerCommand(kind="prescribed_power", absorbed_power_W=12.0),
-            False,
-            ("off", None, None),
-        ),
-        (
-            PrescribedPowerModel(
-                kind="prescribed_power",
-                electron_fraction=1.0,
-                gas_fraction=0.0,
-            ),
-            PrescribedPowerCommand(kind="prescribed_power"),
-            True,
-            None,
-        ),
-        (
-            DCSeriesModel(
-                kind="dc_series",
-                ballast_resistance_ohm=1.0,
-                gap_m=1.0,
-                electrode_area_m2=1.0,
-                source_voltage_V=100.0,
-            ),
-            DCSeriesCommand(kind="dc_series"),
-            True,
-            ("voltage", None, 100.0),
-        ),
-        (
-            DCSeriesModel(
-                kind="dc_series",
-                ballast_resistance_ohm=1.0,
-                gap_m=1.0,
-                electrode_area_m2=1.0,
-            ),
-            DCSeriesCommand(kind="dc_series", off_voltage_V=-5.0),
-            False,
-            ("voltage", None, -5.0),
-        ),
-        (
-            ExperimentalRFEnvelopeModel(
-                kind="experimental.rf_envelope",
-                control="voltage",
-            ),
-            ExperimentalRFEnvelopeCommand(
-                kind="experimental.rf_envelope",
-                voltage_rms_V=22.0,
-            ),
-            True,
-            ("voltage", None, 22.0),
-        ),
-        (
-            ExperimentalCCPModel(
-                kind="experimental.ccp",
-                control="absorbed_power",
-            ),
-            ExperimentalCCPCommand(
-                kind="experimental.ccp",
-                absorbed_power_W=9.0,
-            ),
-            True,
-            ("power", 9.0, None),
-        ),
-        (
-            ExperimentalICPModel(kind="experimental.icp"),
-            ExperimentalICPCommand(
-                kind="experimental.icp",
-                delivered_power_W=8.0,
-            ),
-            True,
-            ("power", 8.0, None),
-        ),
-        (
-            ExperimentalICPModel(kind="experimental.icp"),
-            ExperimentalICPCommand(
-                kind="experimental.icp",
-                delivered_power_W=8.0,
-            ),
-            False,
-            ("off", None, None),
-        ),
-    ],
-)
-def test_resolved_port_command_preserves_each_model_contract(
-    model: PowerModel,
-    command: PowerPortCommand,
-    enabled: bool,
-    expected: tuple[str, float | None, float | None] | None,
-) -> None:
-    port = PowerPortConfig(port_id="source", zone_id="plasma", model=model)
-
-    result = _resolved_port_command(
-        port,
-        command,
-        enabled=enabled,
-        external_tables=ExternalTableStore(),
-    )
-
-    if expected is None:
-        assert result is None
-    else:
-        assert result is not None
-        assert (result.kind, result.power_W, result.voltage_V) == expected
-
-
-def test_resolved_port_command_keeps_model_mismatch_error() -> None:
-    port = PowerPortConfig(
-        port_id="source",
-        zone_id="plasma",
-        model=PrescribedPowerModel(
-            kind="prescribed_power",
-            electron_fraction=1.0,
-            gas_fraction=0.0,
-        ),
-    )
-    command = ExperimentalICPCommand(
-        kind="experimental.icp",
-        delivered_power_W=1.0,
-    )
-
-    with pytest.raises(
-        CaseValidationError,
-        match="power port 'source' command does not match prescribed_power",
-    ):
-        _resolved_port_command(
-            port,
-            command,
-            enabled=True,
-            external_tables=ExternalTableStore(),
-        )
-
-
-def test_resolved_external_table_command_keeps_bound_table(tmp_path: Path) -> None:
-    table_path = tmp_path / "power.csv"
-    table_path.write_text(
-        "time_s,electron_power_W\n0.0,1.0\n1.0,2.0\n",
-        encoding="utf-8",
-    )
-    port = PowerPortConfig(
-        port_id="source",
-        zone_id="plasma",
-        model=ExternalTableModel(kind="external_table", file=table_path),
-    )
-
-    result = _resolved_port_command(
-        port,
-        ExternalTableCommand(kind="external_table"),
-        enabled=False,
-        external_tables=ExternalTableStore(),
-    )
-
-    assert result is not None
-    assert result.kind == "external_table"
-    assert result.external_table is not None
-    assert result.time_dependent
-
-
 def test_compiled_steps_preserve_forcing_temperature_and_command_order() -> None:
     data = load_case(FIXTURE).model_dump(mode="python")
-    data["reactor"]["power_ports"][0]["model"]["default_absorbed_power_W"] = 0.0
-    data["reactor"]["gas_inlets"] = [
-        {
-            "inlet_id": "feed",
+    data["reactor"]["power_ports"]["source"]["model"]["absorbed_power_W"] = 0.0
+    data["reactor"]["gas_inlets"] = {
+        "feed": {
             "zone_id": "plasma",
             "flow_sccm": {"Ar": 1.0},
             "temperature_K": 350.0,
         }
-    ]
-    first_step = data["recipe"]["steps"][0]
+    }
+    first_step = data["run"]["steps"][0]
     first_step["commands"]["gas_inlets"] = {"feed": {"flow_sccm": {"Ar": 4.0}}}
-    data["recipe"]["steps"].append(
+    data["run"]["steps"].append(
         {
-            "step_id": "idle",
+            "label": "idle",
             "duration_s": 2.0e-7,
             "commands": {},
         }
     )
 
-    compiled = compile_case(ResolvedCase.model_validate(data))
+    compiled = compile_case(case_from_mapping(data, base_directory=FIXTURE.parent))
 
     assert [segment.segment_id for segment in compiled.segments] == [
-        first_step["step_id"],
-        "idle",
+        "step_1",
+        "step_2",
     ]
     assert [segment.start_s for segment in compiled.segments] == pytest.approx(
         [0.0, 1.0e-7]
@@ -266,10 +72,10 @@ def test_compiled_steps_preserve_forcing_temperature_and_command_order() -> None
 
 def test_compile_rejects_a_step_without_a_required_power_setpoint() -> None:
     data = load_case(FIXTURE).model_dump(mode="python")
-    data["reactor"]["power_ports"][0]["model"].pop("default_absorbed_power_W", None)
-    data["recipe"]["steps"][0]["commands"]["power_ports"] = {}
+    data["reactor"]["power_ports"]["source"]["model"].pop("absorbed_power_W", None)
+    data["run"]["steps"][0]["commands"]["power_ports"] = {}
     with pytest.raises(CaseValidationError, match="requires a power command"):
-        compile_case(ResolvedCase.model_validate(data))
+        compile_case(case_from_mapping(data, base_directory=FIXTURE.parent))
 
 
 @pytest.mark.parametrize("interpolation", ["linear", "previous"])
@@ -279,14 +85,51 @@ def test_compile_rejects_external_table_without_full_recipe_coverage(
     path = tmp_path / "partial.csv"
     path.write_text("time_s,electron_power_W\n0,1\n1e-8,2\n", encoding="utf-8")
     data = load_case(FIXTURE).model_dump(mode="python")
-    data["reactor"]["power_ports"][0]["model"] = {
+    data["reactor"]["power_ports"]["source"]["model"] = {
         "kind": "external_table",
         "file": path,
         "interpolation": interpolation,
     }
-    data["recipe"]["steps"][0]["commands"]["power_ports"] = {}
+    data["run"]["steps"][0]["commands"]["power_ports"] = {}
     with pytest.raises(CaseValidationError, match="does not cover recipe interval"):
-        compile_case(ResolvedCase.model_validate(data))
+        compile_case(case_from_mapping(data, base_directory=FIXTURE.parent))
+
+
+def test_only_effective_table_bindings_supply_field_in_each_step(
+    tmp_path: Path,
+) -> None:
+    field = tmp_path / "field.csv"
+    field.write_text(
+        "time_s,electron_power_W,reduced_field_Td\n0,0,2\n1,0,2\n", encoding="utf-8"
+    )
+    power = tmp_path / "power.csv"
+    power.write_text("time_s,electron_power_W\n0,0\n1,0\n", encoding="utf-8")
+    data = load_case(FIXTURE).model_dump(mode="python")
+    data["reactor"]["power_ports"] = {
+        name: {
+            "zone_id": "plasma",
+            "model": {"kind": "external_table", "file": field},
+        }
+        for name in ("first", "second")
+    }
+    steps = data["run"]["steps"]
+    steps[0]["commands"]["power_ports"] = {"second": {"file": power}}
+    steps.append(
+        {
+            "label": "next",
+            "duration_s": 1e-7,
+            "commands": {"power_ports": {"first": {"file": power}}},
+        }
+    )
+    compiled = compile_case(case_from_mapping(data, base_directory=FIXTURE.parent))
+    assert [
+        [
+            name
+            for name, command in segment.port_commands.items()
+            if command.produces_reduced_field
+        ]
+        for segment in compiled.segments
+    ] == [["first"], ["second"]]
 
 
 @pytest.mark.parametrize(
@@ -297,7 +140,7 @@ def test_compile_rejects_external_table_without_full_recipe_coverage(
                 "kind": "prescribed_power",
                 "electron_fraction": 1.0,
                 "gas_fraction": 0.0,
-                "default_absorbed_power_W": 2.0,
+                "absorbed_power_W": 2.0,
             },
             ("power", 2.0, None),
         ),
@@ -313,19 +156,23 @@ def test_compile_rejects_external_table_without_full_recipe_coverage(
             ("voltage", None, 2.0),
         ),
         (
-            {"kind": "experimental.rf_envelope", "default_absorbed_power_W": 2.0},
+            {"kind": "experimental.rf_envelope", "absorbed_power_W": 2.0},
             ("power", 2.0, None),
         ),
         (
             {
                 "kind": "experimental.ccp",
                 "control": "voltage",
-                "default_voltage_rms_V": 2.0,
+                "voltage_rms_V": 2.0,
+                "electrode_gap_m": 0.1,
+                "powered_area_m2": 0.01,
+                "grounded_area_m2": 0.02,
+                "dominant_ion": "Ar_plus",
             },
             ("voltage", None, 2.0),
         ),
         (
-            {"kind": "experimental.icp", "default_delivered_power_W": 2.0},
+            {"kind": "experimental.icp", "delivered_power_W": 2.0},
             ("power", 2.0, None),
         ),
     ],
@@ -334,8 +181,88 @@ def test_omitted_recipe_commands_resolve_to_the_model_default(
     model: dict, expected: tuple
 ) -> None:
     data = load_case(FIXTURE).model_dump(mode="python")
-    data["reactor"]["power_ports"][0]["model"] = model
-    data["recipe"]["steps"][0]["commands"]["power_ports"] = {}
-    compiled = compile_case(ResolvedCase.model_validate(data))
+    data["reactor"]["power_ports"]["source"]["model"] = model
+    data["run"]["steps"][0]["commands"]["power_ports"] = {}
+    compiled = compile_case(case_from_mapping(data, base_directory=FIXTURE.parent))
     command = compiled.segments[0].port_commands["source"]
     assert (command.kind, command.power_W, command.voltage_V) == expected
+
+
+@pytest.mark.parametrize("target", ["process", "plasma"])
+def test_public_icp_downstream_deposition_matches_yaml_and_python(tmp_path, target):
+    data = load_case(FIXTURE).to_dict()
+    data["reactor"]["zones"]["process"] = deepcopy(data["reactor"]["zones"]["plasma"])
+    data["reactor"]["zones"]["process"]["volume_m3"] = 0.02
+    data["reactor"]["power_ports"] = {
+        "icp": {
+            "zone_id": "plasma",
+            "model": {
+                "kind": "experimental.icp",
+                "delivered_power_W": 300.0,
+                "downstream_zone_id": target,
+                "downstream_fraction": 0.25,
+            },
+        }
+    }
+    data["run"]["steps"][0]["commands"]["power_ports"] = {}
+    case = case_from_mapping(data, base_directory=FIXTURE.parent)
+    path = tmp_path / "icp.yaml"
+    path.write_text(case.to_yaml(relative_to=tmp_path), encoding="utf-8")
+    python = compile_case(case)
+    yaml = compile_case(load_case(path))
+    results = []
+    for prepared in (python, yaml):
+        model = prepared.model
+        state = model.initial_state(prepared.initial_state)
+        evaluation = model.evaluate(0.0, state, prepared.segments[0])
+        coupling = evaluation.power_coupling
+        assert coupling is not None
+        port = coupling.port_results["icp"]
+        absorbed = port.observables["absorbed_power_W"]
+        assert sum(coupling.electron_power_W_by_zone.values()) == pytest.approx(
+            absorbed
+        )
+        assert absorbed + port.observables["reflected_power_W"] == pytest.approx(300.0)
+        expected = absorbed if target == "plasma" else 0.75 * absorbed
+        assert coupling.electron_power_W_by_zone["plasma"] == pytest.approx(expected)
+        assert coupling.electron_power_W_by_zone["process"] == pytest.approx(
+            0.0 if target == "plasma" else 0.25 * absorbed
+        )
+        results.append(evaluation.derivative)
+    np.testing.assert_allclose(*results, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize("gap_m", [0.01, 0.02])
+def test_public_ccp_uses_explicit_geometry_and_selected_ion(gap_m: float) -> None:
+    data = load_case(FIXTURE).to_dict()
+    data["reactor"]["power_ports"]["source"]["model"] = {
+        "kind": "experimental.ccp",
+        "control": "voltage",
+        "voltage_rms_V": 100.0,
+        "electrode_gap_m": gap_m,
+        "powered_area_m2": 0.03,
+        "grounded_area_m2": 0.12,
+        "dominant_ion": "Ar_plus",
+    }
+    data["run"]["steps"][0]["commands"]["power_ports"] = {}
+    prepared = compile_case(case_from_mapping(data, base_directory=FIXTURE.parent))
+    model = prepared.model
+    state = model.initial_state(prepared.initial_state)
+    evaluation = model.evaluate(0.0, state, prepared.segments[0])
+    coupling = evaluation.power_coupling
+    assert coupling is not None
+    result = coupling.port_results["source"]
+    expected = (
+        result.observables["rf_current_rms_A"]
+        * result.observables["bulk_resistance_ohm"]
+        / gap_m
+        / 2e20
+        / 1e-21
+    )
+    assert result.reduced_field_Td == pytest.approx(expected)
+    assert model.power_coordinator is not None
+    port = model.power_coordinator.ports[0]
+    assert port.electrode_gap_m == gap_m
+    assert port.powered_area_m2 == 0.03
+    assert port.grounded_area_m2 == 0.12
+    assert port.dominant_ion_mass_kg == pytest.approx(39.948 * 1.66053906660e-27)

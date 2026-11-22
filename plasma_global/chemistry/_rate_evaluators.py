@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import csv
+import io
 from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 
+from plasma_global._input_sources import InputSourceStore
 from plasma_global.chemistry._maxwell import compile_maxwell_rate
 from plasma_global.chemistry.data import CrossSectionData, RateModelData
 from plasma_global.errors import ChemistryError, ModelDomainError
@@ -21,9 +23,14 @@ RateEvaluator = Callable[[Any], float]
 RateTableLoader = Callable[[Any], tuple[np.ndarray, np.ndarray]]
 
 
-def _rate_table_rows(path: Any) -> list[tuple[float, float]]:
+def _rate_table_rows(
+    path: Any, sources: InputSourceStore | None
+) -> list[tuple[float, float]]:
     try:
-        with open(path, encoding="utf-8-sig", newline="") as stream:
+        store = sources if sources is not None else InputSourceStore()
+        with io.StringIO(
+            store.read_text(path, "chemistry.rate_table"), newline=""
+        ) as stream:
             reader = csv.reader(stream)
             header = next(reader, None)
             if header != ["x", "value"]:
@@ -42,10 +49,12 @@ def _rate_table_rows(path: Any) -> list[tuple[float, float]]:
     return rows
 
 
-def load_rate_table(path: Any) -> tuple[np.ndarray, np.ndarray]:
+def load_rate_table(
+    path: Any, *, sources: InputSourceStore | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """Load the exact two-column table used by ``tabulated_1d`` rates."""
 
-    values = np.asarray(_rate_table_rows(path), dtype=float)
+    values = np.asarray(_rate_table_rows(path, sources), dtype=float)
     if values.ndim != 2 or values.shape[1] != 2 or values.shape[0] < 2:
         raise ChemistryError(
             f"rate table {path} must have exactly two columns and at least two rows"
@@ -79,7 +88,7 @@ def _bounded_interp(
     axis: np.ndarray, values: np.ndarray, x: float, *, name: str, bounds: str = "error"
 ) -> float:
     if x < axis[0] or x > axis[-1]:
-        if bounds == "clip":
+        if bounds == "hold":
             x = float(np.clip(x, axis[0], axis[-1]))
         else:
             raise ModelDomainError(
@@ -100,8 +109,6 @@ def _electron_impact_evaluator(
     cross_section = cross_sections[cross_section_id]
     rate = compile_maxwell_rate(cross_section)
     branch = float(model.parameters["branching_yield"])
-    if not np.isfinite(branch) or branch < 0.0:
-        raise ChemistryError(f"rate model {model.id} has invalid branching_yield")
 
     def electron_impact(context: Any) -> float:
         supplied = getattr(context, "rate_coefficients", None)
@@ -109,7 +116,7 @@ def _electron_impact_evaluator(
             return branch * float(supplied[cross_section_id])
         return branch * rate(context.mean_energy_eV)
 
-    return electron_impact, cross_section.resolved_electron_energy_transfer_eV
+    return electron_impact, cross_section.electron_energy_transfer_eV
 
 
 def _arrhenius_evaluator(model: RateModelData) -> RateEvaluator:
@@ -145,20 +152,8 @@ def _tabulated_evaluator(
     model: RateModelData, table_loader: RateTableLoader
 ) -> RateEvaluator:
     axis_name = str(model.parameters["axis"])
-    if axis_name not in {
-        "gas_temperature_K",
-        "mean_energy_eV",
-        "electron_temperature_eV",
-        "reduced_field_Td",
-        "pressure_Pa",
-    }:
-        raise ChemistryError(
-            f"rate model {model.id} has unsupported table axis {axis_name!r}"
-        )
     axis, values = table_loader(model.parameters["file"])
     bounds = str(model.parameters["bounds"])
-    if bounds not in {"error", "clip"}:
-        raise ChemistryError(f"rate model {model.id} bounds must be error or clip")
 
     def tabulated(context: Any) -> float:
         return _bounded_interp(
@@ -172,39 +167,24 @@ def _tabulated_evaluator(
     return tabulated
 
 
-def compile_rate_evaluator(
-    model: RateModelData,
-    cross_sections: Mapping[str, CrossSectionData],
-    *,
-    table_loader: RateTableLoader,
-) -> tuple[RateEvaluator, float | None]:
-    """Compile one supported gas-rate model into a scalar evaluator."""
+def _electron_table_evaluator(model: RateModelData) -> RateEvaluator:
+    rate_id = str(model.parameters["rate_id"])
+    branch = float(model.parameters.get("branching_yield", 1.0))
 
-    if model.kind == "electron_impact":
-        return _electron_impact_evaluator(model, cross_sections)
-    if model.kind == "electron_table":
-        rate_id = str(model.parameters["rate_id"])
-        branch = float(model.parameters.get("branching_yield", 1.0))
+    def supplied_rate(context: Any) -> float:
+        supplied = getattr(context, "rate_coefficients", {})
+        if rate_id not in supplied:
+            raise ModelDomainError(f"electron table requires rate {rate_id!r}")
+        return branch * float(supplied[rate_id])
 
-        def supplied_rate(context: Any) -> float:
-            supplied = getattr(context, "rate_coefficients", {})
-            if rate_id not in supplied:
-                raise ModelDomainError(f"electron table requires rate {rate_id!r}")
-            return branch * float(supplied[rate_id])
+    return supplied_rate
 
-        return supplied_rate, None
-    if model.kind == "arrhenius":
-        return _arrhenius_evaluator(model), None
-    if model.kind == "constant":
-        value = float(model.parameters["value"])
-        return lambda _context: value, None
-    if model.kind == "first_order":
-        value = float(model.parameters["rate_s_inv"])
-        return lambda _context: value, None
-    if model.kind == "experimental.electron_temperature_power_law":
-        return _electron_temperature_power_evaluator(model), None
-    if model.kind == "tabulated_1d":
-        return _tabulated_evaluator(model, table_loader), None
-    raise ChemistryError(
-        f"rate model {model.id} kind {model.kind!r} is not a gas-rate model"
-    )
+
+def _constant_evaluator(model: RateModelData) -> RateEvaluator:
+    value = float(model.parameters["value"])
+    return lambda _context: value
+
+
+def _first_order_evaluator(model: RateModelData) -> RateEvaluator:
+    value = float(model.parameters["rate_s_inv"])
+    return lambda _context: value

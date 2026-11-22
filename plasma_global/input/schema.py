@@ -1,34 +1,28 @@
-"""The single public YAML input schema (version 4)."""
+"""The single public declaration used by YAML, Python, and case preparation."""
 
 from __future__ import annotations
 
+import math
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
-from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input._schema_base import (
     Identifier,
     InputPath,
+    NonemptyText,
     NonNegativeFloat,
     PositiveFloat,
     StrictModel,
 )
 from plasma_global.input._schema_models import (
-    ApproximateTwoTermElectronModel,
     FixedGasEnergy,
     GasEnergyModel,
     QuasiNeutralElectronDensity,
 )
-from plasma_global.input._schema_power import (
-    DCSeriesModel,
-    ExperimentalCCPModel,
-    ExperimentalICPModel,
-    ExperimentalRFEnvelopeModel,
-    ExternalTableModel,
-    PrescribedPowerModel,
-)
+from plasma_global.input._schema_power import PowerModel
 from plasma_global.input._schema_reactor import WallTransport
 from plasma_global.input._schema_recipe import GasInletCommand, SurfaceCommand
 from plasma_global.input._schema_run import (
@@ -39,7 +33,7 @@ from plasma_global.input._schema_run import (
 
 
 class CaseMetadata(StrictModel):
-    name: Identifier
+    name: NonemptyText
     description: str = ""
 
 
@@ -50,6 +44,13 @@ class InitialConditions(StrictModel):
     mole_fractions: dict[str, NonNegativeFloat] | None = None
     seed_densities_m3: dict[str, NonNegativeFloat] = Field(default_factory=dict)
     mean_energy_eV: PositiveFloat | None = None
+
+    @model_validator(mode="after")
+    def valid_composition(self) -> Self:
+        from plasma_global.input._validation import validate_composition
+
+        validate_composition(self)
+        return self
 
 
 class ZoneDefinition(StrictModel):
@@ -73,6 +74,12 @@ class EdgeDefinition(StrictModel):
     to_zone: Identifier
     conductance_m3_s: NonNegativeFloat
 
+    @model_validator(mode="after")
+    def distinct_zones(self) -> Self:
+        if self.from_zone == self.to_zone:
+            raise ValueError("an edge must connect two different zones")
+        return self
+
 
 class InletDefinition(StrictModel):
     zone_id: Identifier
@@ -85,55 +92,13 @@ class PumpDefinition(StrictModel):
     speed_m3_s: NonNegativeFloat
 
 
-class AbsorbedPower(PrescribedPowerModel):
-    default_absorbed_power_W: NonNegativeFloat | None = Field(
-        default=None, alias="absorbed_power_W"
-    )
-
-
-class RFPower(ExperimentalRFEnvelopeModel):
-    default_absorbed_power_W: NonNegativeFloat | None = Field(
-        default=None, alias="absorbed_power_W"
-    )
-    default_voltage_rms_V: NonNegativeFloat | None = Field(
-        default=None, alias="voltage_rms_V"
-    )
-
-
-class CCPPower(ExperimentalCCPModel):
-    default_absorbed_power_W: NonNegativeFloat | None = Field(
-        default=None, alias="absorbed_power_W"
-    )
-    default_voltage_rms_V: NonNegativeFloat | None = Field(
-        default=None, alias="voltage_rms_V"
-    )
-
-
-class ICPPower(ExperimentalICPModel):
-    default_delivered_power_W: NonNegativeFloat | None = Field(
-        default=None, alias="delivered_power_W"
-    )
-
-
-class ExternalPower(ExternalTableModel):
-    bounds_policy: Literal["error", "hold"] = Field(default="error", alias="bounds")
-    time_reference: Literal["run_start", "step_start"] = "run_start"
-
-
-PowerModel = Annotated[
-    AbsorbedPower | DCSeriesModel | ExternalPower | RFPower | CCPPower | ICPPower,
-    Field(discriminator="kind"),
-]
-
-
 class PowerDefinition(StrictModel):
     zone_id: Identifier
-    coupling_target: str = ""
     model: PowerModel
 
 
 class ReactorDefinition(StrictModel):
-    chamber_id: Identifier = "reactor"
+    chamber_id: NonemptyText = "reactor"
     description: str = ""
     zones: dict[Identifier, ZoneDefinition]
     surfaces: dict[Identifier, SurfaceDefinition] = Field(default_factory=dict)
@@ -141,6 +106,13 @@ class ReactorDefinition(StrictModel):
     gas_inlets: dict[Identifier, InletDefinition] = Field(default_factory=dict)
     pumps: dict[Identifier, PumpDefinition] = Field(default_factory=dict)
     power_ports: dict[Identifier, PowerDefinition] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def valid_topology(self) -> Self:
+        from plasma_global.input._validation import validate_topology
+
+        validate_topology(self)
+        return self
 
 
 class TableCoefficients(StrictModel):
@@ -164,7 +136,7 @@ class EnergyBalanceElectrons(StrictModel):
 
 class LocalFieldElectrons(StrictModel):
     kind: Literal["local_field"]
-    coefficients: TableCoefficients | ApproximateTwoTermElectronModel
+    coefficients: TableCoefficients
 
 
 ElectronModel = Annotated[
@@ -180,7 +152,7 @@ class DensityProfile(StrictModel):
     kind: Literal["experimental.prescribed_profile"]
     file: InputPath
     columns: dict[str, str] = Field(default_factory=dict)
-    zone_columns: dict[str, Identifier] = Field(default_factory=dict)
+    zone_columns: dict[Identifier, NonemptyText] = Field(default_factory=dict)
     interpolation: Literal["linear", "previous"] = "linear"
     bounds: Literal["error", "hold"] = "error"
     time_offset_s: float = 0.0
@@ -204,7 +176,7 @@ class RunCommands(StrictModel):
 
 
 class RunStep(StrictModel):
-    label: Identifier | None = None
+    label: str | None = None
     duration_s: PositiveFloat
     commands: RunCommands = Field(default_factory=RunCommands)
 
@@ -222,35 +194,51 @@ class RunDefinition(StrictModel):
             raise ValueError("run.steps must not be empty")
         return self
 
+    def normalized_steps(self) -> tuple[RunStep, ...]:
+        if self.steps is not None:
+            return tuple(self.steps)
+        if self.duration_s is None:
+            raise ValueError("run requires duration_s or steps")
+        return (RunStep(duration_s=self.duration_s),)
+
+    @property
+    def total_duration_s(self) -> float:
+        return math.fsum(step.duration_s for step in self.normalized_steps())
+
+    @property
+    def end_time_s(self) -> float:
+        return self.step_bounds()[-1][1]
+
+    def step_bounds(self) -> tuple[tuple[float, float], ...]:
+        start = self.start_time_s
+        elapsed = 0.0
+        correction = 0.0
+        bounds = []
+        for step in self.normalized_steps():
+            increment = step.duration_s - correction
+            next_elapsed = elapsed + increment
+            correction = (next_elapsed - elapsed) - increment
+            elapsed = next_elapsed
+            end = self.start_time_s + elapsed
+            bounds.append((start, end))
+            start = end
+        return tuple(bounds)
+
 
 class OutputSelection(OutputConfig):
-    quantities: list[
-        Literal[
-            "electron_density_m3",
-            "electron_temperature_eV",
-            "mean_energy_eV",
-            "gas_temperature_K",
-            "absorbed_power_W",
-            "reduced_field_Td",
-            "charge_residual_m3",
-            "pressure_Pa",
-            "neutral_density_m3",
-            "heavy_density_m3",
-        ]
-    ] = Field(default_factory=list)
+    profile: Literal["basic", "minimal"] = "basic"
+    quantities: list[Identifier] = Field(default_factory=list)
     zones: list[Identifier] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def one_selection_form(self) -> Self:
         if self.zones and not self.quantities:
             raise ValueError("output.zones requires output.quantities")
-        if self.quantities and self.observables:
-            raise ValueError("choose quantities/zones or explicit observables")
         return self
 
 
 class CaseSpec(StrictModel):
-    schema_version: Literal[4]
+    schema_version: Literal[5]
     case: CaseMetadata
     chemistry: dict[str, Any]
     reactor: ReactorDefinition
@@ -260,10 +248,66 @@ class CaseSpec(StrictModel):
     output: OutputSelection = Field(default_factory=OutputSelection)
     experimental: ExperimentalConfig | None = None
 
-    def resolve(self, base_directory: Path) -> ResolvedCase:
-        from plasma_global.input._resolve import resolve_case
+    _base_directory: Path | None = PrivateAttr(default=None)
+    _source_path: Path | None = PrivateAttr(default=None)
+    _source_bytes: bytes | None = PrivateAttr(default=None)
 
-        return resolve_case(self, base_directory)
+    @model_validator(mode="after")
+    def valid_references(self) -> Self:
+        from plasma_global.input._validation import validate_case
+
+        validate_case(self)
+        return self
+
+    @property
+    def base_directory(self) -> Path:
+        if self._base_directory is None:
+            raise ValueError("use load_case or case_from_mapping with base_directory")
+        return self._base_directory
+
+    @property
+    def source_path(self) -> Path | None:
+        return self._source_path
+
+    @property
+    def source_bytes(self) -> bytes | None:
+        return self._source_bytes
+
+    def _with_origin(
+        self,
+        base_directory: Path,
+        source: Path | None = None,
+        content: bytes | None = None,
+    ) -> Self:
+        private = self.__pydantic_private__
+        if private is None:
+            raise RuntimeError("case origin storage was not initialized")
+        private.update(
+            _base_directory=base_directory.resolve(),
+            _source_path=source,
+            _source_bytes=content,
+        )
+        return self
+
+    def to_dict(self, *, relative_to: str | Path | None = None) -> dict[str, Any]:
+        """Return public keys; optionally rebase declared file references."""
+        from plasma_global.input._paths import map_input_paths
+
+        data = self.model_dump(mode="json")
+        if relative_to is not None:
+            target = Path(relative_to).resolve()
+            base = self.base_directory
+            map_input_paths(
+                data, lambda value: os.path.relpath((base / value).resolve(), target)
+            )
+        return data
+
+    def to_yaml(self, *, relative_to: str | Path | None = None) -> str:
+        import yaml
+
+        return yaml.safe_dump(
+            self.to_dict(relative_to=relative_to), sort_keys=False, allow_unicode=True
+        )
 
 
 __all__ = ["CaseSpec"]

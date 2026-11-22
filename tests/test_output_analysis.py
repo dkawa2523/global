@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 import yaml
+from _model_fixtures import constant_field_port
 
 from plasma_global import load_case, simulate, write_result
 from plasma_global._result_network import network_data, network_graph
 from plasma_global._result_plot import composition_data
 from plasma_global.build import compile_case
+from plasma_global.cli import main as cli
 from plasma_global.core.compiled import CompiledGlobalModel
 from plasma_global.core.domain import RecipeSegment
 from plasma_global.core.result import series_unit
+from plasma_global.errors import CaseValidationError
 from plasma_global.input._schema_output import NetworkConfig, PlotConfig
+from plasma_global.models.power import CompiledPowerCommand, PowerCoordinator
 from plasma_global.output import (
     build_summary,
     network_result_h5,
@@ -91,7 +96,9 @@ def test_zone_probes_event_counts_and_column_units_roundtrip(tmp_path: Path) -> 
     paths = write_result(result, tmp_path / "run")
     loaded = read_result_h5(paths.result_h5)
     np.testing.assert_array_equal(loaded.series("gas_event_count[plasma,relax]"), count)
-    columns = yaml.safe_load((paths.directory / "series.yaml").read_text())["columns"]
+    columns = yaml.safe_load(
+        (paths.directory / "csv" / "series.yaml").read_text(encoding="utf-8")
+    )["columns"]
     probe = next(
         item
         for item in columns
@@ -136,14 +143,25 @@ def test_wall_probe_and_boundary_events_use_area_and_volume(tmp_path: Path) -> N
 def test_cumulative_events_do_not_bridge_a_forcing_jump(tmp_path: Path) -> None:
     compiled = compile_case(_case(tmp_path, _document()))
     segments = (
-        RecipeSegment("on", 0.0, 0.05, reduced_field_Td_by_zone={"plasma": 1.0}),
-        RecipeSegment("off", 0.05, 0.1, reduced_field_Td_by_zone={"plasma": 0.0}),
+        RecipeSegment("on", 0.0, 0.05),
+        RecipeSegment(
+            "off",
+            0.05,
+            0.1,
+            port_commands={"field_plasma": CompiledPowerCommand(kind="off")},
+        ),
     )
     chemistry = replace(
         compiled.chemistry, rate_evaluators=(lambda context: context.reduced_field_Td,)
     )
     model = CompiledGlobalModel(
-        chemistry, compiled.model.zones, segments, compiled.model.electron_closure
+        chemistry,
+        compiled.model.zones,
+        segments,
+        compiled.model.electron_closure,
+        power_coordinator=PowerCoordinator(
+            (constant_field_port("plasma", 1.0),), ("plasma",)
+        ),
     )
     initial = model.initial_state(compiled.initial_state)
     times = np.array([0.0, 0.05, 0.1])
@@ -259,12 +277,14 @@ def test_grouped_plots_split_units_and_can_be_redrawn_from_result(
         )
     assert all(path.suffix == ".pdf" for path in overridden)
     assert len(figures) == 2
-    probe = next(path for path in figures if path.stem == "probe").read_text()
+    probe = next(path for path in figures if path.stem == "probe").read_text(
+        encoding="utf-8"
+    )
     assert "[eV]" in probe
     assert "[m^-3]" in probe
     composition = next(
         path for path in figures if path.stem == "composition"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "time [ms]" in composition
 
 
@@ -281,7 +301,7 @@ def test_dc_probe_exposes_the_computed_circuit_values(tmp_path: Path) -> None:
     from plasma_global.examples import initialize_example
 
     path = initialize_example("zdplaskin_example2", tmp_path / "dc")
-    document = yaml.safe_load(path.read_text())
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
     document["output"]["probes"] = {
         "circuit": {
             "power_port": "dc_series_drive",
@@ -305,16 +325,182 @@ def test_dc_probe_exposes_the_computed_circuit_values(tmp_path: Path) -> None:
     )
 
 
+def test_dc_table_hold_keeps_the_actual_field_when_another_port_supplies_power(
+    tmp_path: Path,
+) -> None:
+    from plasma_global.examples import initialize_example
+
+    path = initialize_example("swarm_argon_dc", tmp_path / "dc")
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document["models"]["electrons"]["coefficients"]["bounds"] = "hold"
+    document["reactor"]["power_ports"]["heat"] = {
+        "zone_id": "plasma",
+        "model": {
+            "kind": "prescribed_power",
+            "absorbed_power_W": 0.1,
+            "electron_fraction": 1.0,
+            "gas_fraction": 0.0,
+        },
+    }
+    first, second = document["run"]["steps"]
+    first["commands"]["power_ports"]["drive"]["source_voltage_V"] = 70.0
+    second["commands"]["power_ports"]["drive"]["source_voltage_V"] = 10.0
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    result = simulate(load_case(path))
+    field = result.series("probe[circuit,reduced_field_Td]")
+    assert result.status.success
+    assert field[0] > 60.0
+    assert 0.0 < field[-1] < 40.0
+    energy = result.series("mean_energy_eV[plasma]")
+    np.testing.assert_allclose(energy[[0, -1]], [5.802317353093206, 5.3993440165709705])
+
+
+def test_rf_series_retains_zero_voltage_and_frequency_during_off(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    document = _document()
+    document["reactor"]["power_ports"] = {
+        "drive": {
+            "zone_id": "plasma",
+            "model": {"kind": "experimental.rf_envelope", "control": "voltage"},
+        }
+    }
+    document["run"] = {
+        "steps": [
+            {
+                "duration_s": 2e-6,
+                "commands": {
+                    "power_ports": {
+                        "drive": {
+                            "voltage_rms_V": 5.0,
+                            "waveform": {
+                                "kind": "square_pulse",
+                                "repetition_Hz": 5e5,
+                                "duty_cycle": 0.5,
+                            },
+                        }
+                    }
+                },
+            }
+        ]
+    }
+    document["solver"] = {"save_at_s": [5e-7, 1.5e-6]}
+    document["output"] = {
+        "probes": {
+            "rf": {
+                "power_port": "drive",
+                "quantities": ["voltage_rms_V", "frequency_Hz"],
+            }
+        },
+    }
+    case = _case(tmp_path, document)
+    path = tmp_path / "case.yaml"
+    assert cli(["outputs", str(path), "--json"]) == 0
+    catalog = json.loads(capsys.readouterr().out)
+    assert catalog["probe[rf,voltage_rms_V]"]["unit"] == "V"
+    assert catalog["probe[rf,voltage_rms_V]"]["stored"] is True
+
+    result = read_result_h5(write_result(simulate(case), tmp_path / "result").result_h5)
+    voltage = result.series("probe[rf,voltage_rms_V]")
+    on = result.time_s <= 1e-6
+    np.testing.assert_array_equal(voltage[on], 5.0)
+    np.testing.assert_array_equal(voltage[~on], 0.0)
+    np.testing.assert_array_equal(result.series("probe[rf,frequency_Hz]"), 13.56e6)
+
+
+@pytest.mark.parametrize(
+    ("port_id", "setpoint", "series"),
+    [
+        ("wafer_bias", "absorbed_power_W", "port_*sheath_thickness_m[wafer_bias]"),
+        ("source_rf", "delivered_power_W", "port_coupling_efficiency[source_rf]"),
+    ],
+)
+def test_plasma_diagnostic_is_rejected_in_a_zero_setpoint_interval(
+    tmp_path: Path, port_id: str, setpoint: str, series: str
+) -> None:
+    from plasma_global.examples import initialize_example
+
+    path = initialize_example("smoke", tmp_path / "rf")
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    step = document["run"]["steps"][0]
+    document["run"]["steps"].append(
+        {
+            **step,
+            "commands": {
+                **step["commands"],
+                "power_ports": {
+                    **step["commands"]["power_ports"],
+                    port_id: {setpoint: 0.0},
+                },
+            },
+        }
+    )
+    document["output"] = {"plots": {"diagnostic": {"series": [series]}}}
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(CaseValidationError, match=r"undefined in segment 'step_2'"):
+        compile_case(load_case(path))
+
+
+def test_external_table_voltage_series_has_a_consistent_reference_plane(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    power = tmp_path / "power.csv"
+    power.write_text(
+        "time_s,electron_power_W,voltage_V\n0,0,5\n1,0,5\n", encoding="utf-8"
+    )
+    without_voltage = tmp_path / "power-only.csv"
+    without_voltage.write_text("time_s,electron_power_W\n0,0\n1,0\n", encoding="utf-8")
+    document = _document()
+    port = {"kind": "external_table", "file": power.name, "gap_m": 0.004}
+    document["reactor"]["power_ports"] = {"drive": {"zone_id": "plasma", "model": port}}
+    document["run"] = {"duration_s": 2e-6}
+    document["solver"] = {"sample_interval_s": 1e-6}
+    series = "port_plasma_voltage_V[drive]"
+    document["output"] = {"observables": [series, "port_reduced_field_Td[drive]"]}
+    result = simulate(_case(tmp_path, document))
+    np.testing.assert_array_equal(result.series(series), 5.0)
+    np.testing.assert_allclose(
+        result.series("port_reduced_field_Td[drive]"), 5.0 / (0.004 * 1.01e20 * 1e-21)
+    )
+    assert "port_source_voltage_V[drive]" not in result.observables
+
+    port.pop("gap_m")
+    document["run"] = {
+        "steps": [
+            {"duration_s": 1e-6},
+            {
+                "duration_s": 1e-6,
+                "commands": {"power_ports": {"drive": {"file": without_voltage.name}}},
+            },
+        ]
+    }
+    document["output"] = {"observables": ["port_voltage_V[drive]"]}
+    with pytest.raises(
+        CaseValidationError,
+        match=r"port_voltage_V\[drive\].*undefined in segment 'step_2'",
+    ):
+        compile_case(_case(tmp_path, document))
+    document["output"] = {}
+    _case(tmp_path, document)
+    assert cli(["outputs", str(tmp_path / "case.yaml"), "--json"]) == 0
+    unavailable = json.loads(capsys.readouterr().out)["port_voltage_V[drive]"]
+    assert unavailable["available"] is False
+    assert unavailable["unavailable_intervals"][0]["segment_id"] == "step_2"
+
+
 def test_surface_event_rates_are_per_area_and_counts_are_per_surface(
     tmp_path: Path,
 ) -> None:
     from plasma_global.examples import initialize_example
 
     path = initialize_example("smoke", tmp_path / "surface")
-    document = yaml.safe_load(path.read_text())
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
     document["output"]["reaction_rates"] = True
     path.write_text(yaml.safe_dump(document), encoding="utf-8")
     result = simulate(load_case(path))
+    assert result.metadata["series_units"]["film[wafer]"] == "m"
+    assert result.metadata["series_units"]["inventory[wafer,F_reservoir]"] == "1"
     events = [
         event
         for event in result.metadata["reaction_network"]
@@ -330,33 +516,23 @@ def test_surface_event_rates_are_per_area_and_counts_are_per_surface(
         assert np.all(np.diff(result.series(event["count_series"])) >= 0)
 
 
-def test_missing_renderer_does_not_publish_an_incomplete_run(
+def test_missing_renderer_preserves_numerical_result_and_reports_artifact_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from plasma_global.output import write_result_h5
-
     document = _document()
     document["output"] = {"networks": {"diagram": {"mode": "mechanism"}}}
     result = simulate(_case(tmp_path, document))
     monkeypatch.setattr(
         "plasma_global._result_network.shutil.which", lambda _name: None
     )
-    with pytest.raises(RuntimeError, match="dot executable"):
-        write_result(result, tmp_path / "incomplete")
-    assert not (tmp_path / "incomplete").exists()
-    assert write_result_h5(tmp_path / "numerical-result.h5", result).is_file()
-
-
-def test_units_do_not_rescale_a_known_physical_quantity(tmp_path: Path) -> None:
-    document = _document()
-    document["output"] = {
-        "quantities": ["pressure_Pa"],
-        "units": {"pressure_Pa[plasma]": "kPa"},
-    }
-    with pytest.raises(ValueError, match="canonical unit"):
-        compile_case(_case(tmp_path, document))
-    assert series_unit("film[wall]") == "m"
-    assert series_unit("inventory[wall,F]") == "1"
+    paths = write_result(result, tmp_path / "partial-artifacts")
+    assert paths.result_h5.is_file()
+    assert paths.summary_yaml.is_file()
+    assert read_result_h5(paths.result_h5).status.success
+    assert paths.artifacts.status == "failed"
+    assert "dot executable" in paths.artifacts.requests[0].message
+    assert paths.artifacts.manifest.is_file()
+    assert not (paths.directory / "networks" / "diagram").exists()
 
 
 @pytest.mark.parametrize("artifact", ["plots", "networks"])
@@ -408,23 +584,92 @@ def test_species_focus_records_the_requested_reaction_subset(tmp_path: Path) -> 
     assert data["selection"]["species"] == ["Ar_plus"]
 
 
-def test_old_unknown_units_are_preserved_when_the_catalog_grows(tmp_path: Path) -> None:
-    import h5py
-
-    from plasma_global.core.result import SimulationResult
-    from plasma_global.output import write_result_h5
-
-    result = SimulationResult(
-        np.array([0.0]),
-        np.array([[1.0]]),
-        ("film[wall]",),
-        observables={"pressure_Pa": np.array([2.0])},
+@pytest.mark.parametrize("with_power_port", [False, True])
+def test_mean_energy_table_field_is_selectable_and_saved(
+    tmp_path: Path, with_power_port: bool
+) -> None:
+    table = tmp_path / "electrons.csv"
+    table.write_text(
+        "mean_energy_eV,reduced_field_Td\n1,10\n10,100\n", encoding="utf-8"
     )
-    path = write_result_h5(tmp_path / "legacy.h5", result)
-    with h5py.File(path, "a") as h5:
-        h5["state/values"].attrs["column_units"] = ["unspecified"]
-        h5["observables/pressure_Pa"].attrs["unit"] = "unspecified"
-    loaded = read_result_h5(path)
-    assert series_unit("film[wall]", loaded.metadata["series_units"]) == "unspecified"
-    assert series_unit("pressure_Pa", loaded.metadata["series_units"]) == "unspecified"
-    np.testing.assert_array_equal(loaded.state, result.state)
+    document = minimal_case_document()
+    document["models"]["electrons"] = {
+        "kind": "energy_balance",
+        "coefficients": {"file": table.name},
+    }
+    if with_power_port:
+        document["reactor"]["power_ports"] = {
+            "heat": {
+                "zone_id": "plasma",
+                "model": {
+                    "kind": "prescribed_power",
+                    "absorbed_power_W": 1e-6,
+                    "electron_fraction": 1.0,
+                    "gas_fraction": 0.0,
+                },
+            }
+        }
+    document["solver"] = {"sample_interval_s": 0.0005}
+    field = "reduced_field_Td[plasma]"
+    document["output"] = {"observables": [field, "mean_energy_eV[plasma]"]}
+    case = _case(tmp_path, document)
+    assert compile_case(case).output_plan.available_units[field] == "Td"
+
+    result = read_result_h5(write_result(simulate(case), tmp_path / "run").result_h5)
+
+    np.testing.assert_allclose(
+        result.series(field), 10.0 * result.series("mean_energy_eV[plasma]")
+    )
+    assert result.series(field)[0] == pytest.approx(30.0)
+    assert result.metadata["series_units"][field] == "Td"
+
+
+def test_saved_network_name_merges_only_explicit_overrides(tmp_path: Path) -> None:
+    document = _document()
+    document["output"] = {
+        "networks": {
+            "focus": {
+                "mode": "events",
+                "species": ["Ar_star"],
+                "domains": ["gas"],
+                "format": "dot",
+            },
+            "other": {"mode": "mechanism", "format": "dot"},
+        }
+    }
+    paths = write_result(simulate(_case(tmp_path, document)), tmp_path / "run")
+    for changes in (None, {"time_s": 0.0}):
+        with pytest.raises(ValueError, match="multiple saved networks require --name"):
+            network_result_h5(
+                paths.result_h5, tmp_path / "ambiguous", overrides=changes
+            )
+    assert not (tmp_path / "ambiguous").exists()
+    generated = network_result_h5(
+        paths.result_h5,
+        tmp_path / "redraw",
+        name="focus",
+        overrides={"time_s": 0.0},
+    )
+    record = json.loads(
+        next(path for path in generated if path.suffix == ".json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert record["mode"] == "events"
+    assert record["selection"]["species"] == ["Ar_star"]
+    assert record["selection"]["domains"] == ["gas"]
+    assert record["time_s"] == 0.0
+    with pytest.raises(ValueError, match="unknown saved network"):
+        network_result_h5(paths.result_h5, tmp_path / "wrong", name="unknown")
+
+
+def test_direct_plot_expands_the_same_literal_star_selector(tmp_path: Path) -> None:
+    paths = write_result(simulate(_case(tmp_path, _document())), tmp_path / "run")
+    generated = plot_result_h5(
+        paths.result_h5,
+        tmp_path / "species",
+        series=["n[plasma,*]"],
+        image_format="svg",
+    )
+    assert len(generated) == 3
+    assert all(path.is_file() for path in generated)

@@ -8,11 +8,13 @@ result assembly can evolve independently without changing public type identity.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal
 
 from plasma_global.errors import ModelDomainError
 from plasma_global.models.power import (
     CompiledPowerCommand,
+    PowerContribution,
     PowerPortResult,
     PowerState,
 )
@@ -21,7 +23,6 @@ if TYPE_CHECKING:
     from plasma_global.experimental.power import (
         ICPPowerPort,
         RFEnvelopePort,
-        SquarePulse,
     )
 
 ELEMENTARY_CHARGE_C = 1.602176634e-19
@@ -29,6 +30,41 @@ BOLTZMANN_J_K = 1.380649e-23
 VACUUM_PERMITTIVITY_F_M = 8.8541878128e-12
 TD_TO_V_M2 = 1.0e-21
 _ICP_FIELD_DENSITY_SCALE_M3 = 1.0e10
+
+RF_ENVELOPE_OBSERVABLE_UNITS = {
+    "frequency_Hz": "Hz",
+    "delivered_power_W": "W",
+    "absorbed_power_W": "W",
+    "voltage_rms_V": "V",
+    "self_bias_V": "V",
+    "plasma_potential_V": "V",
+}
+
+ICP_OFF_OBSERVABLE_UNITS = {
+    "frequency_Hz": "Hz",
+    "delivered_power_W": "W",
+    "absorbed_power_W": "W",
+    "downstream_power_W": "W",
+    "reflected_power_W": "W",
+    "coil_voltage_rms_V": "V",
+    "coil_current_rms_A": "A",
+    "plasma_potential_V": "V",
+}
+ICP_OBSERVABLE_UNITS = {
+    **ICP_OFF_OBSERVABLE_UNITS,
+    "coupling_efficiency": "1",
+    "mode_index": "1",
+    "mode_H": "1",
+    "pressure_Pa": "Pa",
+}
+
+
+def rf_off_observables(
+    frequency_Hz: float, units: Mapping[str, str]
+) -> dict[str, float]:
+    observables = dict.fromkeys(units, 0.0)
+    observables["frequency_Hz"] = frequency_Hz
+    return observables
 
 
 def _positive(name: str, value: float) -> None:
@@ -46,31 +82,18 @@ def _validate_port_ids(port_id: str, zone_id: str) -> None:
         raise ValueError("port_id and zone_id must not be empty")
 
 
-def _validate_default_commands(
-    default_power_W: float | None,
-    default_voltage_V: float | None,
+def _validate_constant_commands(
+    power_W: float | None,
+    voltage_V: float | None,
     *,
     model_name: str,
 ) -> None:
-    if default_power_W is not None and (
-        not math.isfinite(default_power_W) or default_power_W < 0.0
-    ):
-        raise ValueError("default_power_W must be finite and nonnegative")
-    if default_voltage_V is not None and not math.isfinite(default_voltage_V):
-        raise ValueError("default_voltage_V must be finite")
-    if default_power_W is not None and default_voltage_V is not None:
+    if power_W is not None and (not math.isfinite(power_W) or power_W < 0.0):
+        raise ValueError("power_W must be finite and nonnegative")
+    if voltage_V is not None and not math.isfinite(voltage_V):
+        raise ValueError("voltage_V must be finite")
+    if power_W is not None and voltage_V is not None:
         raise ValueError(f"provide only one default {model_name} command")
-
-
-def validate_square_pulse(pulse: SquarePulse) -> None:
-    _positive("repetition_Hz", pulse.repetition_Hz)
-    _fraction("duty_cycle", pulse.duty_cycle)
-    if not math.isfinite(pulse.phase_fraction):
-        raise ValueError("phase_fraction must be finite")
-
-
-def _envelope_value(pulse: SquarePulse | None, time_s: float) -> float:
-    return 1.0 if pulse is None else pulse(time_s)
 
 
 def _delivered_power(absorbed_power_W: float, coupling_efficiency: float) -> float:
@@ -88,8 +111,8 @@ def _delivered_power(absorbed_power_W: float, coupling_efficiency: float) -> flo
 def _command_value(
     command: CompiledPowerCommand | None,
     *,
-    default_power_W: float | None,
-    default_voltage_V: float | None,
+    power_W: float | None,
+    voltage_V: float | None,
 ) -> tuple[Literal["power", "voltage"], float]:
     if command is not None and command.kind == "power":
         if command.power_W is None:
@@ -101,10 +124,10 @@ def _command_value(
         return "voltage", abs(command.voltage_V)
     if command is not None:
         raise TypeError("power ports accept compiled power or voltage commands")
-    if default_power_W is not None:
-        return "power", default_power_W
-    if default_voltage_V is not None:
-        return "voltage", abs(default_voltage_V)
+    if power_W is not None:
+        return "power", power_W
+    if voltage_V is not None:
+        return "voltage", abs(voltage_V)
     raise ValueError("the power port requires a recipe command or a default command")
 
 
@@ -116,8 +139,8 @@ def validate_rf_envelope_port(port: RFEnvelopePort) -> None:
     if port.role not in {"source", "bias"}:
         raise ValueError("role must be 'source' or 'bias'")
     _validate_rf_coefficients(port)
-    _validate_default_commands(
-        port.default_power_W, port.default_voltage_V, model_name="RF"
+    _validate_constant_commands(
+        port.absorbed_power_W, port.voltage_rms_V, model_name="RF"
     )
 
 
@@ -142,31 +165,38 @@ def evaluate_rf_envelope_port(
 ) -> PowerPortResult:
     mode, value = _command_value(
         command,
-        default_power_W=port.default_power_W,
-        default_voltage_V=port.default_voltage_V,
+        power_W=port.absorbed_power_W,
+        voltage_V=port.voltage_rms_V,
     )
-    envelope = _envelope_value(port.pulse, time_s)
+    del time_s
+    if value == 0.0:
+        return PowerPortResult(
+            port_id=port.port_id,
+            zone_id=port.zone_id,
+            reduced_field_Td=0.0,
+            observables=port.off_observables,
+        )
     if mode == "power":
-        absorbed = value * envelope
+        absorbed = value
         delivered = _delivered_power(absorbed, port.coupling_efficiency)
         voltage_rms = math.sqrt(delivered * port.effective_impedance_ohm)
     else:
-        voltage_rms = value * envelope
+        voltage_rms = value
         delivered = voltage_rms**2 / port.effective_impedance_ohm
         absorbed = port.coupling_efficiency * delivered
-    reduced_field = port.base_reduced_field_Td * envelope
+    reduced_field = port.base_reduced_field_Td
     reduced_field += port.reduced_field_per_sqrt_W_Td * math.sqrt(absorbed)
     self_bias = (
         -port.self_bias_fraction * math.sqrt(2.0) * voltage_rms
         if port.role == "bias"
         else 0.0
     )
-    plasma_potential = port.plasma_potential_offset_V * envelope
+    plasma_potential = port.plasma_potential_offset_V
     plasma_potential += port.plasma_potential_per_sqrt_W * math.sqrt(absorbed)
     return PowerPortResult(
         port_id=port.port_id,
         zone_id=port.zone_id,
-        electron_power_W=absorbed,
+        contributions=(PowerContribution(port.zone_id, absorbed),),
         reduced_field_Td=reduced_field,
         observables={
             "frequency_Hz": port.frequency_Hz,
@@ -188,7 +218,7 @@ def validate_icp_power_port(port: ICPPowerPort) -> None:
         raise ValueError(
             "downstream_zone_id is required when power is split downstream"
         )
-    _validate_default_commands(port.default_power_W, None, model_name="ICP")
+    _validate_constant_commands(port.delivered_power_W, None, model_name="ICP")
 
 
 def _icp_coupling(
@@ -224,11 +254,19 @@ def evaluate_icp_power_port(
     command: CompiledPowerCommand | None,
 ) -> PowerPortResult:
     mode, value = _command_value(
-        command, default_power_W=port.default_power_W, default_voltage_V=None
+        command, power_W=port.delivered_power_W, voltage_V=None
     )
     if mode != "power":
         raise TypeError("ICP ports accept power commands only")
-    delivered = value * _envelope_value(port.pulse, time_s)
+    del time_s
+    delivered = value
+    if delivered == 0.0:
+        return PowerPortResult(
+            port_id=port.port_id,
+            zone_id=port.zone_id,
+            reduced_field_Td=0.0,
+            observables=port.off_observables,
+        )
     pressure_Pa = state.neutral_density_m3 * BOLTZMANN_J_K * port.gas_temperature_K
     pressure_scale = max(pressure_Pa / 10.0, 1.0e-3)
     frequency_scale = max(port.frequency_Hz / 13.56e6, 0.1)
@@ -257,7 +295,14 @@ def evaluate_icp_power_port(
     return PowerPortResult(
         port_id=port.port_id,
         zone_id=port.zone_id,
-        electron_power_W=local_power,
+        contributions=(
+            PowerContribution(port.zone_id, local_power),
+            *(
+                (PowerContribution(port.downstream_zone_id, downstream_power),)
+                if port.downstream_zone_id is not None and downstream_power > 0.0
+                else ()
+            ),
+        ),
         reduced_field_Td=reduced_field,
         observables={
             "frequency_Hz": port.frequency_Hz,
@@ -266,7 +311,6 @@ def evaluate_icp_power_port(
             "downstream_power_W": downstream_power,
             "reflected_power_W": delivered - absorbed,
             "coupling_efficiency": coupling,
-            "plasma_resistance_ohm": plasma_resistance,
             "coil_voltage_rms_V": coil_voltage,
             "coil_current_rms_A": coil_current,
             "mode_index": mode_index,
@@ -286,5 +330,4 @@ __all__ = [
     "evaluate_rf_envelope_port",
     "validate_icp_power_port",
     "validate_rf_envelope_port",
-    "validate_square_pulse",
 ]

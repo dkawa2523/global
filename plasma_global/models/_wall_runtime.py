@@ -48,7 +48,7 @@ def _resolved_sheath_energy_eV(
     )
 
 
-def _loss_frequency(compiled: CompiledWallBoundary) -> float:
+def _loss_frequency(compiled: CompiledWallBoundary, temperature_eV: float) -> float:
     boundary = compiled.boundary
     if (
         boundary.transport_kind == "prescribed_frequency"
@@ -60,7 +60,11 @@ def _loss_frequency(compiled: CompiledWallBoundary) -> float:
         and boundary.diffusion_coefficient_m2_s is not None
         and boundary.diffusion_length_m is not None
     ):
-        return boundary.diffusion_coefficient_m2_s / boundary.diffusion_length_m**2
+        frequency = boundary.diffusion_coefficient_m2_s / boundary.diffusion_length_m**2
+        reference = boundary.electron_temperature_reference_eV
+        return (
+            frequency if reference is None else frequency * (temperature_eV / reference)
+        )
     raise RuntimeError("compiled wall transport parameters are inconsistent")
 
 
@@ -91,7 +95,7 @@ def _ion_transport(
         )
         flux = ion_density * speed
         return flux, flux * area_over_volume, speed
-    frequency = _loss_frequency(compiled)
+    frequency = _loss_frequency(compiled, electrons.temperature_eV)
     rate = ion_density * frequency
     return rate / area_over_volume, rate, frequency / area_over_volume
 

@@ -14,7 +14,7 @@ import yaml
 from plasma_global.core.result import series_unit as series_unit
 
 RESULT_FORMAT = "plasma_global_result"
-RESULT_FORMAT_VERSION = 3
+RESULT_FORMAT_VERSION = 4
 RESULT_H5_NAME = "result.h5"
 SUMMARY_YAML_NAME = "summary.yaml"
 RESULT_CSV_NAME = "result.csv"

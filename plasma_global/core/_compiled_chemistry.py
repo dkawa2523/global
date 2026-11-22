@@ -9,6 +9,7 @@ from typing import Protocol, cast
 
 import numpy as np
 
+from plasma_global._identifiers import validate_identifier
 from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.rates import ConstantRate, RateEvaluator
 
@@ -19,7 +20,7 @@ class ChemistrySource(Protocol):
     """Structural input accepted by :func:`compile_chemistry_data`."""
 
     @property
-    def species_ids(self) -> Sequence[object]: ...
+    def species_ids(self) -> Sequence[str]: ...
 
     @property
     def charges(self) -> object: ...
@@ -28,7 +29,7 @@ class ChemistrySource(Protocol):
     def masses_kg(self) -> object: ...
 
     @property
-    def reaction_ids(self) -> Sequence[object]: ...
+    def reaction_ids(self) -> Sequence[str]: ...
 
     @property
     def stoichiometry(self) -> object: ...
@@ -43,13 +44,13 @@ class ChemistrySource(Protocol):
     def rate_evaluators(self) -> Sequence[object]: ...
 
     @property
-    def energy_loss_eV(self) -> object: ...
+    def electron_energy_transfer_eV(self) -> object: ...
 
     @property
     def gas_heating_eV(self) -> object: ...
 
     @property
-    def reaction_zones(self) -> Sequence[Sequence[object]]: ...
+    def reaction_zones(self) -> Sequence[Sequence[str]]: ...
 
     @property
     def jacobian_species_pattern(self) -> object: ...
@@ -69,7 +70,6 @@ class CompiledChemistryData:
     reactant_powers_by_reaction: tuple[ReactantPowers, ...]
     electron_orders: np.ndarray
     electron_energy_transfer_eV: np.ndarray
-    energy_loss_eV: np.ndarray
     gas_heating_eV: np.ndarray
     jacobian_species_pattern: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
@@ -115,36 +115,6 @@ def _readonly_jacobian_pattern(values: object, species_count: int) -> np.ndarray
     return result
 
 
-def _electron_energy_transfer(
-    source: ChemistrySource, reaction_count: int
-) -> np.ndarray:
-    signed = getattr(source, "electron_energy_transfer_eV", None)
-    if signed is not None:
-        return _readonly_float_array(
-            signed,
-            shape=(reaction_count,),
-            name="electron_energy_transfer_eV",
-        )
-    legacy_loss = _readonly_float_array(
-        source.energy_loss_eV,
-        shape=(reaction_count,),
-        name="energy_loss_eV",
-    )
-    if np.any(legacy_loss < 0.0):
-        raise ModelConfigurationError("Electron energy losses must be non-negative")
-    result = -legacy_loss
-    result.setflags(write=False)
-    return result
-
-
-def _legacy_energy_loss(electron_energy_transfer_eV: np.ndarray) -> np.ndarray:
-    """Build the immutable positive-loss compatibility view once."""
-
-    result = np.maximum(-electron_energy_transfer_eV, 0.0)
-    result.setflags(write=False)
-    return result
-
-
 def _compiled_rate_evaluators(
     values: Sequence[object], reaction_count: int
 ) -> tuple[RateEvaluator, ...]:
@@ -163,11 +133,18 @@ def _compiled_rate_evaluators(
     return tuple(evaluators)
 
 
+def _validated_identifiers(values: Sequence[str]) -> tuple[str, ...]:
+    try:
+        return tuple(validate_identifier(value) for value in values)
+    except ValueError as exc:
+        raise ModelConfigurationError(f"Compiled chemistry identifier: {exc}") from exc
+
+
 def _compiled_identifiers(
     source: ChemistrySource,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    species_ids = tuple(str(value) for value in source.species_ids)
-    reaction_ids = tuple(str(value) for value in source.reaction_ids)
+    species_ids = _validated_identifiers(source.species_ids)
+    reaction_ids = _validated_identifiers(source.reaction_ids)
     if not species_ids or len(set(species_ids)) != len(species_ids):
         raise ModelConfigurationError(
             "Chemistry needs unique, non-empty heavy-species IDs"
@@ -202,7 +179,11 @@ def _compiled_arrays(
             shape=(reaction_count,),
             name="electron_orders",
         ),
-        electron_energy_transfer_eV=_electron_energy_transfer(source, reaction_count),
+        electron_energy_transfer_eV=_readonly_float_array(
+            source.electron_energy_transfer_eV,
+            shape=(reaction_count,),
+            name="electron_energy_transfer_eV",
+        ),
         gas_heating_eV=_readonly_float_array(
             source.gas_heating_eV,
             shape=(reaction_count,),
@@ -235,9 +216,7 @@ def _compiled_reaction_zones(
     raw_reaction_zones = source.reaction_zones
     if len(raw_reaction_zones) != reaction_count:
         raise ModelConfigurationError("reaction_zones length must match reaction_ids")
-    return tuple(
-        tuple(str(zone_id) for zone_id in zones) for zones in raw_reaction_zones
-    )
+    return tuple(_validated_identifiers(zones) for zones in raw_reaction_zones)
 
 
 def _reactant_powers_by_reaction(
@@ -267,7 +246,6 @@ def compile_chemistry_data(source: ChemistrySource) -> CompiledChemistryData:
         reaction_count=reaction_count,
     )
 
-    electron_transfer = arrays.electron_energy_transfer_eV
     return CompiledChemistryData(
         species_ids=species_ids,
         species_index=MappingProxyType(
@@ -282,8 +260,7 @@ def compile_chemistry_data(source: ChemistrySource) -> CompiledChemistryData:
             arrays.reactant_orders
         ),
         electron_orders=arrays.electron_orders,
-        electron_energy_transfer_eV=electron_transfer,
-        energy_loss_eV=_legacy_energy_loss(electron_transfer),
+        electron_energy_transfer_eV=arrays.electron_energy_transfer_eV,
         gas_heating_eV=arrays.gas_heating_eV,
         jacobian_species_pattern=arrays.jacobian_pattern,
         reaction_zones=_compiled_reaction_zones(source, reaction_count),

@@ -7,8 +7,8 @@ prescribed absorbed power does not manufacture a sheath voltage or E/N.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import InitVar, dataclass, field, replace
 from typing import Literal, Protocol, cast
 
 from plasma_global.errors import (
@@ -21,9 +21,8 @@ from plasma_global.models._power_coupling import (
     normalized_identities,
     validate_field_sources,
 )
-from plasma_global.models._power_ports import E_CHARGE as E_CHARGE
-from plasma_global.models._power_ports import TD_TO_V_M2 as TD_TO_V_M2
 from plasma_global.models._power_ports import (
+    DC_VOLTAGE_UNITS,
     _PortEvaluation,
     dc_series_evaluation,
     external_table_evaluation,
@@ -32,10 +31,13 @@ from plasma_global.models._power_ports import (
     validate_dc_series_port,
     validate_prescribed_power_port,
 )
+from plasma_global.models._power_ports import E_CHARGE as E_CHARGE
+from plasma_global.models._power_ports import TD_TO_V_M2 as TD_TO_V_M2
 from plasma_global.models._power_types import (
     _empty_observables,
     finite_observables,
     frozen_mapping,
+    power_identifier,
     validate_compiled_power_command,
     validate_power_port_result,
     validate_power_state,
@@ -104,23 +106,82 @@ class CompiledPowerCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class PowerContribution:
+    """Power deposited in one concrete region, in watts."""
+
+    zone_id: str
+    electron_power_W: float = 0.0
+    gas_power_W: float = 0.0
+
+    def __post_init__(self) -> None:
+        power_identifier(self.zone_id, "power contribution zone_id")
+        validate_power_port_result(self.electron_power_W, self.gas_power_W, None)
+
+
+@dataclass(frozen=True, slots=True)
+class PowerTopology:
+    """State-reading region and every possible power or field target."""
+
+    port_id: str
+    source_zone_id: str
+    electron_deposition_zone_ids: tuple[str, ...] = ()
+    gas_deposition_zone_ids: tuple[str, ...] = ()
+    field_zone_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.port_id or not self.source_zone_id:
+            raise CaseValidationError(
+                "power topology requires port and source zone IDs"
+            )
+        for name, values in (
+            ("electron_deposition_zone_ids", self.electron_deposition_zone_ids),
+            ("gas_deposition_zone_ids", self.gas_deposition_zone_ids),
+            ("field_zone_ids", self.field_zone_ids),
+        ):
+            zones = tuple(values)
+            for zone in zones:
+                power_identifier(zone, f"power topology {name}")
+            if len(set(zones)) != len(zones):
+                raise CaseValidationError("power topology targets must be unique IDs")
+            object.__setattr__(self, name, zones)
+        if self.field_zone_ids not in ((), (self.source_zone_id,)):
+            raise CaseValidationError(
+                "a port's reduced field applies only to its source zone"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class PowerPortResult:
-    """Power and optional field contribution returned by one port."""
+    """Typed region contributions and optional field produced by one port."""
 
     port_id: str
     zone_id: str
-    electron_power_W: float
-    gas_power_W: float = 0.0
+    contributions: tuple[PowerContribution, ...] = ()
     reduced_field_Td: float | None = None
     observables: Mapping[str, float] = field(default_factory=_empty_observables)
 
     def __post_init__(self) -> None:
-        validate_power_port_result(
-            self.electron_power_W,
-            self.gas_power_W,
-            self.reduced_field_Td,
-        )
+        power_identifier(self.port_id, "power result port_id")
+        power_identifier(self.zone_id, "power result zone_id")
+        contributions = tuple(self.contributions)
+        if any(not isinstance(item, PowerContribution) for item in contributions):
+            raise CaseValidationError("power result requires typed contributions")
+        validate_power_port_result(0.0, 0.0, self.reduced_field_Td)
+        object.__setattr__(self, "contributions", contributions)
         object.__setattr__(self, "observables", finite_observables(self.observables))
+
+    @property
+    def electron_power_W(self) -> float:
+        """Actual electron power deposited in the port's evaluation region."""
+        return sum(
+            c.electron_power_W for c in self.contributions if c.zone_id == self.zone_id
+        )
+
+    @property
+    def gas_power_W(self) -> float:
+        return sum(
+            c.gas_power_W for c in self.contributions if c.zone_id == self.zone_id
+        )
 
 
 class PowerPort(Protocol):
@@ -136,7 +197,13 @@ class PowerPort(Protocol):
     def time_dependent(self) -> bool: ...
 
     @property
-    def produces_reduced_field(self) -> bool: ...
+    def topology(self) -> PowerTopology: ...
+
+    @property
+    def observable_units(self) -> Mapping[str, str]: ...
+
+    @property
+    def off_observables(self) -> Mapping[str, float]: ...
 
     def evaluate(
         self, time_s: float, state: PowerState, command: CompiledPowerCommand | None
@@ -199,19 +266,14 @@ def _power_port_result(
     return PowerPortResult(
         port_id=port_id,
         zone_id=zone_id,
-        electron_power_W=evaluated.electron_power_W,
-        gas_power_W=evaluated.gas_power_W,
+        contributions=(
+            PowerContribution(
+                zone_id, evaluated.electron_power_W, evaluated.gas_power_W
+            ),
+        ),
         reduced_field_Td=evaluated.reduced_field_Td,
         observables=evaluated.observables,
     )
-
-
-@dataclass(frozen=True, slots=True)
-class _ZonePowerDistributor:
-    port_id: str
-    source_zone_id: str
-    static_target_zone_ids: tuple[str, ...] | None
-    distribute: Callable[[PowerPortResult], Mapping[str, float]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,21 +284,31 @@ class PrescribedPowerPort:
     zone_id: str
     electron_fraction: float = 1.0
     gas_fraction: float = 0.0
-    default_power_W: float | None = None
+    absorbed_power_W: float | None = None
+
+    @property
+    def observable_units(self) -> Mapping[str, str]:
+        return {"commanded_power_W": "W"}
+
+    @property
+    def off_observables(self) -> Mapping[str, float]:
+        return {"commanded_power_W": 0.0}
+
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id, self.zone_id, (self.zone_id,), (self.zone_id,)
+        )
 
     @property
     def time_dependent(self) -> bool:
-        return False
-
-    @property
-    def produces_reduced_field(self) -> bool:
         return False
 
     def __post_init__(self) -> None:
         validate_prescribed_power_port(
             self.electron_fraction,
             self.gas_fraction,
-            self.default_power_W,
+            self.absorbed_power_W,
         )
 
     def evaluate(
@@ -247,7 +319,7 @@ class PrescribedPowerPort:
             port_id=self.port_id,
             electron_fraction=self.electron_fraction,
             gas_fraction=self.gas_fraction,
-            default_power_W=self.default_power_W,
+            absorbed_power_W=self.absorbed_power_W,
             command_kind=None if command is None else command.kind,
             command_power_W=None if command is None else command.power_W,
         )
@@ -264,16 +336,26 @@ class DCSeriesPort:
     gap_m: float
     electrode_area_m2: float
     absorption_fraction: float = 1.0
-    configured_mobility_m2_V_s: float | None = None
-    default_voltage_V: float | None = None
+    electron_mobility_m2_V_s: float | None = None
+    source_voltage_V: float | None = None
+
+    @property
+    def observable_units(self) -> Mapping[str, str]:
+        return DC_VOLTAGE_UNITS
+
+    @property
+    def off_observables(self) -> Mapping[str, float]:
+        return dict.fromkeys(DC_VOLTAGE_UNITS, 0.0)
+
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id, self.zone_id, (self.zone_id,), (), (self.zone_id,)
+        )
 
     @property
     def time_dependent(self) -> bool:
         return False
-
-    @property
-    def produces_reduced_field(self) -> bool:
-        return True
 
     def __post_init__(self) -> None:
         validate_dc_series_port(
@@ -281,8 +363,8 @@ class DCSeriesPort:
             gap_m=self.gap_m,
             electrode_area_m2=self.electrode_area_m2,
             absorption_fraction=self.absorption_fraction,
-            configured_mobility_m2_V_s=self.configured_mobility_m2_V_s,
-            default_voltage_V=self.default_voltage_V,
+            constant_mobility_m2_V_s=self.electron_mobility_m2_V_s,
+            source_voltage_V=self.source_voltage_V,
         )
 
     def evaluate(
@@ -295,8 +377,8 @@ class DCSeriesPort:
             gap_m=self.gap_m,
             electrode_area_m2=self.electrode_area_m2,
             absorption_fraction=self.absorption_fraction,
-            configured_mobility_m2_V_s=self.configured_mobility_m2_V_s,
-            default_voltage_V=self.default_voltage_V,
+            constant_mobility_m2_V_s=self.electron_mobility_m2_V_s,
+            source_voltage_V=self.source_voltage_V,
             electron_density_m3=state.electron_density_m3,
             neutral_density_m3=state.neutral_density_m3,
             electron_mobility_m2_V_s=state.electron_mobility_m2_V_s,
@@ -326,7 +408,7 @@ class DCSeriesPort:
             ballast_resistance_ohm=self.ballast_resistance_ohm,
             gap_m=self.gap_m,
             electrode_area_m2=self.electrode_area_m2,
-            default_voltage_V=self.default_voltage_V,
+            source_voltage_V=self.source_voltage_V,
             electron_density_m3=electron_density_m3,
             neutral_density_m3=neutral_density_m3,
             kinetics=kinetics,
@@ -345,8 +427,18 @@ class ExternalTablePowerPort:
     time_dependent: bool = True
 
     @property
-    def produces_reduced_field(self) -> bool:
-        return self.default.produces_reduced_field
+    def off_observables(self) -> Mapping[str, float]:
+        return {}
+
+    @property
+    def topology(self) -> PowerTopology:
+        return PowerTopology(
+            self.port_id,
+            self.zone_id,
+            (self.zone_id,),
+            (self.zone_id,),
+            (self.zone_id,) if self.default.produces_reduced_field else (),
+        )
 
     def _table_for_command(
         self, command: CompiledPowerCommand | None
@@ -358,6 +450,10 @@ class ExternalTablePowerPort:
         raise CaseValidationError(
             f"external-table port {self.port_id!r} received an invalid command"
         )
+
+    @property
+    def observable_units(self) -> dict[str, str]:
+        return self.default.observable_units
 
     def evaluate(
         self,
@@ -381,46 +477,56 @@ class PowerCoordinator:
     zone_ids: tuple[str, ...]
     coupling_rtol: float = 1.0e-6
     max_iterations: int = 12
+    initial_commands: InitVar[Mapping[str, CompiledPowerCommand] | None] = None
     _ports_by_zone: Mapping[str, tuple[PowerPort, ...]] = field(init=False, repr=False)
     _port_ids: frozenset[str] = field(init=False, repr=False)
-    _zone_power_distributors: tuple[_ZonePowerDistributor, ...] = field(
-        init=False, repr=False, compare=False
-    )
 
-    def __post_init__(self) -> None:
+    def __post_init__(
+        self, initial_commands: Mapping[str, CompiledPowerCommand] | None
+    ) -> None:
         ports, zones, port_ids = normalized_identities(self.ports, self.zone_ids)
         if not math.isfinite(self.coupling_rtol) or self.coupling_rtol <= 0.0:
             raise CaseValidationError("coupling_rtol must be positive")
         if self.max_iterations <= 0:
             raise CaseValidationError("max_iterations must be positive")
         grouped = group_ports(ports, zones)
-        for zone_id, zone_ports in grouped.items():
-            validate_field_sources(zone_id, zone_ports, {})
-        distributors: list[_ZonePowerDistributor] = []
         for port in ports:
-            distribute = getattr(port, "power_by_zone", None)
-            if callable(distribute):
-                static_targets = getattr(port, "_static_power_target_zone_ids", None)
-                distributors.append(
-                    _ZonePowerDistributor(
-                        port_id=str(port.port_id),
-                        source_zone_id=str(port.zone_id),
-                        static_target_zone_ids=(
-                            None
-                            if static_targets is None
-                            else tuple(str(value) for value in static_targets)
-                        ),
-                        distribute=cast(
-                            Callable[[PowerPortResult], Mapping[str, float]],
-                            distribute,
-                        ),
-                    )
+            topology = port.topology
+            targets = {
+                topology.source_zone_id,
+                *topology.electron_deposition_zone_ids,
+                *topology.gas_deposition_zone_ids,
+                *topology.field_zone_ids,
+            }
+            if topology.port_id != str(port.port_id) or topology.source_zone_id != str(
+                port.zone_id
+            ):
+                raise CaseValidationError("power topology identity must match its port")
+            if unknown := targets - set(zones):
+                raise CaseValidationError(
+                    f"power topology references unknown zones: {sorted(unknown)}"
                 )
         object.__setattr__(self, "ports", ports)
         object.__setattr__(self, "zone_ids", zones)
         object.__setattr__(self, "_ports_by_zone", frozen_mapping(grouped))
         object.__setattr__(self, "_port_ids", frozenset(port_ids))
-        object.__setattr__(self, "_zone_power_distributors", tuple(distributors))
+        self.validate_commands(initial_commands or {})
+
+    def topology(
+        self, commands: Mapping[str, CompiledPowerCommand]
+    ) -> tuple[PowerTopology, ...]:
+        """Declare per-segment field and deposition dependencies before integration."""
+        return tuple(
+            replace(
+                port.topology,
+                field_zone_ids=(
+                    (str(port.zone_id),)
+                    if command_field_capability(port, commands.get(str(port.port_id)))
+                    else ()
+                ),
+            )
+            for port in self.ports
+        )
 
     def validate_commands(self, commands: Mapping[str, CompiledPowerCommand]) -> None:
         """Validate one compiled segment command set outside the ODE hot path."""
@@ -458,11 +564,7 @@ class PowerCoordinator:
         electron_density_m3_by_zone: Mapping[str, float],
         neutral_density_m3_by_zone: Mapping[str, float],
         mean_energy_eV_by_zone: Mapping[str, float | None],
-        prescribed_electron_power_W_by_zone: Mapping[str, float] | None = None,
-        prescribed_reduced_field_Td_by_zone: Mapping[str, float] | None = None,
         kinetics_by_zone: Mapping[str, TabulatedElectronKinetics] | None = None,
-        mean_energy_from_field_by_zone: Mapping[str, Callable[[float], float]]
-        | None = None,
     ) -> PowerCouplingResult:
         # Imported lazily so the private engine can construct these public
         # value types without a module-initialization cycle.
@@ -475,10 +577,7 @@ class PowerCoordinator:
             electron_density_m3_by_zone=electron_density_m3_by_zone,
             neutral_density_m3_by_zone=neutral_density_m3_by_zone,
             mean_energy_eV_by_zone=mean_energy_eV_by_zone,
-            prescribed_electron_power_W_by_zone=(prescribed_electron_power_W_by_zone),
-            prescribed_reduced_field_Td_by_zone=(prescribed_reduced_field_Td_by_zone),
             kinetics_by_zone=kinetics_by_zone,
-            mean_energy_from_field_by_zone=mean_energy_from_field_by_zone,
         )
 
 
@@ -486,10 +585,12 @@ __all__ = [
     "CompiledPowerCommand",
     "DCSeriesPort",
     "ExternalTablePowerPort",
+    "PowerContribution",
     "PowerCoordinator",
     "PowerCouplingResult",
     "PowerPort",
     "PowerPortResult",
     "PowerState",
+    "PowerTopology",
     "PrescribedPowerPort",
 ]

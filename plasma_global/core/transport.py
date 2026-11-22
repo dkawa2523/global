@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from plasma_global.errors import CaseValidationError
+from plasma_global.models.gas_energy import HeavyParticleThermodynamics
 
 # 1 sccm at 101325 Pa and 273.15 K, retaining the established rounded value.
 SCCM_TO_PARTICLES_PER_S = 4.477962e17
@@ -21,15 +22,6 @@ def _readonly(value: object, shape: tuple[int, ...], name: str) -> np.ndarray:
     result = np.array(array, copy=True)
     result.setflags(write=False)
     return result
-
-
-def _optional_heavy_cv(value: object | None, n_species: int) -> np.ndarray | None:
-    if value is None:
-        return None
-    heavy_cv = _readonly(value, (n_species,), "heavy_cv_over_kb")
-    if np.any(heavy_cv <= 0.0):
-        raise CaseValidationError("heavy_cv_over_kb must be positive")
-    return heavy_cv
 
 
 def _validated_edges(
@@ -159,7 +151,7 @@ class CompiledTransport:
     edge_to: np.ndarray
     edge_conductance_m3_s: np.ndarray
     n_species: int
-    heavy_cv_over_kb: np.ndarray | None = None
+    thermodynamics: HeavyParticleThermodynamics | None = None
 
     def __post_init__(self) -> None:
         volumes = np.asarray(self.volumes_m3, dtype=float)
@@ -179,7 +171,12 @@ class CompiledTransport:
         )
         if self.n_species <= 0:
             raise CaseValidationError("n_species must be positive")
-        heavy_cv = _optional_heavy_cv(self.heavy_cv_over_kb, self.n_species)
+        if self.thermodynamics is not None and self.thermodynamics.cv_over_kb.shape != (
+            self.n_species,
+        ):
+            raise CaseValidationError(
+                "transport thermodynamics must match the species count"
+            )
         frozen_volumes = np.array(volumes, copy=True)
         frozen_volumes.setflags(write=False)
         for name, value in (
@@ -192,7 +189,6 @@ class CompiledTransport:
             object.__setattr__(self, name, frozen)
         object.__setattr__(self, "volumes_m3", frozen_volumes)
         object.__setattr__(self, "pump_frequency_s_inv", pump)
-        object.__setattr__(self, "heavy_cv_over_kb", heavy_cv)
 
     @property
     def n_zones(self) -> int:
@@ -201,23 +197,13 @@ class CompiledTransport:
     def _heavy_enthalpy_J_m3(
         self, density_m3: np.ndarray, internal_energy_J_m3: np.ndarray
     ) -> np.ndarray:
-        cv = self.heavy_cv_over_kb
-        if cv is None:
+        eos = self.thermodynamics
+        if eos is None:
             raise ValueError(
-                "heavy-energy transport requires heavy_cv_over_kb so flow carries "
+                "heavy-energy transport requires thermodynamics so flow carries "
                 "enthalpy rather than internal energy"
             )
-        if np.any(density_m3 < 0.0):
-            raise ValueError("heavy-particle enthalpy requires nonnegative densities")
-        heat_capacity_over_kb = density_m3 @ cv
-        if np.any(heat_capacity_over_kb <= 0.0):
-            raise ValueError(
-                "heavy-particle enthalpy is undefined for an empty mixture"
-            )
-        pressure_J_m3 = (
-            internal_energy_J_m3 * np.sum(density_m3, axis=1) / heat_capacity_over_kb
-        )
-        return internal_energy_J_m3 + pressure_J_m3
+        return eos.enthalpy_J_m3(density_m3, internal_energy_J_m3)
 
     def _heavy_flow_energy_J_m3(
         self,

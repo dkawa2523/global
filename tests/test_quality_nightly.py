@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from plasma_global import load_case, simulate
-from plasma_global.audit import audit_case
+from plasma_global.audit import audit_result
 
 ROOT = Path(__file__).parents[1]
 SMOKE_CASE = ROOT / "plasma_global" / "examples" / "cases" / "smoke.yaml"
@@ -21,7 +21,7 @@ def test_smoke_case_stays_finite_within_resource_budget() -> None:
     started = time.perf_counter()
     case = load_case(SMOKE_CASE)
     result = simulate(case)
-    audit = audit_case(case)
+    audit = audit_result(result)
     elapsed_s = time.perf_counter() - started
     max_rss_bytes = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024
 

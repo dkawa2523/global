@@ -6,13 +6,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from plasma_global.chemistry.compile import compile_chemistry
 from plasma_global.chemistry.data import (
     ChemistryData,
     RateModelData,
     ReactionData,
     SpeciesData,
 )
-from plasma_global.errors import CaseValidationError, ModelDomainError
+from plasma_global.errors import CaseValidationError, ChemistryError, ModelDomainError
 from plasma_global.models.surface import (
     BOLTZMANN_J_K,
     E_CHARGE,
@@ -132,13 +133,13 @@ def test_solver_continuation_preserves_multisite_surface_composition() -> None:
     )
     coverage = np.array([[0.8, 0.2], [0.3, 0.2]])
 
-    model._continue_solver_coverages(coverage)
+    model.continue_solver_coverages(coverage)
 
     np.testing.assert_allclose(coverage[0], [2.0 / 3.0, 1.0 / 6.0])
     np.testing.assert_array_equal(coverage[1], [0.3, 0.2])
     np.testing.assert_allclose(coverage @ np.array([1.0, 2.0]), [1.0, 0.7])
     with pytest.raises(ValueError, match="coverage state has the wrong shape"):
-        model._continue_solver_coverages(np.zeros(3))
+        model.continue_solver_coverages(np.zeros(3))
 
 
 def test_reactions_aggregate_particle_event_heat_and_coverage_rates() -> None:
@@ -177,7 +178,7 @@ def test_reactions_aggregate_particle_event_heat_and_coverage_rates() -> None:
         ReactionData(
             "etch",
             {"ion": 1.0, "Ads": 1.0},
-            {"A": 1.0, "site": 1.0},
+            {"ion": 1.0, "A": 1.0, "site": 1.0},
             "ion",
             None,
             gas_heating_eV=2.0,
@@ -205,8 +206,8 @@ def test_reactions_aggregate_particle_event_heat_and_coverage_rates() -> None:
     )
     sticking_rate = 0.25 * 0.2 * thermal_speed * 1.0e20 * 0.75
     ion_rate = 10.0 * 2.0 * ((6.0 - 2.0) / (10.0 - 2.0)) * 0.25
-    assert result.rates_m2_s["stick@wall"] == pytest.approx(sticking_rate)
-    assert result.rates_m2_s["etch@wall"] == pytest.approx(ion_rate)
+    assert result.rates_m2_s["stick", "wall"] == pytest.approx(sticking_rate)
+    assert result.rates_m2_s["etch", "wall"] == pytest.approx(ion_rate)
     np.testing.assert_allclose(
         result.gas_derivative_m3_s,
         [[0.5 * (-sticking_rate + ion_rate), 0.0]],
@@ -293,7 +294,7 @@ def test_sticking_rate_is_independent_of_reactant_order() -> None:
             np.array([[1.0e20, 1.0e15]]),
             np.array([400.0]),
         )
-        rates.append(evaluated.rates_m2_s["stick@wall"])
+        rates.append(evaluated.rates_m2_s["stick", "wall"])
 
     assert rates[0] == pytest.approx(rates[1])
 
@@ -330,7 +331,7 @@ def test_ion_assisted_rate_is_independent_of_reactant_order() -> None:
             ion_flux_m2_s={("wall", "ion"): 10.0},
             ion_energy_eV={"wall": 6.0},
         )
-        rates.append(evaluated.rates_m2_s["etch@wall"])
+        rates.append(evaluated.rates_m2_s["etch", "wall"])
 
     assert rates[0] == pytest.approx(rates[1])
 
@@ -370,9 +371,9 @@ def test_surface_temperature_context_is_resolved_per_surface() -> None:
 
     activation_factor = math.exp(-0.05 * E_CHARGE / (BOLTZMANN_J_K * 600.0))
     expected_hot_rate = 3.0 * 1.0e19 * activation_factor * 0.4
-    assert defaults.rates_m2_s["desorb@cold"] < defaults.rates_m2_s["desorb@hot"]
-    assert overridden.rates_m2_s["desorb@cold"] == pytest.approx(expected_hot_rate)
-    assert overridden.rates_m2_s["desorb@hot"] == pytest.approx(expected_hot_rate)
+    assert defaults.rates_m2_s["desorb", "cold"] < defaults.rates_m2_s["desorb", "hot"]
+    assert overridden.rates_m2_s["desorb", "cold"] == pytest.approx(expected_hot_rate)
+    assert overridden.rates_m2_s["desorb", "hot"] == pytest.approx(expected_hot_rate)
     np.testing.assert_allclose(
         overridden.coverage_derivative_s_inv,
         [-expected_hot_rate / 1.0e19, -expected_hot_rate / 1.0e19],
@@ -388,7 +389,7 @@ def test_thermal_surface_rates_scale_with_their_physical_site_order() -> None:
     langmuir_hinshelwood = RateModelData(
         "recombine",
         "langmuir_hinshelwood",
-        {"A_m2_s_inv": 5.0, "activation_eV": 0.0},
+        {"A_m2_s": 5.0, "activation_eV": 0.0},
     )
     reactions = (
         ReactionData(
@@ -425,17 +426,17 @@ def test_thermal_surface_rates_scale_with_their_physical_site_order() -> None:
         np.array([300.0]),
     )
 
-    assert evaluated.rates_m2_s["desorb@low"] == pytest.approx(
+    assert evaluated.rates_m2_s["desorb", "low"] == pytest.approx(
         3.0 * low_density * coverage
     )
-    assert evaluated.rates_m2_s["desorb@high"] == pytest.approx(
-        2.0 * evaluated.rates_m2_s["desorb@low"]
+    assert evaluated.rates_m2_s["desorb", "high"] == pytest.approx(
+        2.0 * evaluated.rates_m2_s["desorb", "low"]
     )
-    assert evaluated.rates_m2_s["recombine@low"] == pytest.approx(
+    assert evaluated.rates_m2_s["recombine", "low"] == pytest.approx(
         5.0 * low_density**2 * coverage**2
     )
-    assert evaluated.rates_m2_s["recombine@high"] == pytest.approx(
-        4.0 * evaluated.rates_m2_s["recombine@low"]
+    assert evaluated.rates_m2_s["recombine", "high"] == pytest.approx(
+        4.0 * evaluated.rates_m2_s["recombine", "low"]
     )
 
 
@@ -458,7 +459,7 @@ def test_thermal_surface_rates_reject_unsupported_reactant_shapes(
     parameters = (
         {"frequency_s_inv": 1.0, "activation_eV": 0.0}
         if kind == "desorption"
-        else {"A_m2_s_inv": 1.0, "activation_eV": 0.0}
+        else {"A_m2_s": 1.0, "activation_eV": 0.0}
     )
     rate_model = RateModelData("thermal", kind, parameters)
     reaction = ReactionData(
@@ -507,3 +508,87 @@ def test_evaluation_rejects_shape_and_domain_contract_violations() -> None:
             gas_temperature,
             surface_temperature_K={"wall": float("nan")},
         )
+
+
+@pytest.mark.parametrize(
+    "identity",
+    ["wall,part", "wall[part]", " wall", "wall ", "wall\x00", "wall\n", "wall\r"],
+)
+@pytest.mark.parametrize("field", ["surface_id", "zone_id", "initial_coverages"])
+def test_surface_geometry_rejects_ambiguous_series_identifiers(
+    identity: str, field: str
+) -> None:
+    values = {
+        "surface_id": "wall",
+        "zone_id": "z",
+        "area_m2": 1.0,
+        "site_density_m2": 1.0e19,
+        "temperature_K": 300.0,
+    }
+    values[field] = {identity: 0.0} if field == "initial_coverages" else identity
+    with pytest.raises(CaseValidationError, match="identifier"):
+        SurfaceGeometry(**values)
+
+
+@pytest.mark.parametrize("ion_product", [0.0, 2.0])
+def test_direct_ion_assisted_model_requires_unit_catalyst_on_both_sides(
+    ion_product: float,
+) -> None:
+    species = _species()
+    products = {"A": 1.0, "site": 1.0}
+    if ion_product:
+        products["ion"] = ion_product
+    reaction = ReactionData(
+        "capture", {"ion": 1.0, "Ads": 1.0}, products, "assist", None
+    )
+    rate = RateModelData(
+        "assist",
+        "ion_assisted",
+        {
+            "yield": 1.0,
+            "threshold_eV": 0.0,
+            "reference_energy_eV": 10.0,
+            "exponent": 1.0,
+        },
+    )
+    chemistry = _chemistry(species=species, reactions=(reaction,), rate_models=(rate,))
+    with pytest.raises(CaseValidationError, match="must preserve the incident ion"):
+        _model(chemistry, (SurfaceGeometry("wall", "z", 1.0, 1e19, 300.0),))
+
+
+def test_direct_surface_entries_reject_noncatalytic_ion_capture() -> None:
+    charged_adsorbate = SpeciesData(
+        "ChargedAds", "surface", 1, 40.0, {"X": 1.0, "site": 1.0}
+    )
+    rate_model = RateModelData(
+        "capture",
+        "ion_assisted",
+        {
+            "yield": 1.0,
+            "threshold_eV": 0.0,
+            "reference_energy_eV": 10.0,
+            "exponent": 1.0,
+        },
+    )
+    chemistry = _chemistry(
+        species=_species(
+            charged_adsorbate,
+            SpeciesData(
+                "e", "gas", -1, 0.00054858, {}, state_tags=frozenset({"electron"})
+            ),
+        ),
+        reactions=(
+            ReactionData(
+                "capture",
+                {"ion": 1.0, "site": 1.0},
+                {"ChargedAds": 1.0},
+                "capture",
+                None,
+            ),
+        ),
+        rate_models=(rate_model,),
+    )
+    with pytest.raises(ChemistryError, match="must preserve the incident ion"):
+        compile_chemistry(chemistry)
+    with pytest.raises(CaseValidationError, match="must preserve the incident ion"):
+        _model(chemistry, (SurfaceGeometry("wall", "z", 1.0, 1e19, 300.0),))

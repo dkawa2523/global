@@ -9,6 +9,7 @@ from itertools import pairwise
 from types import MappingProxyType
 from typing import SupportsFloat
 
+from plasma_global._identifiers import validate_identifier
 from plasma_global.core.transport import SegmentTransport
 from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.power import CompiledPowerCommand
@@ -67,8 +68,10 @@ class Zone:
     gas_temperature_K: float = 300.0
 
     def __post_init__(self) -> None:
-        if not self.zone_id:
-            raise ModelConfigurationError("zone_id must not be empty")
+        try:
+            validate_identifier(self.zone_id)
+        except ValueError as exc:
+            raise ModelConfigurationError(f"zone_id: {exc}") from exc
         if not math.isfinite(self.volume_m3) or self.volume_m3 <= 0.0:
             raise ModelConfigurationError(
                 f"Zone {self.zone_id!r} volume_m3 must be positive"
@@ -86,8 +89,6 @@ class RecipeSegment:
     segment_id: str
     start_s: float
     end_s: float
-    absorbed_power_W_by_zone: Mapping[str, float] = field(default_factory=dict)
-    reduced_field_Td_by_zone: Mapping[str, float] = field(default_factory=dict)
     surface_temperature_K_by_surface: Mapping[str, float] = field(default_factory=dict)
     wall_temperature_K_by_zone: Mapping[str, float] = field(default_factory=dict)
     prescribed_electron_density_m3_by_zone: Mapping[str, float] = field(
@@ -108,18 +109,6 @@ class RecipeSegment:
                 f"Recipe segment {self.segment_id!r} must have end_s > start_s"
             )
         mapping_contracts = (
-            (
-                "absorbed_power_W_by_zone",
-                self.absorbed_power_W_by_zone,
-                True,
-                "negative absorbed power",
-            ),
-            (
-                "reduced_field_Td_by_zone",
-                self.reduced_field_Td_by_zone,
-                True,
-                "negative reduced field",
-            ),
             (
                 "surface_temperature_K_by_surface",
                 self.surface_temperature_K_by_surface,

@@ -22,19 +22,9 @@ from plasma_global.core.result import SimulationResult
 from plasma_global.core.transport import CompiledTransport, SegmentTransport
 from plasma_global.errors import ModelConfigurationError
 from plasma_global.models.electrons import ElectronEnergyClosure
+from plasma_global.models.gas_energy import HeavyParticleThermodynamics
 from plasma_global.models.rates import ConstantRate
 from plasma_global.output import read_result_h5, write_result_h5
-
-ROOT = Path(__file__).parents[1]
-V2_CONFIGS = ROOT / "tests" / "fixtures" / "v2" / "configs"
-V2_CHEMISTRY = (
-    ROOT
-    / "tests"
-    / "fixtures"
-    / "v2"
-    / "chemistry_crane_two_reaction_argon"
-    / "chemistry_manifest.yaml"
-)
 
 
 def _conversion_model(rate_s_inv: float) -> tuple[CompiledGlobalModel, np.ndarray]:
@@ -195,7 +185,7 @@ def test_transport_preserves_shape_dtype_and_volume_integrals(
         edge_to=np.array([target]),
         edge_conductance_m3_s=np.array([conductance]),
         n_species=density.shape[1],
-        heavy_cv_over_kb=np.ones(density.shape[1]),
+        thermodynamics=HeavyParticleThermodynamics(np.ones(density.shape[1])),
     )
     forcing = SegmentTransport.zeros(2, density.shape[1])
 

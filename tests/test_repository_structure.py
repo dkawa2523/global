@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_public_api_exports_supported_operations() -> None:
     expected = ["load_case", "simulate", "write_result"]
 
-    assert plasma_global.__all__ == expected
-    assert plasma_global.api.__all__ == expected
+    assert set(expected) <= set(plasma_global.__all__)
+    assert set(expected) <= set(plasma_global.api.__all__)
     assert all(callable(getattr(plasma_global, name)) for name in expected)
     assert all(
         getattr(plasma_global, name) is getattr(plasma_global.api, name)

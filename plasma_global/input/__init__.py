@@ -1,3 +1,6 @@
-"""Schema, loader, compilers, and one-way migration; import concrete modules."""
+"""Public case declaration and input factories."""
 
-__all__: list[str] = []
+from plasma_global.input.load import case_from_mapping, load_case
+from plasma_global.input.schema import CaseSpec
+
+__all__ = ["CaseSpec", "case_from_mapping", "load_case"]

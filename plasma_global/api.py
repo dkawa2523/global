@@ -1,35 +1,37 @@
-"""The complete public application API."""
+"""Public declarations, preparation, simulation, and result publication."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
+from plasma_global.build import PreparedCase, compile_case
+from plasma_global.catalog import list_models
 from plasma_global.core.result import SimulationResult
-from plasma_global.input._resolved_case import ResolvedCase
-from plasma_global.input.load import load_case as _load_case
-from plasma_global.output import ResultPaths
+from plasma_global.input.load import case_from_mapping, load_case
+from plasma_global.input.schema import CaseSpec
+from plasma_global.output import (
+    ArtifactReport,
+    ArtifactStatus,
+    ResultPaths,
+    write_result,
+)
 
 
-def load_case(path: str | Path) -> ResolvedCase:
-    """Load and validate one schema-v4 case."""
-
-    return _load_case(path)
-
-
-def simulate(case: ResolvedCase) -> SimulationResult:
-    """Compile and simulate an already loaded case."""
-
+def simulate(case: CaseSpec | PreparedCase) -> SimulationResult:
+    """Simulate a declaration or reuse an already prepared input snapshot."""
     from plasma_global.build import simulate_case
 
     return simulate_case(case)
 
 
-def write_result(result: SimulationResult, out: str | Path) -> ResultPaths:
-    """Publish the numerical result and its requested analysis artifacts."""
-
-    from plasma_global.output import write_result as _write_result
-
-    return _write_result(result, out)
-
-
-__all__ = ["load_case", "simulate", "write_result"]
+__all__ = [
+    "ArtifactReport",
+    "ArtifactStatus",
+    "CaseSpec",
+    "PreparedCase",
+    "ResultPaths",
+    "case_from_mapping",
+    "compile_case",
+    "list_models",
+    "load_case",
+    "simulate",
+    "write_result",
+]

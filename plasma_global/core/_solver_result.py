@@ -11,6 +11,33 @@ from plasma_global.core.domain import SolverSettings
 
 
 @dataclass(slots=True)
+class _SegmentProgress:
+    """Sampled history plus one valid accepted state; never trial states."""
+
+    last_time_s: float
+    last_state: np.ndarray
+    time_parts: list[np.ndarray] = field(default_factory=list)
+    state_parts: list[np.ndarray] = field(default_factory=list)
+    saved_points: int = 0
+
+    def __post_init__(self) -> None:
+        self.append(np.array([self.last_time_s]), self.last_state.reshape(1, -1))
+
+    def append(self, time_s: np.ndarray, state: np.ndarray) -> None:
+        if time_s.size:
+            self.time_parts.append(time_s.copy())
+            self.state_parts.append(state.copy())
+            self.saved_points += time_s.size
+
+    def arrays(self, *, include_last: bool = False) -> tuple[np.ndarray, np.ndarray]:
+        if include_last and self.time_parts[-1][-1] < self.last_time_s:
+            self.append(np.array([self.last_time_s]), self.last_state.reshape(1, -1))
+        elif include_last:
+            self.state_parts[-1][-1] = self.last_state
+        return np.concatenate(self.time_parts), np.concatenate(self.state_parts, axis=0)
+
+
+@dataclass(slots=True)
 class _IntegrationHistory:
     time_parts: list[np.ndarray] = field(default_factory=list)
     state_parts: list[np.ndarray] = field(default_factory=list)
@@ -24,18 +51,20 @@ class _IntegrationHistory:
         self,
         *,
         segment_index: int,
-        solution: BDF,
+        solution: BDF | None,
         time_s: np.ndarray,
         state: np.ndarray,
+        completed: bool = True,
     ) -> None:
         if segment_index > 0:
             time_s, state = time_s[1:], state[1:, :]
         self.time_parts.append(time_s)
         self.state_parts.append(state)
-        self.nfev += int(solution.nfev)
-        self.njev += int(solution.njev)
-        self.nlu += int(solution.nlu)
-        self.completed_segments += 1
+        if solution is not None:
+            self.nfev += int(solution.nfev)
+            self.njev += int(solution.njev)
+            self.nlu += int(solution.nlu)
+        self.completed_segments += int(completed)
         self.saved_points += time_s.size
 
     def arrays(self, state_size: int) -> tuple[np.ndarray, np.ndarray]:

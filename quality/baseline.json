@@ -1,9 +1,8 @@
 {
   "bandit": {
     "findings": {
-      "bandit|B404:LOW|tools/quality_gate/context.py|<module>|Consider possible security implications associated with the subprocess module.": 1,
-      "bandit|B603:LOW|tools/quality_gate/context.py|_capture|subprocess call - check for execution of untrusted input.": 1,
-      "bandit|B603:LOW|tools/quality_gate/context.py|_run|subprocess call - check for execution of untrusted input.": 1
+      "bandit|B404:LOW|tools/_process.py|<module>|Consider possible security implications associated with the subprocess module.": 1,
+      "bandit|B603:LOW|tools/_process.py|run_process|subprocess call - check for execution of untrusted input.": 1
     }
   },
   "complexity_exceptions": {}

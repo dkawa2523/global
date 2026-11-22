@@ -215,3 +215,34 @@ def test_secret_scan_includes_untracked_nonignored_files(
 
     assert _tracked_files() == ["tracked.py", "untracked.py"]
     assert calls == [("ls-files", "--cached", "--others", "--exclude-standard")]
+
+
+def test_reviewed_bandit_move_preserves_rule_and_severity_budget(monkeypatch) -> None:
+    from tools.quality_gate import baselines
+
+    old = {"bandit": {"findings": {"bandit|B603:LOW|old.py|run|checked process": 1}}}
+    moved = {
+        "bandit": {
+            "findings": {"bandit|B603:LOW|new.py|run_process|checked process": 1}
+        }
+    }
+    monkeypatch.setattr(baselines, "_read_base_json", lambda _: old)
+    baselines._validate_baseline_monotonic(moved)
+    for changed in (
+        {"bandit|B603:LOW|new.py|run_process|checked process": 2},
+        {"bandit|B603:HIGH|new.py|run_process|checked process": 1},
+        {"bandit|B607:LOW|new.py|run_process|different concern": 1},
+    ):
+        with pytest.raises(QualityFailure, match="Baseline weakening"):
+            baselines._validate_baseline_monotonic({"bandit": {"findings": changed}})
+    # A moved location must still be explicitly reviewed in the current baseline.
+    with pytest.raises(QualityFailure, match="New or worsened"):
+        baselines._assert_findings_not_worse(
+            "bandit",
+            [
+                Finding(
+                    "bandit|B603:LOW|unreviewed.py|run|checked process", "unreviewed"
+                )
+            ],
+            moved,
+        )

@@ -154,7 +154,7 @@ def _validate_h5_header(h5: h5py.File, source: Path) -> None:
         version, (int, np.integer)
     ):
         raise ValueError("Result HDF5 format_version must be an integer")
-    if version not in {2, RESULT_FORMAT_VERSION}:
+    if version != RESULT_FORMAT_VERSION:
         raise ValueError(f"Unsupported result HDF5 format version {version}")
     if str(h5.attrs.get("state_layout", "")) != "time-major":
         raise ValueError("Result HDF5 state layout must be time-major")
@@ -192,6 +192,8 @@ def _read_h5_metadata(h5: h5py.File) -> dict[str, Any]:
     metadata = _read_yaml(group, "values_yaml", "/metadata/values_yaml")
     if not isinstance(metadata, dict):
         raise TypeError("result metadata must be a mapping")
+    if "series_catalog" not in metadata:
+        raise ValueError("Result HDF5 v4 requires metadata.series_catalog")
     return metadata
 
 
@@ -203,8 +205,6 @@ def _read_h5_solver(
     success_dataset = _required_dataset(group, "success", "/solver/success")
     if success_dataset.dtype.kind != "b" or success_dataset.shape not in {None, ()}:
         raise TypeError("/solver/success must be a scalar or null boolean dataset")
-    if success_dataset.shape is None and h5.attrs["format_version"] < 3:
-        raise ValueError("unknown execution status requires result format version 3")
     success = None if success_dataset.shape is None else bool(success_dataset[()])
     status = SimulationStatus(
         success=success,
@@ -226,8 +226,14 @@ def read_result_h5(path: str | Path) -> SimulationResult:
         time_s, state, state_labels = _read_h5_state(h5)
         observables = _read_h5_observables(h5)
         metadata = _read_h5_metadata(h5)
-        _preserve_unspecified_units(h5, state_labels, observables, metadata)
         status, solver_stats = _read_h5_solver(h5)
+        catalog = metadata["series_catalog"]
+        if not isinstance(catalog, Mapping):
+            raise TypeError("metadata.series_catalog must be a mapping")
+        if missing := (set(state_labels) | set(observables)) - catalog.keys():
+            raise ValueError(
+                f"series catalog is missing saved series: {sorted(missing)}"
+            )
         result = SimulationResult(
             time_s=time_s,
             state=state,
@@ -237,38 +243,13 @@ def read_result_h5(path: str | Path) -> SimulationResult:
             solver_stats=solver_stats,
             metadata=metadata,
         )
-        if h5.attrs["format_version"] == RESULT_FORMAT_VERSION:
-            _validate_h5_units(h5, result)
+        _validate_h5_units(h5, result)
     return result
 
 
-def _preserve_unspecified_units(
-    h5: h5py.File,
-    labels: tuple[str, ...],
-    observables: Mapping[str, np.ndarray],
-    metadata: dict[str, Any],
-) -> None:
-    """Keep explicit legacy unknown units when the current catalog grew."""
-    state_units = h5["state/values"].attrs.get("column_units", ())
-    stored = dict(zip(labels, state_units, strict=False))
-    stored.update(
-        {name: h5[f"observables/{name}"].attrs.get("unit") for name in observables}
-    )
-    declared = metadata.get("series_units", {})
-    if not isinstance(declared, Mapping):
-        return  # The result constructor reports invalid metadata.
-    inherited = {
-        name: "unspecified"
-        for name, unit in stored.items()
-        if unit == "unspecified"
-        and name not in declared
-        and series_unit(name) != "unspecified"
-    }
-    if inherited:
-        metadata["series_units"] = {**inherited, **declared}
-
-
 def _validate_h5_units(h5: h5py.File, result: SimulationResult) -> None:
+    if h5["time_s"].attrs.get("unit") != "s":
+        raise ValueError("/time_s unit disagrees with required unit 's'")
     units = result.metadata.get("series_units", {})
     expected = tuple(series_unit(label, units) for label in result.state_labels)
     stored = h5["state/values"].attrs.get("column_units", ())

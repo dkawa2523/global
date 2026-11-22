@@ -14,13 +14,13 @@ DEFAULT_OUTPUT_DIRECTORY = ROOT / "docs" / "generated"
 
 
 def minimal_case_document() -> dict[str, object]:
-    """Return the smallest self-contained schema-v4 case document.
+    """Return the smallest self-contained schema-v5 case document.
 
     No external files or implicit species seeds are required.
     """
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "case": {"name": "minimal_argon"},
         "chemistry": {
             "species": [

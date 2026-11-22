@@ -11,7 +11,9 @@ from typing import Literal
 
 import numpy as np
 
+from plasma_global._input_sources import InputSourceStore
 from plasma_global._numeric_csv import read_numeric_csv
+from plasma_global._time_axis import inside_time_interval
 
 
 def _validated_profile_time(value: np.ndarray) -> np.ndarray:
@@ -118,11 +120,14 @@ class PrescribedElectronProfile:
         columns: Mapping[str, str] | None = None,
         interpolation: Literal["linear", "previous"] = "linear",
         bounds: Literal["hold", "error"] = "hold",
+        sources: InputSourceStore | None = None,
     ) -> PrescribedElectronProfile:
         """Read ``time_s`` plus numeric zone columns from a CSV file."""
 
         source = Path(path)
-        values = read_numeric_csv(source, columns=columns)
+        values = read_numeric_csv(
+            source, columns=columns, sources=sources, role="electron_density_profile"
+        )
         if "time_s" not in values:
             raise ValueError(f"electron profile {source} requires a time_s column")
         selected = _selected_profile_columns(source, tuple(values), zone_columns)
@@ -147,8 +152,8 @@ class PrescribedElectronProfile:
             values = self.density_m3_by_zone.get("*")
         if values is None:
             raise KeyError(f"no prescribed electron density for zone {key!r}")
-        if self.bounds == "error" and (
-            query < self.time_s[0] or query > self.time_s[-1]
+        if self.bounds == "error" and not inside_time_interval(
+            query, float(self.time_s[0]), float(self.time_s[-1])
         ):
             raise ValueError(
                 f"time_s={query:g} is outside [{self.time_s[0]:g}, {self.time_s[-1]:g}]"

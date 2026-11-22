@@ -9,6 +9,7 @@ from typing import Literal, TypeVar
 
 import numpy as np
 
+from plasma_global._identifiers import validate_identifier
 from plasma_global.errors import CaseValidationError, ModelDomainError
 from plasma_global.models.external_table import (
     ExternalTableBinding,
@@ -17,6 +18,13 @@ from plasma_global.models.external_table import (
 
 _K = TypeVar("_K")
 _V = TypeVar("_V")
+
+
+def power_identifier(value: str, where: str) -> str:
+    try:
+        return validate_identifier(value)
+    except ValueError as exc:
+        raise CaseValidationError(f"{where}: {exc}") from exc
 
 
 def _empty_observables() -> Mapping[str, float]:

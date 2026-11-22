@@ -1,7 +1,7 @@
-schema_version: 4
+schema_version: 5
 case:
   name: canonical-minimal
-  description: Minimal executable schema-v4 fixture
+  description: Minimal executable schema-v5 fixture
 chemistry:
   file: chemistry/chemistry.yaml
 reactor:
@@ -39,7 +39,6 @@ reactor:
   power_ports:
     source:
       zone_id: plasma
-      coupling_target: ''
       model:
         kind: prescribed_power
         electron_fraction: 1.0
@@ -59,6 +58,7 @@ solver:
   atol: 1.0e-14
   max_step_s: 2.5e-08
 output:
+  profile: minimal
   observables: []
   summary_series: []
 run:

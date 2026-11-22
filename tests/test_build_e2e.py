@@ -7,13 +7,11 @@ import numpy as np
 import pytest
 import yaml
 
-import plasma_global.build as build_module
-import plasma_global.models.external_table as external_table_module
 from plasma_global import simulate
-from plasma_global.build import CompiledCase, compile_case, simulate_case
+from plasma_global.build import PreparedCase, compile_case, simulate_case
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._resolved_case import ResolvedCase
-from plasma_global.input.load import load_case
+from plasma_global.input.load import case_from_mapping, load_case
+from plasma_global.input.schema import CaseSpec
 from plasma_global.models.electrons import ELEMENTARY_CHARGE_C
 from plasma_global.models.gas_energy import elastic_electron_heating_J_m3_s
 from plasma_global.models.power import CompiledPowerCommand
@@ -21,10 +19,10 @@ from plasma_global.models.power import CompiledPowerCommand
 FIXTURE = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
 
 
-def _updated_case(case: ResolvedCase, update: object) -> ResolvedCase:
-    data = case.model_dump(mode="python")
+def _updated_case(case: CaseSpec, update: object) -> CaseSpec:
+    data = case.to_dict()
     update(data)
-    return ResolvedCase.model_validate(data)
+    return case_from_mapping(data, base_directory=case.base_directory)
 
 
 def _write_momentum_chemistry(directory: Path) -> Path:
@@ -52,7 +50,7 @@ def _write_momentum_chemistry(directory: Path) -> Path:
         "    kind: momentum_transfer\n"
         "    target: Ar\n"
         "    threshold_eV: 0.0\n"
-        "    energy_loss_eV: 0.0\n"
+        "    electron_energy_transfer_eV: 0.0\n"
         "    file: ar-momentum.csv\n",
         encoding="utf-8",
     )
@@ -114,16 +112,16 @@ def test_canonical_case_loads_compiles_and_simulates() -> None:
     compiled = compile_case(case)
     result = simulate_case(case)
 
-    assert isinstance(compiled, CompiledCase)
+    assert isinstance(compiled, PreparedCase)
     assert compiled.chemistry.species_ids == ("Ar", "Ar_plus")
     assert compiled.model.wall_boundaries[0].reactions[0].reaction_id == "neutralize"
     assert result.status.success
-    assert result.time_s[0] == pytest.approx(case.recipe.start_time_s)
-    assert result.time_s[-1] == pytest.approx(case.recipe.end_time_s)
+    assert result.time_s[0] == pytest.approx(case.run.start_time_s)
+    assert result.time_s[-1] == pytest.approx(case.run.end_time_s)
     assert result.state.shape == (result.time_s.size, 3)
     assert np.isfinite(result.state).all()
-    assert "schema_version: 4" in result.metadata["effective_case_yaml"]
-    assert result.metadata["model_ids"]["electron_closure"] == "electron_energy"
+    assert "schema_version: 5" in result.metadata["effective_case_yaml"]
+    assert result.metadata["model_ids"]["electrons"] == "energy_balance"
     assert result.metadata["provenance"]["chemistry"]["fixture"] == (
         "canonical-minimal"
     )
@@ -141,17 +139,17 @@ def test_boundary_selectors_are_checked_even_when_wall_transport_is_off(
     chemistry = yaml.safe_load(manifest.read_text())
     chemistry["boundary_reactions"][0][selector] = ["misspelled"]
     manifest.write_text(yaml.safe_dump(chemistry), encoding="utf-8")
-    data = load_case(directory / "case.yaml").model_dump(mode="python")
-    data["reactor"]["surfaces"][0]["wall_transport"] = {"kind": "off"}
+    data = load_case(directory / "case.yaml").to_dict(relative_to=Path.cwd())
+    data["reactor"]["surfaces"]["wall"]["wall_transport"] = {"kind": "off"}
     with pytest.raises(CaseValidationError, match=f"{selector} selects unknown"):
-        compile_case(ResolvedCase.model_validate(data))
+        compile_case(case_from_mapping(data, base_directory=Path.cwd()))
 
 
 def test_surface_initial_state_is_never_silently_dropped() -> None:
-    data = load_case(FIXTURE).model_dump(mode="python")
-    data["reactor"]["surfaces"][0]["initial_coverages"] = {"adsorbed": 0.2}
+    data = load_case(FIXTURE).to_dict(relative_to=Path.cwd())
+    data["reactor"]["surfaces"]["wall"]["initial_coverages"] = {"adsorbed": 0.2}
     with pytest.raises(ValueError, match="initial_coverages requires"):
-        ResolvedCase.model_validate(data)
+        CaseSpec.model_validate(data)
 
 
 @pytest.mark.parametrize(
@@ -166,14 +164,14 @@ def test_prescribed_profile_rejects_inapplicable_column_and_zone_bindings(
 ) -> None:
     path = tmp_path / "density.csv"
     path.write_text("time_s,ne\n0,1e12\n1e-7,2e12\n", encoding="utf-8")
-    data = load_case(FIXTURE).model_dump(mode="python")
+    data = load_case(FIXTURE).to_dict(relative_to=Path.cwd())
     data["models"]["electron_density"] = {
         "kind": "experimental.prescribed_profile",
         "file": path,
         "zone_columns": zone_columns,
     }
     with pytest.raises(ValueError, match=message):
-        compile_case(ResolvedCase.model_validate(data))
+        compile_case(case_from_mapping(data, base_directory=Path.cwd()))
 
 
 def test_compile_case_revalidates_and_detaches_the_case_snapshot() -> None:
@@ -187,7 +185,7 @@ def test_compile_case_revalidates_and_detaches_the_case_snapshot() -> None:
     assert compiled.case.output.observables == []
 
     invalid = load_case(FIXTURE)
-    densities = invalid.reactor.zones[0].initial_densities_m3
+    densities = invalid.reactor.zones["plasma"].initial.densities_m3
     assert densities is not None
     cast(dict[str, Any], densities)["Ar"] = "not-a-density"
     with pytest.raises(CaseValidationError, match="changes made after validation"):
@@ -196,10 +194,10 @@ def test_compile_case_revalidates_and_detaches_the_case_snapshot() -> None:
 
 def test_pressure_composition_and_explicit_ion_seed_compile_to_densities() -> None:
     def update(data: dict[str, object]) -> None:
-        zone = data["reactor"]["zones"][0]
-        zone.pop("initial_densities_m3")
-        zone["initial_mole_fractions"] = {"Ar": 1.0}
-        zone["initial_seed_densities_m3"] = {"Ar_plus": 1.0e12}
+        zone = data["reactor"]["zones"]["plasma"]
+        zone["initial"].pop("densities_m3")
+        zone["initial"]["mole_fractions"] = {"Ar": 1.0}
+        zone["initial"]["seed_densities_m3"] = {"Ar_plus": 1.0e12}
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
 
@@ -221,8 +219,8 @@ def test_fixed_gas_energy_is_the_schema_default() -> None:
 
 def test_every_zone_requires_an_explicit_positive_ion_seed() -> None:
     def update(data: dict[str, object]) -> None:
-        zone = data["reactor"]["zones"][0]
-        zone["initial_densities_m3"] = {"Ar": 2.00000001e20}
+        zone = data["reactor"]["zones"]["plasma"]
+        zone["initial"]["densities_m3"] = {"Ar": 2.00000001e20}
 
     with pytest.raises(CaseValidationError, match="positive-ion seed"):
         compile_case(_updated_case(load_case(FIXTURE), update))
@@ -230,7 +228,7 @@ def test_every_zone_requires_an_explicit_positive_ion_seed() -> None:
 
 def test_square_pulse_is_split_at_every_switch_boundary() -> None:
     def update(data: dict[str, object]) -> None:
-        step = data["recipe"]["steps"][0]
+        step = data["run"]["steps"][0]
         step["duration_s"] = 1.0
         step["commands"]["power_ports"]["source"]["absorbed_power_W"] = 1.0
         step["commands"]["power_ports"]["source"]["waveform"] = {
@@ -239,7 +237,7 @@ def test_square_pulse_is_split_at_every_switch_boundary() -> None:
             "repetition_Hz": 2.0,
             "phase_s": 0.0,
         }
-        data["reactor"]["surfaces"][0]["wall_transport"] = {"kind": "off"}
+        data["reactor"]["surfaces"]["wall"]["wall_transport"] = {"kind": "off"}
         data["solver"]["max_step_s"] = 0.05
 
     case = _updated_case(load_case(FIXTURE), update)
@@ -305,7 +303,7 @@ def test_typed_wall_transport_variants_and_impact_energy_compile(
     expected_value: float,
 ) -> None:
     def update(data: dict[str, object]) -> None:
-        surface = data["reactor"]["surfaces"][0]
+        surface = data["reactor"]["surfaces"]["wall"]
         surface["wall_transport"] = transport
         surface["ion_impact_energy_eV"] = 7.5
 
@@ -319,7 +317,7 @@ def test_typed_wall_transport_variants_and_impact_energy_compile(
 
 def test_off_wall_transport_compiles_no_boundary() -> None:
     def update(data: dict[str, object]) -> None:
-        data["reactor"]["surfaces"][0]["wall_transport"] = {"kind": "off"}
+        data["reactor"]["surfaces"]["wall"]["wall_transport"] = {"kind": "off"}
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
     assert compiled.model.wall_boundaries == ()
@@ -334,7 +332,7 @@ def test_bohm_h_factor_contract_is_recorded_without_changing_model_id(
     expected_mode: str,
 ) -> None:
     def update(data: dict[str, object]) -> None:
-        data["reactor"]["surfaces"][0]["wall_transport"] = {
+        data["reactor"]["surfaces"]["wall"]["wall_transport"] = {
             "kind": "bohm",
             "h_factor": h_factor,
         }
@@ -352,7 +350,7 @@ def test_bohm_h_factor_contract_is_recorded_without_changing_model_id(
 
 def test_schema_bohm_h_factor_is_the_complete_edge_density_factor() -> None:
     def update(data: dict[str, object]) -> None:
-        data["reactor"]["surfaces"][0]["wall_transport"] = {
+        data["reactor"]["surfaces"]["wall"]["wall_transport"] = {
             "kind": "bohm",
             "h_factor": 1.0,
         }
@@ -378,7 +376,7 @@ def test_auto_bohm_h_factor_tracks_current_neutral_density_and_limits() -> None:
     cross_section_m2 = 1.0e-18
 
     def update(data: dict[str, object]) -> None:
-        data["reactor"]["surfaces"][0]["wall_transport"] = {
+        data["reactor"]["surfaces"]["wall"]["wall_transport"] = {
             "kind": "bohm",
             "h_factor": "auto",
             "characteristic_length_m": length_m,
@@ -422,16 +420,15 @@ def test_evolved_gas_inlet_compiles_particle_enthalpy_source(tmp_path: Path) -> 
     manifest = _write_momentum_chemistry(tmp_path / "chemistry")
 
     def update(data: dict[str, object]) -> None:
-        data["chemistry"]["manifest"] = manifest
+        data["chemistry"]["file"] = manifest
         data["models"]["gas_energy"] = {"kind": "evolved"}
-        data["reactor"]["gas_inlets"] = [
-            {
-                "inlet_id": "feed",
+        data["reactor"]["gas_inlets"] = {
+            "feed": {
                 "zone_id": "plasma",
                 "flow_sccm": {"Ar": 1.0},
                 "temperature_K": 450.0,
             }
-        ]
+        }
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
     source = compiled.segments[0].transport.inlet_heavy_energy_J_m3_s
@@ -456,50 +453,38 @@ def test_compile_reads_each_shared_external_model_once(
     )
 
     def update(data: dict[str, object]) -> None:
-        data["reactor"]["power_ports"][0]["model"] = {
+        data["reactor"]["power_ports"]["source"]["model"] = {
             "kind": "external_table",
             "file": power_path,
         }
-        command = data["recipe"]["steps"][0]["commands"]["power_ports"]["source"]
-        data["recipe"]["steps"][0]["commands"]["power_ports"]["source"] = {
-            "kind": "external_table",
+        command = data["run"]["steps"][0]["commands"]["power_ports"]["source"]
+        data["run"]["steps"][0]["commands"]["power_ports"]["source"] = {
             "file": power_path,
         }
         assert command
         data["models"]["electrons"] = {
-            "kind": "table",
-            "file": kinetics_path,
-            "lookup": "mean_energy",
+            "kind": "energy_balance",
+            "coefficients": {"file": kinetics_path},
         }
 
     case = _updated_case(load_case(FIXTURE), update)
-    counts = {"chemistry": 0, "power": 0, "kinetics": 0}
-    original_chemistry = build_module.load_chemistry
-    original_power = external_table_module.load_external_table
-    original_kinetics = build_module.TabulatedElectronKinetics.from_csv
+    paths = {
+        Path(case.base_directory / case.chemistry["file"]).resolve(),
+        power_path.resolve(),
+        kinetics_path.resolve(),
+    }
+    counts = dict.fromkeys(paths, 0)
+    read_bytes = Path.read_bytes
 
-    def counted_chemistry(path: Path) -> object:
-        counts["chemistry"] += 1
-        return original_chemistry(path)
+    def counted_read_bytes(path: Path) -> bytes:
+        if path.resolve() in counts:
+            counts[path.resolve()] += 1
+        return read_bytes(path)
 
-    def counted_power(path: Path) -> object:
-        counts["power"] += 1
-        return original_power(path)
-
-    def counted_kinetics(*args: object, **kwargs: object) -> object:
-        counts["kinetics"] += 1
-        return original_kinetics(*args, **kwargs)
-
-    monkeypatch.setattr(build_module, "load_chemistry", counted_chemistry)
-    monkeypatch.setattr(external_table_module, "load_external_table", counted_power)
-    monkeypatch.setattr(
-        build_module.TabulatedElectronKinetics,
-        "from_csv",
-        counted_kinetics,
-    )
+    monkeypatch.setattr(Path, "read_bytes", counted_read_bytes)
     compiled = compile_case(case)
-
-    assert counts == {"chemistry": 1, "power": 1, "kinetics": 1}
+    assert set(counts.values()) == {1}
+    assert paths <= set(compiled.input_sources)
     kinetics_provenance = compiled.metadata["provenance"]["electron_kinetics"]
     assert kinetics_provenance["mobility_scaling"] == "inverse_neutral_density"
     assert kinetics_provenance["mobility_reference_source"] == ("table_input")
@@ -515,15 +500,14 @@ def test_previous_external_table_knots_bind_each_forcing_interval(
     )
 
     def update(data: dict[str, object]) -> None:
-        data["reactor"]["power_ports"][0]["model"] = {
+        data["reactor"]["power_ports"]["source"]["model"] = {
             "kind": "external_table",
             "file": power_path,
             "interpolation": "previous",
         }
-        step = data["recipe"]["steps"][0]
+        step = data["run"]["steps"][0]
         step["duration_s"] = 1.0
         step["commands"]["power_ports"]["source"] = {
-            "kind": "external_table",
             "file": power_path,
             "interpolation": "previous",
             "time_offset_s": 0.1,
@@ -579,14 +563,14 @@ def test_linear_external_table_does_not_create_knot_segments(tmp_path: Path) -> 
     )
 
     def update(data: dict[str, object]) -> None:
-        data["reactor"]["power_ports"][0]["model"] = {
+        data["reactor"]["power_ports"]["source"]["model"] = {
             "kind": "external_table",
             "file": power_path,
             "interpolation": "linear",
         }
-        step = data["recipe"]["steps"][0]
+        step = data["run"]["steps"][0]
         step["duration_s"] = 1.0
-        step["commands"]["power_ports"]["source"] = {"kind": "external_table"}
+        step["commands"]["power_ports"]["source"] = {}
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
     assert len(compiled.segments) == 1
@@ -606,24 +590,21 @@ def test_local_field_table_and_dc_series_are_bound_to_the_core(
     )
 
     def update(data: dict[str, object]) -> None:
-        zone = data["reactor"]["zones"][0]
-        zone.pop("initial_mean_energy_eV")
-        data["reactor"]["power_ports"][0]["model"] = {
+        zone = data["reactor"]["zones"]["plasma"]
+        zone["initial"].pop("mean_energy_eV")
+        data["reactor"]["power_ports"]["source"]["model"] = {
             "kind": "dc_series",
             "ballast_resistance_ohm": 1.0e6,
             "gap_m": 0.1,
             "electrode_area_m2": 0.01,
         }
-        data["recipe"]["steps"][0]["commands"]["power_ports"]["source"] = {
-            "kind": "dc_series",
+        data["run"]["steps"][0]["commands"]["power_ports"]["source"] = {
             "source_voltage_V": 10.0,
         }
         data["models"]["electrons"] = {
-            "kind": "table",
-            "file": kinetics_path,
-            "lookup": "local_field",
+            "kind": "local_field",
+            "coefficients": {"file": kinetics_path},
         }
-        data["models"]["electron_closure"] = {"kind": "local_field"}
         data["output"]["observables"] = ["reduced_field_Td[plasma]"]
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
@@ -649,7 +630,7 @@ def test_requested_observables_are_postprocessed_without_output_side_effects() -
     ]
 
     def update(data: dict[str, object]) -> None:
-        model = data["reactor"]["power_ports"][0]["model"]
+        model = data["reactor"]["power_ports"]["source"]["model"]
         model["electron_fraction"] = 0.75
         model["gas_fraction"] = 0.25
         data["output"]["observables"] = names
@@ -681,7 +662,7 @@ def test_unknown_observable_is_a_compile_error() -> None:
     def update(data: dict[str, object]) -> None:
         data["output"]["observables"] = ["legacy_everything"]
 
-    with pytest.raises(ValueError, match="unknown output observables"):
+    with pytest.raises(ValueError, match="output series matches nothing"):
         compile_case(_updated_case(load_case(FIXTURE), update))
 
 
@@ -690,7 +671,7 @@ def test_reduced_field_observable_without_a_field_source_is_a_compile_error() ->
         data["output"]["observables"] = ["reduced_field_Td[plasma]"]
 
     with pytest.raises(
-        ValueError, match=r"unknown output observables.*reduced_field_Td"
+        ValueError, match=r"reduced_field_Td.*undefined.*no reduced-field source"
     ):
         compile_case(_updated_case(load_case(FIXTURE), update))
 
@@ -699,7 +680,7 @@ def test_unknown_summary_series_is_a_compile_error() -> None:
     def update(data: dict[str, object]) -> None:
         data["output"]["summary_series"] = ["n[plasma,legacy_species]"]
 
-    with pytest.raises(ValueError, match="unknown output summary series"):
+    with pytest.raises(ValueError, match="output series matches nothing"):
         compile_case(_updated_case(load_case(FIXTURE), update))
 
 
@@ -715,7 +696,7 @@ def test_prescribed_electron_density_profile_is_bound_once(
             "file": profile_path,
             "zone_columns": {"plasma": "ne"},
             "interpolation": "linear",
-            "hold": "error",
+            "bounds": "error",
         }
         data["output"]["observables"] = [
             "electron_density_m3[plasma]",
@@ -761,7 +742,7 @@ def test_previous_electron_profile_is_bound_on_each_side_of_a_knot(
             "file": profile_path,
             "zone_columns": {"plasma": "ne"},
             "interpolation": "previous",
-            "hold": "error",
+            "bounds": "error",
         }
 
     compiled = compile_case(_updated_case(load_case(FIXTURE), update))
@@ -782,7 +763,7 @@ def test_momentum_cross_section_compiles_elastic_heating_into_both_ledgers(
     manifest = _write_momentum_chemistry(tmp_path / "chemistry")
 
     def update(data: dict[str, object]) -> None:
-        data["chemistry"]["manifest"] = manifest
+        data["chemistry"]["file"] = manifest
         data["models"]["gas_energy"] = {
             "kind": "evolved",
             "wall_energy_relaxation_s_inv_by_zone": {"plasma": 0.0},
@@ -821,11 +802,10 @@ def test_table_eedf_uses_and_requires_its_momentum_rate(tmp_path: Path) -> None:
     )
 
     def update(data: dict[str, object]) -> None:
-        data["chemistry"]["manifest"] = manifest
+        data["chemistry"]["file"] = manifest
         data["models"]["electrons"] = {
-            "kind": "table",
-            "file": kinetics_path,
-            "lookup": "mean_energy",
+            "kind": "energy_balance",
+            "coefficients": {"file": kinetics_path},
         }
         data["models"]["gas_energy"] = {"kind": "evolved"}
 
@@ -860,16 +840,16 @@ def test_surface_state_reaction_temperature_override_and_free_site_observable(
     manifest = _write_surface_chemistry(tmp_path / "surface-chemistry")
 
     def update(data: dict[str, object]) -> None:
-        data["chemistry"]["manifest"] = manifest
-        zone = data["reactor"]["zones"][0]
-        zone["initial_densities_m3"] = {"A": 1.0e20, "A_plus": 1.0e12}
-        zone["pressure_Pa"] = 1.00000001e20 * 1.380649e-23 * 300.0
-        surface = data["reactor"]["surfaces"][0]
+        data["chemistry"]["file"] = manifest
+        zone = data["reactor"]["zones"]["plasma"]
+        zone["initial"]["densities_m3"] = {"A": 1.0e20, "A_plus": 1.0e12}
+        zone["initial"]["pressure_Pa"] = 1.00000001e20 * 1.380649e-23 * 300.0
+        surface = data["reactor"]["surfaces"]["wall"]
         surface["site_density_m2"] = 1.0e19
         surface["initial_coverages"] = {"wall:A*": 0.0}
         surface["wall_transport"] = {"kind": "off"}
-        data["models"]["surface_kinetics"] = {}
-        commands = data["recipe"]["steps"][0]["commands"]
+        data["models"]["surface_kinetics"] = {"kind": "mass_action"}
+        commands = data["run"]["steps"][0]["commands"]
         commands["surfaces"] = {"wall": {"temperature_K": 450.0}}
         data["output"]["observables"] = ["coverage[wall,wall:*]"]
 
@@ -893,7 +873,7 @@ def test_standard_argon_case_conserves_particles_through_afterglow() -> None:
         Path(__file__).parents[1] / "plasma_global/examples/cases/argon_maxwellian.yaml"
     )
     result = simulate(load_case(case_path))
-    assert result.metadata["assessment"]["classification"] == "standard"
+    assert result.status.success
     assert not result.metadata["assessment"]["issues"]
     total = result.series("n[plasma,Ar]") + result.series("n[plasma,Ar_plus]")
     np.testing.assert_allclose(total, total[0], rtol=1.0e-8)
@@ -901,3 +881,47 @@ def test_standard_argon_case_conserves_particles_through_afterglow() -> None:
     assert np.all(
         result.series("absorbed_power_W[plasma]")[result.time_s > 1.0e-3] == 0.0
     )
+
+
+def test_effective_inline_chemistry_replays_from_a_result_directory(
+    tmp_path: Path,
+) -> None:
+    inputs = tmp_path / "inputs"
+    mechanism = _write_momentum_chemistry(inputs)
+    document = load_case(FIXTURE).to_dict(relative_to=inputs)
+    document["chemistry"] = yaml.safe_load(mechanism.read_text(encoding="utf-8"))
+    source = inputs / "case.yaml"
+    source.write_text(yaml.safe_dump(document), encoding="utf-8")
+    original = simulate(load_case(source))
+
+    results = tmp_path / "results"
+    results.mkdir()
+    replay = results / "effective.yaml"
+    replay.write_text(original.metadata["effective_case_yaml"], encoding="utf-8")
+    restored = simulate(load_case(replay))
+    np.testing.assert_array_equal(restored.time_s, original.time_s)
+    np.testing.assert_array_equal(restored.state, original.state)
+
+
+def test_external_power_table_covers_a_shifted_run_endpoint(tmp_path: Path) -> None:
+    table = tmp_path / "power.csv"
+    table.write_text("time_s,electron_power_W\n0,1\n0.2,1\n", encoding="utf-8")
+    document = load_case(FIXTURE).to_dict(relative_to=tmp_path)
+    source = document["reactor"]["power_ports"]["source"]
+    source["model"] = {"kind": "external_table", "file": str(table)}
+    for surface in document["reactor"]["surfaces"].values():
+        surface["wall_transport"] = {"kind": "off"}
+    document["run"] = {"start_time_s": 0.1, "duration_s": 0.2}
+    document["solver"] = {"sample_interval_s": 0.1}
+    document["output"] = {"observables": ["absorbed_power_W[plasma]"]}
+    case_file = tmp_path / "case.yaml"
+    case_file.write_text(yaml.safe_dump(document), encoding="utf-8")
+    result = simulate(load_case(case_file))
+    assert result.status.success
+    assert result.time_s[-1] == 0.1 + 0.2
+    np.testing.assert_array_equal(result.series("absorbed_power_W[plasma]"), 1.0)
+
+    document["run"]["duration_s"] = 0.20001
+    case_file.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(CaseValidationError, match="does not cover recipe interval"):
+        simulate(load_case(case_file))

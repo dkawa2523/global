@@ -58,7 +58,7 @@ def _result() -> SimulationResult:
         status=SimulationStatus.completed("integration finished"),
         solver_stats={"nfev": 42, "method": "BDF"},
         metadata={
-            "effective_case_yaml": "schema_version: 4\ncase:\n  name: argon\n",
+            "effective_case_yaml": "schema_version: 5\ncase:\n  name: argon\n",
             "model_ids": {"electrons": "maxwellian", "solver": "BDF"},
             "provenance": {"source": "fixture", "input_files": {"files": {}}},
             "summary_series": ["electron_density_m3", "absorbed_power_W"],
@@ -181,6 +181,7 @@ def test_write_result_always_writes_exactly_h5_and_summary(tmp_path: Path) -> No
     assert {path.name for path in paths.directory.iterdir()} == {
         "result.h5",
         "summary.yaml",
+        "artifacts.yaml",
     }
     summary = yaml.safe_load(paths.summary_yaml.read_text(encoding="utf-8"))
     assert summary["model_ids"] == {
@@ -210,8 +211,10 @@ def test_completed_run_is_immutable_and_can_reproduce_its_summary(
     )
 
 
-def test_normal_run_and_case_audit_publish_the_same_assessment(tmp_path: Path) -> None:
-    from plasma_global.audit import audit_case
+def test_normal_run_and_saved_result_publish_the_same_assessment(
+    tmp_path: Path,
+) -> None:
+    from plasma_global import compile_case
 
     fixture = Path(__file__).parent / "fixtures" / "minimal" / "case.yaml"
     case = load_case(fixture)
@@ -219,7 +222,7 @@ def test_normal_run_and_case_audit_publish_the_same_assessment(tmp_path: Path) -
     paths = write_result(result, tmp_path / "run")
     loaded = read_result_h5(paths.result_h5)
     assessment = to_plain_mapping(result.metadata)["assessment"]
-    assert assessment == audit_case(case).assessment.to_dict()
+    assert assessment == compile_case(case).assessment.to_dict()
     assert assessment == build_summary(loaded)["assessment"]
     assert assessment["issues"][0]["code"] == "MISSING_MOMENTUM_CROSS_SECTION"
     assert to_plain_mapping(result.metadata) == to_plain_mapping(loaded.metadata)
@@ -255,6 +258,8 @@ def test_result_reader_rejects_legacy_or_extra_hdf5_layout(tmp_path: Path) -> No
     [
         ("format", np.bytes_("legacy_result"), "is not a plasma_global_result"),
         ("format_version", 1, "Unsupported result HDF5 format version 1"),
+        ("format_version", 2, "Unsupported result HDF5 format version 2"),
+        ("format_version", 3, "Unsupported result HDF5 format version 3"),
         ("format_version", 2.9, "format_version must be an integer"),
         ("state_layout", "state-major", "state layout must be time-major"),
     ],
@@ -496,23 +501,6 @@ def test_hdf5_metadata_never_silently_overwrites_duplicate_keys(tmp_path: Path) 
         read_result_h5(path)
 
 
-def test_hdf5_v2_remains_readable_without_allowing_unknown_status(
-    tmp_path: Path,
-) -> None:
-    from dataclasses import replace
-
-    path = write_result_h5(tmp_path / "v2.h5", _result())
-    with h5py.File(path, "a") as h5:
-        h5.attrs["format_version"] = 2
-    assert read_result_h5(path).status.success is True
-    unknown = replace(_result(), status=SimulationStatus(None, "imported_csv"))
-    path = write_result_h5(tmp_path / "unknown.h5", unknown)
-    with h5py.File(path, "a") as h5:
-        h5.attrs["format_version"] = 2
-    with pytest.raises(ValueError, match="requires result format version 3"):
-        read_result_h5(path)
-
-
 def test_custom_units_are_explicit_and_never_inferred_from_ambiguous_suffixes(
     tmp_path: Path,
 ) -> None:
@@ -537,8 +525,11 @@ def test_custom_units_are_explicit_and_never_inferred_from_ambiguous_suffixes(
 @pytest.mark.parametrize(
     ("dataset", "attribute", "value"),
     [
+        ("time_s", "unit", "ms"),
+        ("time_s", "unit", None),
         ("state/values", "column_units", ["eV", "m^-3"]),
         ("observables/absorbed_power_W", "unit", "eV"),
+        ("observables/pressure_Pa", "unit", "unspecified"),
     ],
 )
 def test_hdf5_rejects_a_unit_that_changes_the_quantity_meaning(
@@ -546,7 +537,10 @@ def test_hdf5_rejects_a_unit_that_changes_the_quantity_meaning(
 ) -> None:
     path = write_result_h5(tmp_path / "units.h5", _result())
     with h5py.File(path, "a") as h5:
-        h5[dataset].attrs[attribute] = value
+        if value is None:
+            del h5[dataset].attrs[attribute]
+        else:
+            h5[dataset].attrs[attribute] = value
     with pytest.raises(ValueError, match="disagree"):
         read_result_h5(path)
 
@@ -555,6 +549,7 @@ def test_hdf5_rejects_a_unit_that_changes_the_quantity_meaning(
     ("declared", "message"),
     [
         ({"electron_density_m3": "cm^-3"}, "requires canonical unit"),
+        ({"pressure_Pa": "unspecified"}, "requires canonical unit"),
         ({"typo": "m^-3"}, "unknown series"),
         ([], "must be a mapping"),
     ],
@@ -593,17 +588,13 @@ def test_plot_series_keep_distinct_names_and_explicit_units(tmp_path: Path) -> N
     assert read_result_h5(source).state_labels == result.state_labels
 
 
-@pytest.mark.parametrize(
-    "series", [("mean_energy_eV", "missing"), ("mean_energy_eV", "mean_energy_eV")]
-)
+@pytest.mark.parametrize("series", [("mean_energy_eV", "missing")])
 def test_invalid_plot_selection_never_publishes_partial_output(
     tmp_path: Path, series: tuple[str, ...]
 ) -> None:
     source = write_result_h5(tmp_path / "result.h5", _result())
     directory = tmp_path / "plots"
-    with pytest.raises(
-        (KeyError, ValueError), match=r"Unknown result series|duplicates"
-    ):
+    with pytest.raises((KeyError, ValueError), match=r"matches nothing"):
         plot_result_h5(source, directory, series=series)
     assert not directory.exists()
 
@@ -642,3 +633,38 @@ def test_summary_selection_preserves_names_without_coercion_or_deduplication(
 
     with pytest.raises(error, match=message):
         replace(_result(), metadata={"summary_series": selection})
+
+
+def test_hdf5_v4_requires_catalog_for_every_saved_series(tmp_path: Path) -> None:
+    source = write_result_h5(tmp_path / "catalog.h5", _result())
+    with h5py.File(source, "a") as handle:
+        metadata = yaml.safe_load(handle["metadata/values_yaml"].asstr()[()])
+        del metadata["series_catalog"]["mean_energy_eV"]
+        handle["metadata/values_yaml"][()] = yaml.safe_dump(metadata)
+    with pytest.raises(ValueError, match="catalog is missing saved series"):
+        read_result_h5(source)
+
+
+def test_saved_result_audit_accepts_explicit_cli_conservation_tolerance(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    from plasma_global.cli import main
+
+    source = write_result_h5(tmp_path / "result.h5", _result())
+    assert main(["audit", str(source), "--conservation", "particle_residual=1e-8"]) == 0
+    capsys.readouterr()
+    assert (
+        main(["audit", str(source), "--conservation", "particle_residual=1e-10"]) == 1
+    )
+    assert "CONSERVATION_RESIDUAL_EXCEEDED" in capsys.readouterr().out
+
+
+def test_hdf5_v4_rejects_inconsistent_catalog_availability(tmp_path: Path) -> None:
+    source = write_result_h5(tmp_path / "catalog.h5", _result())
+    with h5py.File(source, "a") as handle:
+        metadata = yaml.safe_load(handle["metadata/values_yaml"].asstr()[()])
+        metadata["series_catalog"]["mean_energy_eV"]["available"] = False
+        handle["metadata/values_yaml"][()] = yaml.safe_dump(metadata)
+    with pytest.raises(ValueError, match="availability disagrees"):
+        read_result_h5(source)

@@ -9,25 +9,26 @@ import plasma_global.input.compile_experimental as compile_module
 from plasma_global import load_case
 from plasma_global.chemistry.data import ChemistryData, load_chemistry
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._resolved_case import ResolvedCase
 from plasma_global.input.compile_experimental import (
     compile_experimental_accumulator,
 )
+from plasma_global.input.load import case_from_mapping
+from plasma_global.input.schema import CaseSpec
 
 ROOT = Path(__file__).parents[1]
 MINIMAL = ROOT / "tests" / "fixtures" / "minimal" / "case.yaml"
 SMOKE = ROOT / "plasma_global" / "examples" / "cases" / "smoke.yaml"
 
 
-def _smoke_inputs() -> tuple[ResolvedCase, ChemistryData]:
+def _smoke_inputs() -> tuple[CaseSpec, ChemistryData]:
     case = load_case(SMOKE)
-    return case, load_chemistry(case.chemistry.manifest)
+    return case, load_chemistry(case.base_directory / case.chemistry["file"])
 
 
-def _updated_case(case: ResolvedCase, **updates: object) -> ResolvedCase:
+def _updated_case(case: CaseSpec, **updates: object) -> CaseSpec:
     data = case.model_dump(mode="python")
     data.update(updates)
-    return ResolvedCase.model_validate(data)
+    return case_from_mapping(data, base_directory=case.base_directory)
 
 
 def test_compiles_film_and_inventory_event_contract() -> None:
@@ -43,9 +44,9 @@ def test_compiles_film_and_inventory_event_contract() -> None:
         "film[source_wall]",
         "inventory[wafer,F_reservoir]",
     )
-    assert [event.event_id for event in accumulator.surface_event_templates] == [
-        "S1001@wafer",
-        "S1002@wafer",
+    assert [event.event_key for event in accumulator.surface_event_templates] == [
+        ("S1001", "wafer"),
+        ("S1002", "wafer"),
     ]
     inventory_event, film_event = accumulator.surface_event_templates
     assert inventory_event.inventory_particles_per_event == {"F_reservoir": 1.0}
@@ -56,12 +57,12 @@ def test_compiles_film_and_inventory_event_contract() -> None:
 
 def test_surface_event_templates_preserve_order_and_filter_applicability() -> None:
     case, chemistry = _smoke_inputs()
-    surfaces = tuple(
-        surface.model_copy(update={"site_density_m2": 0.0})
-        if surface.surface_id == "source_wall"
+    surfaces = {
+        surface_id: surface.model_copy(update={"site_density_m2": 0.0})
+        if surface_id == "source_wall"
         else surface
-        for surface in case.reactor.surfaces
-    )
+        for surface_id, surface in case.reactor.surfaces.items()
+    }
     all_process_surfaces = replace(
         chemistry.surface_reactions[0],
         id="all_process_surfaces",
@@ -86,10 +87,10 @@ def test_surface_event_templates_preserve_order_and_filter_applicability() -> No
         {("selected_surfaces", "source_wall"): {"tracked": 2.0}},
     )
 
-    assert tuple(event.event_id for event in templates) == (
-        "all_process_surfaces@wafer",
-        "all_process_surfaces@grounded_wall",
-        "selected_surfaces@source_wall",
+    assert tuple(event.event_key for event in templates) == (
+        ("all_process_surfaces", "wafer"),
+        ("all_process_surfaces", "grounded_wall"),
+        ("selected_surfaces", "source_wall"),
     )
     assert tuple(event.zone_id for event in templates) == (
         "process",
@@ -104,12 +105,12 @@ def test_surface_event_templates_preserve_order_and_filter_applicability() -> No
 
 def test_surface_event_template_validation_precedes_unbound_inventory() -> None:
     case, chemistry = _smoke_inputs()
-    surfaces = tuple(
-        surface.model_copy(update={"site_density_m2": 0.0})
-        if surface.surface_id == "wafer"
+    surfaces = {
+        surface_id: surface.model_copy(update={"site_density_m2": 0.0})
+        if surface_id == "wafer"
         else surface
-        for surface in case.reactor.surfaces
-    )
+        for surface_id, surface in case.reactor.surfaces.items()
+    }
 
     with pytest.raises(
         CaseValidationError,
@@ -125,31 +126,9 @@ def test_surface_event_template_validation_precedes_unbound_inventory() -> None:
 
 def test_absent_experimental_state_needs_no_accumulator() -> None:
     case = load_case(MINIMAL)
-    chemistry = load_chemistry(case.chemistry.manifest)
+    chemistry = load_chemistry(case.base_directory / case.chemistry["file"])
 
     assert compile_experimental_accumulator(case, chemistry, None) == (None, ())
-
-
-def test_extensions_require_chemistry_declared_state() -> None:
-    case = load_case(MINIMAL)
-    chemistry = load_chemistry(case.chemistry.manifest)
-    extensions = _updated_case(case, experimental={"extensions": {}})
-
-    with pytest.raises(
-        CaseValidationError,
-        match=(
-            r"experimental\.extensions requires "
-            r"chemistry\.experimental\.state_variables"
-        ),
-    ):
-        compile_experimental_accumulator(extensions, chemistry, None)
-
-    invalid = replace(chemistry, experimental={"unexpected": {}})
-    with pytest.raises(
-        CaseValidationError,
-        match="Cannot compile experimental chemistry extensions",
-    ):
-        compile_experimental_accumulator(extensions, invalid, None)
 
 
 def test_film_requires_surface_kinetics_and_film_reaction() -> None:
@@ -190,7 +169,7 @@ def test_wall_inventory_rejects_empty_or_unbound_configuration() -> None:
 
     data = case.model_dump(mode="python")
     data["experimental"]["film"] = None
-    inventory_only = ResolvedCase.model_validate(data)
+    inventory_only = case_from_mapping(data, base_directory=case.base_directory)
     with pytest.raises(
         CaseValidationError,
         match=r"wall-inventory events require models\.surface_kinetics",
@@ -198,7 +177,7 @@ def test_wall_inventory_rejects_empty_or_unbound_configuration() -> None:
         compile_experimental_accumulator(inventory_only, chemistry, None)
 
     data["experimental"]["wall_inventory"]["events"][0]["reaction_id"] = "missing"
-    unbound = ResolvedCase.model_validate(data)
+    unbound = case_from_mapping(data, base_directory=case.base_directory)
     with pytest.raises(
         CaseValidationError,
         match="reference unknown or inapplicable reaction/surface pairs",
@@ -220,8 +199,8 @@ def test_wall_inventory_rejects_empty_or_unbound_configuration() -> None:
 def test_film_event_requires_positive_site_density() -> None:
     case, chemistry = _smoke_inputs()
     data = case.model_dump(mode="python")
-    data["reactor"]["surfaces"][0]["site_density_m2"] = 0.0
-    zero_site_density = ResolvedCase.model_validate(data)
+    data["reactor"]["surfaces"]["wafer"]["site_density_m2"] = 0.0
+    zero_site_density = case_from_mapping(data, base_directory=case.base_directory)
 
     with pytest.raises(
         CaseValidationError,
@@ -234,7 +213,7 @@ def test_runtime_construction_error_is_reported_as_case_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     case = load_case(MINIMAL)
-    chemistry = load_chemistry(case.chemistry.manifest)
+    chemistry = load_chemistry(case.base_directory / case.chemistry["file"])
     inventory_only = _updated_case(
         case,
         experimental={

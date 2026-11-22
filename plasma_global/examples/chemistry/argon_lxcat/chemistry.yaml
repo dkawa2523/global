@@ -77,7 +77,7 @@ species:
     display_name: source:*
 gas_reactions:
 - id: G_AR_ION
-  energy_loss_eV: 15.76
+  electron_energy_transfer_eV: -15.76
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -87,7 +87,7 @@ gas_reactions:
   equation: e + Ar -> Ar_plus + 2 e
   rate: RM_E_AR_ION
 - id: G_AR_EXC_01
-  energy_loss_eV: 11.62
+  electron_energy_transfer_eV: -11.62
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -97,7 +97,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_01
 - id: G_AR_EXC_02
-  energy_loss_eV: 11.83
+  electron_energy_transfer_eV: -11.83
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -107,7 +107,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_02
 - id: G_AR_EXC_03
-  energy_loss_eV: 14.153
+  electron_energy_transfer_eV: -14.153
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -117,7 +117,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_03
 - id: G_AR_EXC_04
-  energy_loss_eV: 14.3
+  electron_energy_transfer_eV: -14.3
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -127,7 +127,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_04
 - id: G_AR_EXC_05
-  energy_loss_eV: 14.09
+  electron_energy_transfer_eV: -14.09
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -137,7 +137,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_05
 - id: G_AR_EXC_06
-  energy_loss_eV: 14.255
+  electron_energy_transfer_eV: -14.255
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -147,7 +147,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_06
 - id: G_AR_EXC_07
-  energy_loss_eV: 15.0
+  electron_energy_transfer_eV: -15.0
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -157,7 +157,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_07
 - id: G_AR_EXC_08
-  energy_loss_eV: 11.55
+  electron_energy_transfer_eV: -11.55
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -167,7 +167,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_08
 - id: G_AR_EXC_09
-  energy_loss_eV: 11.72
+  electron_energy_transfer_eV: -11.72
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -177,7 +177,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_09
 - id: G_AR_EXC_10
-  energy_loss_eV: 12.91
+  electron_energy_transfer_eV: -12.91
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -187,7 +187,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_10
 - id: G_AR_EXC_11
-  energy_loss_eV: 13.08
+  electron_energy_transfer_eV: -13.08
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -197,7 +197,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_11
 - id: G_AR_EXC_12
-  energy_loss_eV: 13.09
+  electron_energy_transfer_eV: -13.09
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -207,7 +207,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_12
 - id: G_AR_EXC_13
-  energy_loss_eV: 13.15
+  electron_energy_transfer_eV: -13.15
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -217,7 +217,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_13
 - id: G_AR_EXC_14
-  energy_loss_eV: 13.17
+  electron_energy_transfer_eV: -13.17
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -227,7 +227,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_14
 - id: G_AR_EXC_15
-  energy_loss_eV: 13.27
+  electron_energy_transfer_eV: -13.27
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -237,7 +237,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_15
 - id: G_AR_EXC_16
-  energy_loss_eV: 13.3
+  electron_energy_transfer_eV: -13.3
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -247,7 +247,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_16
 - id: G_AR_EXC_17
-  energy_loss_eV: 13.33
+  electron_energy_transfer_eV: -13.33
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -257,7 +257,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_17
 - id: G_AR_EXC_18
-  energy_loss_eV: 13.48
+  electron_energy_transfer_eV: -13.48
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -267,7 +267,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_18
 - id: G_AR_EXC_19
-  energy_loss_eV: 13.84
+  electron_energy_transfer_eV: -13.84
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -277,7 +277,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_19
 - id: G_AR_EXC_20
-  energy_loss_eV: 13.84
+  electron_energy_transfer_eV: -13.84
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -287,7 +287,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_20
 - id: G_AR_EXC_21
-  energy_loss_eV: 13.9
+  electron_energy_transfer_eV: -13.9
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -297,7 +297,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_21
 - id: G_AR_EXC_22
-  energy_loss_eV: 13.98
+  electron_energy_transfer_eV: -13.98
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -307,7 +307,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_22
 - id: G_AR_EXC_23
-  energy_loss_eV: 14.01
+  electron_energy_transfer_eV: -14.01
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -317,7 +317,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_23
 - id: G_AR_EXC_24
-  energy_loss_eV: 14.06
+  electron_energy_transfer_eV: -14.06
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -327,7 +327,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_24
 - id: G_AR_EXC_25
-  energy_loss_eV: 14.09
+  electron_energy_transfer_eV: -14.09
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -337,7 +337,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_25
 - id: G_AR_EXC_26
-  energy_loss_eV: 14.21
+  electron_energy_transfer_eV: -14.21
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -347,7 +347,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_26
 - id: G_AR_EXC_27
-  energy_loss_eV: 14.23
+  electron_energy_transfer_eV: -14.23
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -357,7 +357,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_27
 - id: G_AR_EXC_28
-  energy_loss_eV: 14.24
+  electron_energy_transfer_eV: -14.24
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -367,7 +367,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_28
 - id: G_AR_EXC_29
-  energy_loss_eV: 14.07
+  electron_energy_transfer_eV: -14.07
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -377,7 +377,7 @@ gas_reactions:
   equation: e + Ar -> Ar + e
   rate: RM_E_AR_EXC_29
 - id: G_AR_EXC_30
-  energy_loss_eV: 14.241
+  electron_energy_transfer_eV: -14.241
   gas_heating_eV: 0.0
   zones: []
   surfaces: []
@@ -523,14 +523,17 @@ cross_sections:
 - id: xs_ar_momentum_zenodo
   kind: momentum_transfer
   target: Ar
-  threshold_eV: 1.36e-05
-  energy_loss_eV: 0.0
+  threshold_eV: 0.0
+  electron_energy_transfer_eV: 0.0
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
     source_url: https://zenodo.org/records/8192503/files/Cross%20section.txt?download=1
     license: CC-BY-4.0
     original_kind: ELASTIC
+    original_electron_target_mass_ratio: 1.36e-05
+    original_threshold_eV: 0.0
+    original_parameter_definition: ELASTIC line 3 is the dimensionless m/M ratio, not an energy threshold.
     original_process: E + Ar -> E + Ar((3p6)1S0), Momentum
     original_comment: 'residual ELASTIC Momentum-transfer : Ar((3p6)1S0)  | based
       on from ELASTIC (from TOTAL (Experimental average from Kurokawa (2011), Buckman))'
@@ -540,7 +543,7 @@ cross_sections:
   kind: ionization
   target: Ar
   threshold_eV: 15.76
-  energy_loss_eV: 15.76
+  electron_energy_transfer_eV: -15.76
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -556,7 +559,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 11.62
-  energy_loss_eV: 11.62
+  electron_energy_transfer_eV: -11.62
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -572,7 +575,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 11.83
-  energy_loss_eV: 11.83
+  electron_energy_transfer_eV: -11.83
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -588,7 +591,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.153
-  energy_loss_eV: 14.153
+  electron_energy_transfer_eV: -14.153
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -604,7 +607,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.3
-  energy_loss_eV: 14.3
+  electron_energy_transfer_eV: -14.3
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -620,7 +623,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.09
-  energy_loss_eV: 14.09
+  electron_energy_transfer_eV: -14.09
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -636,7 +639,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.255
-  energy_loss_eV: 14.255
+  electron_energy_transfer_eV: -14.255
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -652,7 +655,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 15.0
-  energy_loss_eV: 15.0
+  electron_energy_transfer_eV: -15.0
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -669,7 +672,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 11.55
-  energy_loss_eV: 11.55
+  electron_energy_transfer_eV: -11.55
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -685,7 +688,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 11.72
-  energy_loss_eV: 11.72
+  electron_energy_transfer_eV: -11.72
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -701,7 +704,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 12.91
-  energy_loss_eV: 12.91
+  electron_energy_transfer_eV: -12.91
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -717,7 +720,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.08
-  energy_loss_eV: 13.08
+  electron_energy_transfer_eV: -13.08
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -733,7 +736,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.09
-  energy_loss_eV: 13.09
+  electron_energy_transfer_eV: -13.09
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -749,7 +752,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.15
-  energy_loss_eV: 13.15
+  electron_energy_transfer_eV: -13.15
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -765,7 +768,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.17
-  energy_loss_eV: 13.17
+  electron_energy_transfer_eV: -13.17
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -781,7 +784,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.27
-  energy_loss_eV: 13.27
+  electron_energy_transfer_eV: -13.27
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -797,7 +800,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.3
-  energy_loss_eV: 13.3
+  electron_energy_transfer_eV: -13.3
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -813,7 +816,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.33
-  energy_loss_eV: 13.33
+  electron_energy_transfer_eV: -13.33
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -829,7 +832,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.48
-  energy_loss_eV: 13.48
+  electron_energy_transfer_eV: -13.48
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -845,7 +848,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.84
-  energy_loss_eV: 13.84
+  electron_energy_transfer_eV: -13.84
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -861,7 +864,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.84
-  energy_loss_eV: 13.84
+  electron_energy_transfer_eV: -13.84
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -877,7 +880,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.9
-  energy_loss_eV: 13.9
+  electron_energy_transfer_eV: -13.9
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -893,7 +896,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 13.98
-  energy_loss_eV: 13.98
+  electron_energy_transfer_eV: -13.98
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -909,7 +912,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.01
-  energy_loss_eV: 14.01
+  electron_energy_transfer_eV: -14.01
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -925,7 +928,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.06
-  energy_loss_eV: 14.06
+  electron_energy_transfer_eV: -14.06
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -941,7 +944,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.09
-  energy_loss_eV: 14.09
+  electron_energy_transfer_eV: -14.09
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -957,7 +960,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.21
-  energy_loss_eV: 14.21
+  electron_energy_transfer_eV: -14.21
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -973,7 +976,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.23
-  energy_loss_eV: 14.23
+  electron_energy_transfer_eV: -14.23
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -989,7 +992,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.24
-  energy_loss_eV: 14.24
+  electron_energy_transfer_eV: -14.24
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -1005,7 +1008,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.07
-  energy_loss_eV: 14.07
+  electron_energy_transfer_eV: -14.07
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -1021,7 +1024,7 @@ cross_sections:
   kind: excitation
   target: Ar
   threshold_eV: 14.241
-  energy_loss_eV: 14.241
+  electron_energy_transfer_eV: -14.241
   metadata:
     source_dataset: Bolsig+ format cross section of e-N2, O2, NO, Ar, O, N
     source_doi: 10.5281/zenodo.8192503
@@ -1033,4 +1036,3 @@ cross_sections:
       based on Stewart 2002'
     updated: '2023-06-03'
   file: cross_sections.csv
-experimental: {}

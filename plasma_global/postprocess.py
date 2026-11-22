@@ -19,10 +19,16 @@ from plasma_global.errors import CaseValidationError
 
 
 def _has_reduced_field_series(model: CompiledGlobalModel, zone_id: str) -> bool:
+    table = model.electron_kinetics_by_zone.get(zone_id)
+    if (
+        table is not None
+        and table.lookup == "mean_energy"
+        and table.effective_field_Td is not None
+    ):
+        return True
     coordinator = model.power_coordinator
     return all(
-        zone_id in segment.reduced_field_Td_by_zone
-        or (
+        (
             coordinator is not None
             and coordinator.has_reduced_field_source(zone_id, segment.port_commands)
         )

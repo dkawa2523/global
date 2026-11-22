@@ -20,6 +20,7 @@ from plasma_global.errors import (
     ModelDomainError,
 )
 from plasma_global.models.electrons import ElectronEnergyClosure
+from plasma_global.models.rates import RateContext
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,7 @@ class ChemistryFixture:
     reactant_orders: np.ndarray
     electron_orders: np.ndarray
     rate_evaluators: tuple[object, ...]
-    energy_loss_eV: np.ndarray
+    electron_energy_transfer_eV: np.ndarray
     gas_heating_eV: np.ndarray
     reaction_zones: tuple[tuple[str, ...], ...]
 
@@ -54,7 +55,7 @@ def first_order_chemistry(rate_s_inv: object = 2.0) -> ChemistryFixture:
         reactant_orders=np.array([[1.0, 0.0, 0.0]]),
         electron_orders=np.array([0.0]),
         rate_evaluators=(rate_s_inv,),
-        energy_loss_eV=np.array([0.0]),
+        electron_energy_transfer_eV=np.array([0.0]),
         gas_heating_eV=np.zeros(1),
         reaction_zones=((),),
     )
@@ -72,7 +73,7 @@ def first_order_decay_chemistry(rate_s_inv: float = 1.0) -> ChemistryFixture:
         reactant_orders=np.array([[0.0, 1.0, 0.0]]),
         electron_orders=np.array([0.0]),
         rate_evaluators=(rate_s_inv,),
-        energy_loss_eV=np.array([0.0]),
+        electron_energy_transfer_eV=np.array([0.0]),
         gas_heating_eV=np.zeros(1),
         reaction_zones=((),),
     )
@@ -316,22 +317,42 @@ def test_invalid_initial_state_fails_before_segment_integration() -> None:
     bad_state = model.initial_state(initial_state())
     bad_state[model.layout.density_slices["z"].start] = -1.0e8
 
-    with pytest.raises(ModelConfigurationError, match="compiled lower bound"):
+    with pytest.raises(
+        ModelConfigurationError, match="Initial state must be nonnegative"
+    ):
         solve_compiled_model(model, bad_state)
 
 
 def test_domain_failure_reports_segment_and_time() -> None:
-    def fail_rate(context: object) -> float:
-        del context
-        raise ModelDomainError("invalid reaction state")
+    def fail_rate(context: RateContext) -> float:
+        if context.time_s > 0.25:
+            raise ModelDomainError("invalid reaction state")
+        return 1.0
 
     model = compiled_model(
         RecipeSegment("bad-domain", 0.0, 1.0),
         chemistry=first_order_chemistry(rate_s_inv=fail_rate),
     )
 
-    with pytest.raises(IntegrationError, match=r"segment 'bad-domain' at t=.* s"):
-        solve_compiled_model(model, initial_state())
+    with pytest.raises(
+        IntegrationError, match=r"segment 'bad-domain' at t=.* s"
+    ) as caught:
+        solve_compiled_model(
+            model, initial_state(), SolverSettings(save_at_s=(0.0, 1.0))
+        )
+    partial = caught.value.partial_result
+    assert partial is not None
+    assert not partial.status.success
+    assert partial.time_s[0] == 0.0
+    assert 0.0 < partial.time_s[-1] <= 0.25
+    assert partial.metadata["requested_end_s"] == 1.0
+    assert partial.metadata["reached_end_s"] == partial.time_s[-1]
+    assert partial.metadata["failure_time_s"] > partial.time_s[-1]
+    assert partial.metadata["failure_segment_id"] == "bad-domain"
+    np.testing.assert_allclose(
+        partial.series("n[z,A]"), 1.0e18 * np.exp(-partial.time_s), rtol=3.0e-6
+    )
+    assert not partial.state.flags.writeable
 
 
 def test_initial_vector_rejects_wrong_shape_and_nonfinite_values() -> None:
@@ -344,3 +365,77 @@ def test_initial_vector_rejects_wrong_shape_and_nonfinite_values() -> None:
     nonfinite_state[0] = np.nan
     with pytest.raises(ModelConfigurationError, match="only finite values"):
         solve_compiled_model(model, nonfinite_state)
+
+
+def test_invalid_dense_state_is_excluded_from_partial_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dense_output = solver_module.BDF.dense_output
+
+    def corrupted_dense_output(solver):
+        original = dense_output(solver)
+
+        def evaluate(times):
+            values = original(times)
+            values[0, np.asarray(times) == 0.25] = -1.0e20
+            return values
+
+        return evaluate
+
+    monkeypatch.setattr(solver_module.BDF, "dense_output", corrupted_dense_output)
+    model = compiled_model(RecipeSegment("dense", 0.0, 1.0))
+    with pytest.raises(IntegrationError, match="below -10") as failure:
+        solve_compiled_model(
+            model,
+            initial_state(),
+            SolverSettings(save_at_s=(0.0, 0.25, 0.5, 1.0), max_step_s=0.1),
+        )
+    partial = failure.value.partial_result
+    assert partial is not None
+    assert partial.metadata["failure_time_s"] == 0.25
+    assert 0.0 < partial.time_s[-1] < 0.25
+    assert np.all(partial.state >= 0.0)
+    np.testing.assert_allclose(
+        partial.series("n[z,A]"), 1.0e18 * np.exp(-2.0 * partial.time_s), rtol=3.0e-6
+    )
+
+
+def test_solver_reported_failure_keeps_initial_and_last_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step = solver_module.BDF.step
+
+    def fail_after_step(solver):
+        if solver.t >= 0.2:
+            solver.status = "failed"
+            return "controlled numerical failure"
+        return step(solver)
+
+    monkeypatch.setattr(solver_module.BDF, "step", fail_after_step)
+    model = compiled_model(RecipeSegment("failed", 0.0, 1.0))
+    with pytest.raises(
+        IntegrationError, match="controlled numerical failure"
+    ) as failure:
+        solve_compiled_model(
+            model, initial_state(), SolverSettings(save_at_s=(0.0, 1.0), max_step_s=0.1)
+        )
+    partial = failure.value.partial_result
+    assert partial is not None
+    assert partial.time_s.size == 2
+    assert partial.time_s[0] == 0.0
+    assert 0.2 <= partial.time_s[-1] < 0.4
+    assert partial.status.code == "failed"
+    assert partial.solver_stats["segments_completed"] == 0
+
+
+def test_negative_initial_net_charge_is_a_configuration_error() -> None:
+    from dataclasses import replace
+
+    chemistry = replace(first_order_chemistry(), charges=np.array([0.0, 0.0, -1.0]))
+    model = compiled_model(
+        RecipeSegment("initial-charge", 0.0, 1.0), chemistry=chemistry
+    )
+    with pytest.raises(
+        ModelConfigurationError, match=r"Initial state.*negative electron density"
+    ):
+        solve_compiled_model(model, initial_state())

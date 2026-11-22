@@ -30,7 +30,7 @@ def test_constant_cross_section_matches_analytic_truncated_maxwell_average(
         "ionization",
         "Ar",
         threshold,
-        threshold,
+        -(threshold),
         np.linspace(threshold, maximum, nodes),
         np.full(nodes, sigma),
     )
@@ -95,7 +95,7 @@ def test_small_distribution_tail_cannot_hide_a_large_missing_rate_tail() -> None
         "ionization",
         "Ar",
         99.0,
-        99.0,
+        -(99.0),
         np.array([99.0, 100.0]),
         np.array([sigma, sigma]),
     )
@@ -106,7 +106,7 @@ def test_small_distribution_tail_cannot_hide_a_large_missing_rate_tail() -> None
         "ionization",
         "Ar",
         99.0,
-        99.0,
+        -(99.0),
         np.array([99.0, 200.0]),
         np.array([sigma, sigma]),
     )

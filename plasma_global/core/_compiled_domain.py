@@ -11,6 +11,7 @@ import numpy as np
 
 from plasma_global.core.domain import RecipeSegment
 from plasma_global.errors import ModelConfigurationError
+from plasma_global.models.electrons import ElectronEnergyClosure, LocalFieldClosure
 from plasma_global.models.walls import BoundaryReaction, WallBoundary
 
 if TYPE_CHECKING:
@@ -25,12 +26,12 @@ class DomainValidator:
 
     def validate(self) -> None:
         zone_ids, known_zones = self._identifiers()
+        self._electron_closure()
         self._optional_models()
         known_surfaces = self._surfaces(zone_ids, known_zones)
         self._transport_and_power(zone_ids)
         self._kinetics_and_reactions(known_zones)
         self._segments(known_zones, known_surfaces)
-        self._electron_closure()
         self._wall_boundaries(known_zones)
 
     def _identifiers(self) -> tuple[tuple[str, ...], set[str]]:
@@ -68,10 +69,8 @@ class DomainValidator:
                 "HeavyEnergyClosure heat capacities must match compiled species order"
             )
         if model.transport is not None:
-            transport_cv = model.transport.heavy_cv_over_kb
-            if transport_cv is None or not np.array_equal(
-                transport_cv, closure.cv_over_kb
-            ):
+            eos = model.transport.thermodynamics
+            if eos is None or not np.array_equal(eos.cv_over_kb, closure.cv_over_kb):
                 raise ModelConfigurationError(
                     "Evolved gas energy requires transport heat capacities to "
                     "match HeavyEnergyClosure"
@@ -201,6 +200,12 @@ class DomainValidator:
             if model.electron_closure.mode == "electron_energy"
             else "local_field"
         )
+        if model.electron_closure.mode == "local_field" and (
+            missing := known_zones - set(model.electron_kinetics_by_zone)
+        ):
+            raise ModelConfigurationError(
+                f"local_field closure needs kinetics tables for zones {sorted(missing)}"
+            )
         for zone_id, kinetics in model.electron_kinetics_by_zone.items():
             if kinetics.lookup != required_lookup:
                 raise ModelConfigurationError(
@@ -245,11 +250,8 @@ class DomainValidator:
         known_surfaces: set[str],
         require_electron_density: bool,
     ) -> None:
-        zone_references = (
-            set(segment.absorbed_power_W_by_zone)
-            | set(segment.reduced_field_Td_by_zone)
-            | set(segment.wall_temperature_K_by_zone)
-            | set(segment.prescribed_electron_density_m3_by_zone)
+        zone_references = set(segment.wall_temperature_K_by_zone) | set(
+            segment.prescribed_electron_density_m3_by_zone
         )
         unknown_zones = zone_references - known_zones
         if unknown_zones:
@@ -279,10 +281,9 @@ class DomainValidator:
         model = self.model
         coordinator = model.power_coordinator
         if model.electron_closure.mode == "local_field":
-            prescribed = set(segment.reduced_field_Td_by_zone)
             missing = {
                 zone_id
-                for zone_id in known_zones - prescribed
+                for zone_id in known_zones
                 if coordinator is None
                 or not coordinator.has_reduced_field_source(
                     zone_id, segment.port_commands
@@ -303,13 +304,9 @@ class DomainValidator:
 
     def _electron_closure(self) -> None:
         closure = self.model.electron_closure
-        if closure.mode not in {"electron_energy", "local_field"}:
+        if not isinstance(closure, (ElectronEnergyClosure, LocalFieldClosure)):
             raise ModelConfigurationError(
-                f"Unknown electron closure mode {closure.mode!r}"
-            )
-        if closure.evolves_energy != (closure.mode == "electron_energy"):
-            raise ModelConfigurationError(
-                "Electron closure mode and evolves_energy flag are inconsistent"
+                "Electron closure must be electron_energy or local_field"
             )
 
     def _wall_boundaries(self, known_zones: set[str]) -> None:

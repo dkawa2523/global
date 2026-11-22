@@ -1,4 +1,4 @@
-"""Compile the static physical components of a schema-v4 reactor."""
+"""Compile the static physical components of a schema-v5 reactor."""
 
 from __future__ import annotations
 
@@ -11,64 +11,68 @@ from plasma_global.chemistry.data import ChemistryData
 from plasma_global.core.domain import Zone
 from plasma_global.core.transport import CompiledTransport
 from plasma_global.errors import CaseValidationError
-from plasma_global.input._resolved_case import (
+from plasma_global.input._compile_recipe_transport import wall_temperatures
+from plasma_global.input._compile_thermal import heavy_thermodynamics
+from plasma_global.input._schema_models import EvolvedGasEnergy, FixedGasEnergy
+from plasma_global.input._schema_reactor import (
     AmbipolarWallTransport,
     BohmWallTransport,
-    EvolvedGasEnergy,
-    FixedGasEnergy,
     OffWallTransport,
     PrescribedFrequencyWallTransport,
-    ResolvedCase,
-    SurfaceConfig,
 )
+from plasma_global.input.schema import CaseSpec, SurfaceDefinition
 from plasma_global.models.gas_energy import HeavyEnergyClosure
 from plasma_global.models.surface import CompiledSurfaceModel, SurfaceGeometry
 from plasma_global.models.walls import AutoBohmHFactor, BoundaryReaction, WallBoundary
 
 
-def compile_zones(case: ResolvedCase) -> tuple[Zone, ...]:
+def compile_zones(case: CaseSpec) -> tuple[Zone, ...]:
     """Compile the immutable zone geometry used by the runtime."""
 
     return tuple(
-        Zone(zone.zone_id, zone.volume_m3, zone.gas_temperature_K)
-        for zone in case.reactor.zones
+        Zone(zone_id, zone.volume_m3, zone.initial.gas_temperature_K)
+        for zone_id, zone in case.reactor.zones.items()
     )
 
 
 def compile_static_transport(
-    case: ResolvedCase,
+    case: CaseSpec,
     chemistry: CompiledChemistry,
     heavy_energy_closure: HeavyEnergyClosure | None,
 ) -> CompiledTransport:
     """Compile pumps, inter-zone edges, and fixed transport geometry."""
 
-    zones = tuple(case.reactor.zones)
-    zone_index = {zone.zone_id: index for index, zone in enumerate(zones)}
+    zones = tuple(case.reactor.zones.values())
+    zone_index = {zone_id: index for index, zone_id in enumerate(case.reactor.zones)}
     pump_frequency = np.zeros(len(zones))
-    for pump in case.reactor.pumps:
+    for pump in case.reactor.pumps.values():
         index = zone_index[pump.zone_id]
         pump_frequency[index] += pump.speed_m3_s / zones[index].volume_m3
     return CompiledTransport(
         volumes_m3=np.asarray([zone.volume_m3 for zone in zones]),
         pump_frequency_s_inv=pump_frequency,
         edge_from=np.asarray(
-            [zone_index[edge.from_zone] for edge in case.reactor.edges], dtype=int
+            [zone_index[edge.from_zone] for edge in case.reactor.edges.values()],
+            dtype=int,
         ),
         edge_to=np.asarray(
-            [zone_index[edge.to_zone] for edge in case.reactor.edges], dtype=int
+            [zone_index[edge.to_zone] for edge in case.reactor.edges.values()],
+            dtype=int,
         ),
         edge_conductance_m3_s=np.asarray(
-            [edge.conductance_m3_s for edge in case.reactor.edges]
+            [edge.conductance_m3_s for edge in case.reactor.edges.values()]
         ),
         n_species=len(chemistry.species_ids),
-        heavy_cv_over_kb=(
-            None if heavy_energy_closure is None else heavy_energy_closure.cv_over_kb
+        thermodynamics=(
+            None
+            if heavy_energy_closure is None
+            else heavy_energy_closure.thermodynamics
         ),
     )
 
 
 def compile_heavy_energy(
-    case: ResolvedCase,
+    case: CaseSpec,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
 ) -> HeavyEnergyClosure | None:
@@ -80,19 +84,19 @@ def compile_heavy_energy(
     if not isinstance(config, EvolvedGasEnergy):
         assert_never(config)
     return HeavyEnergyClosure(
-        cv_over_kb=_heavy_heat_capacities(chemistry_data, chemistry),
+        thermodynamics=heavy_thermodynamics(chemistry_data, chemistry),
         wall_temperature_K=_zone_wall_temperatures(case),
         wall_relaxation_s_inv=np.asarray(
             [
-                config.wall_energy_relaxation_s_inv_by_zone.get(zone.zone_id, 0.0)
-                for zone in case.reactor.zones
+                config.wall_energy_relaxation_s_inv_by_zone.get(zone_id, 0.0)
+                for zone_id in case.reactor.zones
             ]
         ),
     )
 
 
 def compile_surface_model(
-    case: ResolvedCase,
+    case: CaseSpec,
     chemistry_data: ChemistryData,
     chemistry: CompiledChemistry,
 ) -> CompiledSurfaceModel | None:
@@ -102,14 +106,14 @@ def compile_surface_model(
         return None
     surfaces = tuple(
         SurfaceGeometry(
-            surface_id=surface.surface_id,
+            surface_id=surface_id,
             zone_id=surface.zone_id,
             area_m2=surface.area_m2,
             site_density_m2=surface.site_density_m2,
             temperature_K=surface.temperature_K,
             initial_coverages=surface.initial_coverages,
         )
-        for surface in case.reactor.surfaces
+        for surface_id, surface in case.reactor.surfaces.items()
     )
     if not surfaces:
         raise CaseValidationError(
@@ -119,21 +123,23 @@ def compile_surface_model(
         chemistry=chemistry_data,
         gas_species_ids=chemistry.species_ids,
         gas_masses_kg=chemistry.masses_kg,
-        zone_ids=tuple(zone.zone_id for zone in case.reactor.zones),
-        zone_volumes_m3=np.asarray([zone.volume_m3 for zone in case.reactor.zones]),
+        zone_ids=tuple(case.reactor.zones),
+        zone_volumes_m3=np.asarray(
+            [zone.volume_m3 for zone in case.reactor.zones.values()]
+        ),
         surfaces=surfaces,
         domain_atol=case.solver.atol,
     )
 
 
 def compile_walls(
-    case: ResolvedCase,
+    case: CaseSpec,
     chemistry: CompiledChemistry,
 ) -> tuple[WallBoundary, ...]:
     """Compile wall transport and chemistry for every enabled surface."""
 
     walls: list[WallBoundary] = []
-    for surface in case.reactor.surfaces:
+    for surface_id, surface in case.reactor.surfaces.items():
         transport = surface.wall_transport
         if isinstance(transport, OffWallTransport):
             continue
@@ -143,7 +149,7 @@ def compile_walls(
                 chemistry,
                 zone_id=surface.zone_id,
                 area_m2=surface.area_m2,
-                surface_id=surface.surface_id,
+                surface_id=surface_id,
                 sheath_energy_eV=surface.ion_impact_energy_eV,
                 transport_kind="bohm",
                 bohm_factor=bohm_factor,
@@ -154,26 +160,22 @@ def compile_walls(
                 chemistry,
                 zone_id=surface.zone_id,
                 area_m2=surface.area_m2,
-                surface_id=surface.surface_id,
+                surface_id=surface_id,
                 sheath_energy_eV=surface.ion_impact_energy_eV,
                 transport_kind="prescribed_frequency",
                 prescribed_frequency_s_inv=transport.frequency_s_inv,
             )
         elif isinstance(transport, AmbipolarWallTransport):
-            zone = next(
-                item for item in case.reactor.zones if item.zone_id == surface.zone_id
-            )
             boundary = _compile_wall_boundary(
                 chemistry,
                 zone_id=surface.zone_id,
                 area_m2=surface.area_m2,
-                surface_id=surface.surface_id,
+                surface_id=surface_id,
                 sheath_energy_eV=surface.ion_impact_energy_eV,
                 transport_kind="ambipolar",
                 diffusion_coefficient_m2_s=transport.diffusion_coefficient_m2_s,
-                diffusion_length_m=(
-                    transport.diffusion_length_m or zone.volume_m3 / surface.area_m2
-                ),
+                diffusion_length_m=transport.diffusion_length_m,
+                electron_temperature_reference_eV=transport.electron_temperature_reference_eV,
             )
         else:
             assert_never(transport)
@@ -181,56 +183,23 @@ def compile_walls(
     return tuple(walls)
 
 
-def _heavy_heat_capacities(
-    chemistry_data: ChemistryData,
-    chemistry: CompiledChemistry,
-) -> np.ndarray:
-    """Return heat capacities in compiled species order or report all omissions."""
-
-    species = {item.id: item for item in chemistry_data.species}
-    missing_cv = [
-        species_id
-        for species_id in chemistry.species_ids
-        if species[species_id].cv_over_kb is None
-    ]
-    if missing_cv:
-        raise CaseValidationError(
-            "evolved gas energy requires cv_over_kb for every heavy gas species; "
-            f"missing {missing_cv}"
-        )
-    return np.asarray(
-        [species[species_id].cv_over_kb for species_id in chemistry.species_ids],
-        dtype=float,
-    )
-
-
-def _zone_wall_temperatures(case: ResolvedCase) -> np.ndarray:
+def _zone_wall_temperatures(case: CaseSpec) -> np.ndarray:
     """Area-average each zone's surfaces, falling back to its gas temperature."""
 
-    wall_temperatures: list[float] = []
-    for zone in case.reactor.zones:
-        surfaces = [
-            item for item in case.reactor.surfaces if item.zone_id == zone.zone_id
-        ]
-        total_area = sum(item.area_m2 for item in surfaces)
-        wall_temperatures.append(
-            sum(item.area_m2 * item.temperature_K for item in surfaces) / total_area
-            if total_area > 0.0
-            else zone.gas_temperature_K
-        )
-    return np.asarray(wall_temperatures)
+    values = wall_temperatures(case, {})
+    return np.asarray([values[zone_id] for zone_id in case.reactor.zones])
 
 
 def _bohm_h_factor(
-    case: ResolvedCase,
-    surface: SurfaceConfig,
+    case: CaseSpec,
+    surface: SurfaceDefinition,
 ) -> tuple[float, AutoBohmHFactor | None]:
     config = surface.wall_transport
     if not isinstance(config, BohmWallTransport):
         raise TypeError("_bohm_h_factor requires Bohm wall transport")
     if config.h_factor != "auto":
         return config.h_factor, None
-    zone = next(item for item in case.reactor.zones if item.zone_id == surface.zone_id)
+    zone = case.reactor.zones[surface.zone_id]
     length = config.characteristic_length_m or zone.volume_m3 / surface.area_m2
     closure = AutoBohmHFactor(
         characteristic_length_m=length,
@@ -254,6 +223,7 @@ def _compile_wall_boundary(
     diffusion_coefficient_m2_s: float | None = None,
     diffusion_length_m: float | None = None,
     auto_bohm_h_factor: AutoBohmHFactor | None = None,
+    electron_temperature_reference_eV: float | None = None,
 ) -> WallBoundary:
     """Bind typed compiled boundary reactions to one reactor surface."""
 
@@ -280,4 +250,5 @@ def _compile_wall_boundary(
         diffusion_coefficient_m2_s=diffusion_coefficient_m2_s,
         diffusion_length_m=diffusion_length_m,
         auto_bohm_h_factor=auto_bohm_h_factor,
+        electron_temperature_reference_eV=electron_temperature_reference_eV,
     )

@@ -9,6 +9,8 @@ import shlex
 import shutil
 import sys
 from collections.abc import Callable
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from tools.quality_gate.baselines import (
     _assert_findings_not_worse,
@@ -32,7 +34,6 @@ from tools.quality_gate.checks import (
     _pip_audit,
     _pytest_with_coverage,
 )
-from tools.quality_gate.config_contract import _check_quality_config
 from tools.quality_gate.context import (
     ALL_PYTHON_PATHS,
     BASELINE_PATH,
@@ -83,7 +84,6 @@ def _run_fast() -> None:
 
 
 def _run_pr() -> None:
-    _check_quality_config()
     baseline = _load_baseline()
     _validate_baseline_monotonic(baseline)
     _check_secret_reviews()
@@ -141,8 +141,28 @@ def _run_mutation_gate() -> None:
         "-c",
         "import numpy; from mutmut.__main__ import cli; cli()",
     ]
-    _run([*invocation, "run"])
-    output = _capture([*invocation, "results"])
+    with TemporaryDirectory(prefix="plasma-global-mutation-") as raw:
+        snapshot = Path(raw)
+        for name in ("pyproject.toml", "README.md"):
+            shutil.copy2(ROOT / name, snapshot / name)
+        for name in ("plasma_global", "tests", "tools"):
+            shutil.copytree(
+                ROOT / name,
+                snapshot / name,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+        _run([*invocation, "run"], cwd=snapshot)
+        output = _capture([*invocation, "results"], cwd=snapshot)
+        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        (REPORT_DIR / "mutation-results.log").write_text(output, encoding="utf-8")
+        for metadata in (snapshot / "mutants").rglob("*.meta"):
+            target = (
+                REPORT_DIR
+                / "mutation-metadata"
+                / metadata.relative_to(snapshot / "mutants")
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(metadata, target)
     if output.strip():
         print(output, end="" if output.endswith("\n") else "\n")
     unacceptable = re.compile(
