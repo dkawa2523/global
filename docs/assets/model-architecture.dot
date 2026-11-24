@@ -10,7 +10,7 @@ digraph architecture {
            fontsize=11, color="#b7c9d1", style=rounded];
     electron [label="Electron kinetics\nMaxwellian integrals / coefficient tables\nPower-port / circuit coupling"];
     chemistry [label="Gas reactions\nStoichiometry + rates\nParticle / energy sources"];
-    boundary [label="Walls and surfaces\nIon flux, branching\nCoverage, energy loss"];
+    boundary [label="Walls and surfaces\nIon flux, wall reactions\nCoverage, energy loss"];
     flow [label="Gas exchange\nInlet, pump, transfer\nParticles + enthalpy"];
     { rank=same; electron; chemistry; }
     { rank=same; boundary; flow; }
@@ -19,9 +19,8 @@ digraph architecture {
   }
   swarm [label="INDEPENDENT ELECTRON CALCULATION\nSwarm | EEDF + transport + reaction rates\nCSV with generation conditions", fillcolor="#f5efe3", color="#8a6a32"];
   swarm -> input [label="coefficient CSV"];
-  input -> electron;
-  input -> chemistry;
-  balance [label="COUPLED BALANCE EQUATIONS\nSpecies densities | Electron energy\nOptional gas energy + surface state\nFilm / wall event accumulations",
+  input -> electron [lhead=cluster_physics];
+  balance [label="COUPLED BALANCE EQUATIONS\nHeavy-species densities\nOptional electron energy, gas energy, surface state\nFilm / wall event accumulations",
            fillcolor="#dceee7", color="#276354", penwidth=1.4];
   electron -> balance;
   chemistry -> balance;

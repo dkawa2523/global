@@ -1,14 +1,17 @@
 site_name: Plasma Global Model
-site_description: 低圧プラズマのモデリングマニュアル兼統合仕様書
+site_description: 低圧プラズマのモデリング手順、公開仕様、理論と検証
 docs_dir: docs
 site_dir: site
 theme:
   name: readthedocs
 nav:
-  - モデリングマニュアル・統合仕様: index.md
-  - 理論・構成・数値検証: THEORY.md
+  - 利用手順・公開仕様: index.md
+  - 理論と比較根拠: THEORY.md
   - 開発・保守: DEVELOPMENT.md
   - 計画と残る課題: ROADMAP.md
+validation:
+  links:
+    anchors: warn
 markdown_extensions:
   - tools.doc_math
   - fenced_code

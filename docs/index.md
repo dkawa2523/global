@@ -1,19 +1,15 @@
 # モデリングマニュアル兼統合仕様書
 
-対象は **Plasma Global Model 0.5.0／入力schema v5／結果HDF5 format v4** です。
-本書に利用者向けの仕様と操作をまとめ、実装済みの機能と今後の拡張を区別します。
+Plasma Global Model 0.5.0の利用手順と公開仕様を示します。使用する形式の版は[形式と互換方針](#migration)を参照してください。
+最初は同梱Ar例を計算し、保存結果から放電停止前後の変化を読みます。次に、調べたい量を決めて装置、反応機構、
+電源と保存量を自分の条件に置き換えます。第5〜14節では、選んだ機能に必要な入力の意味・単位と、結果を読むための仕様を調べられます。
 
-初回は第2〜4節を順に読み、同梱例の実行、結果の確認、自分の条件への変更まで進めてください。
-第5〜14節は設定・出力を調べるためのリファレンスです。すべての変数を設定する必要はなく、
-利用する物理機能の表を参照します。第15〜17節では結果の評価、問題への対応、現行形式の互換方針を扱います。
-
-globalモデルを初めて扱う場合は、[低圧プラズマの体積平均モデル](THEORY.md)で技術的背景、機能構成、保存則からの導出、方程式、近似、
-実測したベンチマーク結果を確認できます。本書は操作と設定、理論文書は方程式と検証を担当します。
-[完成版PDF](assets/global-model-theory.pdf)をダウンロードして閲覧することもできます。
+方程式の導出、近似、解析解・別コード・測定との比較の根拠は[低圧プラズマの体積平均モデル](THEORY.md)にまとめています。
+[同じ原稿から生成したPDF](assets/global-model-theory.pdf)でも読めます。
 
 | 知りたいこと | 読む箇所 |
 |---|---|
-| 全体構成・計算の流れ・適用対象を把握したい | [1. 目的と適用範囲](#purpose) |
+| モデルで評価できる量を把握したい | [1. 目的と適用範囲](#purpose) |
 | まず動かして結果を見たい | [2. 初回実行](#quickstart)、[3. 計算例の読み方](#worked-example) |
 | 自分の装置と化学機構を設定したい | [4. モデルを作る手順](#workflow)〜[9. 運転条件](#operation) |
 | 連続通電・パルス・流通・回路・表面の用途から選びたい | [用途別の作業手順](#task-guides) |
@@ -27,8 +23,8 @@ globalモデルを初めて扱う場合は、[低圧プラズマの体積平均�
 | コマンドの引数・終了コードを調べたい | [操作一覧](#commands) |
 | 対応する入力・結果形式を確認したい | [17. 形式と互換方針](#migration) |
 
-内部構造と保守手順は[開発・保守](DEVELOPMENT.md)、未実装の内容と次の作業は
-[計画と残る課題](ROADMAP.md)へ分けます。
+実装の責務、検証の再現、文書生成は[開発・保守](DEVELOPMENT.md)に、
+追加の検証や実装を判断する条件は[計画と残る課題](ROADMAP.md)にあります。
 
 <a id="purpose"></a>
 
@@ -36,33 +32,29 @@ globalモデルを初めて扱う場合は、[低圧プラズマの体積平均�
 
 ### モデルが答える問い
 
-本パッケージは、低圧プラズマの粒子・エネルギー収支を時間積分する体積平均モデルです。
+本パッケージは、低圧プラズマの粒子・電荷・エネルギー収支から区画ごとの平均状態を求める体積平均モデルです。
 電子衝突による生成、体積反応、壁面反応、電力供給、原料供給・排気を結合し、
 平均組成と過渡応答を決める過程を調べます。
 反応機構の選別、壁条件や吸収電力の感度評価、パルス運転の検討、
 空間分解モデルへ渡す代表状態の検討に利用できます。
 
-低圧のICP・CCPやパルス放電は、電子・気体・表面の時間尺度が異なります。
-例えば、Cl系エッチングでは原子生成と壁再結合、O₂放電では準安定分子と負イオン反応が
-組成を変える要因になります。これらの文献事例、流体・PIC/MCCとの比較、近似の選択は
-[理論資料 第1節](THEORY.md#background)に説明しています。
-本パッケージの同梱機構と数値検証はArを中心とし、他のガスの機構・装置精度は個別に確認します。
+同梱機構と公開の比較はArを中心とします。他のガスや装置に用いる場合は、反応機構の出典、係数の生成条件、
+壁の近似と観測量の対応を確認してください。空間分解モデルとの使い分けや他のガスへの適用事例は
+[理論資料の背景](THEORY.md#background)に示します。
 
 | 調べたいこと | 比較する出力 | 主に準備する入力 |
 |---|---|---|
 | どの反応が組成を決めるか | 密度、生成消滅速度、反応頻度 | 化学種・反応、衝突データ、境界反応 |
 | 通電・停止後に何が残るか | 電子エネルギー、組成の時系列 | 吸収電力・運転波形、初期状態、時間分解能 |
-| 容器や壁材を変えるとどうなるか | 壁への粒子束、損失、表面被覆 | 体積・面積、壁輸送、反応分岐、表面係数 |
+| 容器や壁材を変えるとどうなるか | 壁への粒子束、損失、表面被覆 | 体積・面積、壁輸送、境界反応、表面係数 |
 | 原料や生成物の滞留がどう効くか | 分率、流出入、必要なら処理部の状態 | 流量、排気速度、根拠のある内部移送 |
 | 回路と化学反応がどう結び付くか | 電流、電圧、吸収電力、電子状態 | 回路定数、電子係数とその適用条件 |
 
 ### 機能の全体構成
 
-![物理機能から収支・時間積分・解析への接続](assets/model-architecture.png)
-
-各物理機能は、同じ瞬間の密度・エネルギー・表面状態から寄与を評価します。
-それを粒子・エネルギー・表面の収支へまとめ、時間積分します。
-入力上の区画分割は装置表現の一部であり、反応や電子係数、壁輸送とは別の機能です。
+一つのケースで、装置、物理機能、運転、保存量を選びます。
+反応や電源、壁、輸送が同じ瞬間の状態に及ぼす寄与を合計して時間積分します。
+各寄与に使う状態や数値処理の関係は[理論資料の構成図と計算フロー](THEORY.md#calculation-structure)を参照してください。
 
 | 機能 | 設定する場所 | 役割・詳しい説明 |
 |---|---|---|
@@ -75,17 +67,11 @@ globalモデルを初めて扱う場合は、[低圧プラズマの体積平均�
 
 ### 計算の流れと操作の対応
 
-![入力、反復する物理評価と時間積分、結果保存の流れ](assets/model-flow.png)
-
-1. `init`で開始例を取り出し、YAMLと必要なCSVを編集します。
-2. `validate`で参照データを含むモデルを組み立て、`outputs`で利用可能な解析系列を確認します。
-3. `run`が、現在状態から電子係数・電源・反応・壁・流入出を評価し、収支をBDF法で時間積分します。
-4. 指定した保存時刻で派生量と反応数を評価し、結果・入力来歴・図を新しいrunへ保存します。
-5. `export`、`plot`、`network`またはPython APIで保存結果を調べます。
-
-電子密度は標準では準中性から求める代数量です。電子エネルギー、気体内部エネルギー、
-表面被覆率は、対応する方式を選んだ場合に積分状態へ加わります。
-保存点数は積分器の適応ステップ数と独立で、probeや図を増やしても物理的な状態数は増えません。
+`init`で取り出した入力を`validate`で組み立て、`outputs`で必要な系列が定義されるかを確かめます。
+`run`は時間積分と指定時刻での派生量の評価を行い、数値結果と来歴を保存してから、要求された表と図を生成します。
+`inspect`、`audit`、`export`、`plot`、`network`は保存結果を読みます。
+電子・気体エネルギーや表面被覆率を積分するかは選んだ物理機能で決まり、保存点数や図の設定は[数値計算](#numerics)と
+[出力設定](#outputs)で指定します。
 
 ### 適用範囲
 
@@ -110,10 +96,12 @@ MaxwellianはEEDFを熱平衡形で近似する選択で、電子と気体の温
 
 ### 環境の準備
 
-Python 3.11以上とpipを使います。以下のコマンドは、ダウンロードまたはcloneした
-リポジトリのルートで実行します。システムのPython環境と分ける場合は、先に仮想環境を作ります。
+Python 3.11以上とpipを使います。ソースを取得し、リポジトリのルートで仮想環境を用意します。
+すでにソースを取得済みなら、そのディレクトリで `python -m venv .venv` を実行します。
 
 ```bash
+git clone https://github.com/dkawa2523/global.git
+cd global
 python -m venv .venv
 ```
 
@@ -139,27 +127,29 @@ plasma-global init argon_maxwellian --output work/argon
 plasma-global validate work/argon/case.yaml
 plasma-global outputs work/argon/case.yaml
 plasma-global run work/argon/case.yaml --output runs/argon-001
+plasma-global inspect runs/argon-001/result.h5
 ```
 
 `init` は必要なcase、反応機構、数値CSVを新しいディレクトリへコピーします。
 `validate` は入力とモデルの組み立てを確認し、時間積分はしません。
-`outputs` はそのモデルで利用可能な系列名、単位、保存対象かどうかを表示します。
-電源固有量は全運転区間の指令から判定し、停止中に定義できない量を要求すると計算前に該当区間を示します。
+`outputs` は系列名、単位、定義できるか、保存対象かを表示します。
+電源固有量は全運転区間の指令から判定します。選択エラーの読み方は[操作一覧](#commands)を参照してください。
 `run` が計算し、`result.h5` と人が読む `summary.yaml` を保存します。
-この基本例は `output.csv: true` なので、解析用 `result.csv` と列名・単位の `series.yaml` も生成します。
-出力先は毎回新しい名前にします。既存の結果は上書きしません。
+この基本例は `output.csv: true` なので、数値表と列名・単位の一覧も生成します。
+`inspect` はHDF5に保存された状態、系列、単位、来歴を表示します。
+再実行には `work/argon-002` や `runs/argon-002` など、未作成の出力先を使います。
 
 ### 最初の計算で確認すること
 
 `validate` の成功に続き、run終了後に `runs/argon-001/summary.yaml` を開きます。
 この例では `status.success: true`、`status.code: completed`、`time.end_s: 0.002` を確認します。
-201保存時刻のうち、最終電子密度は約4.42×10¹³ m⁻³です。桁と時間変化の見方は[第3節](#worked-example)で説明します。
-実行時間やsolverの評価回数は環境に依存し、合否の条件には使いません。
+保存時刻は0〜2 msの201点です。通電と停止後の変化は[計算例の読み方](#worked-example)で確認できます。
 
 | 生成物 | 最初に確認する内容 |
 |---|---|
 | `summary.yaml` | 完了したか、どの時刻まで計算したか、構成の警告、指定した最終値 |
 | `result.h5` | 全状態・保存した派生量・実効入力・来歴を含む再解析用の正本 |
+| `artifacts.yaml` | 要求したCSVや図の生成成否 |
 | `csv/result.csv` | 表計算ソフト等へ渡す数値。各行が1保存時刻 |
 | `csv/series.yaml` | CSVの列名と単位。CSVだけでは終了状態と入力来歴を復元できない |
 
@@ -182,28 +172,15 @@ work/argon/
 
 ### 図を出力する
 
-図とCSVを含む一通りの解析例は次です。
+Matplotlibを導入し、最初の計算から保存した電子密度と等価電子温度を描きます。
+角括弧・コンマを含む系列名は引用符で囲みます。
 
 ```bash
-python -m pip install ".[plot,graph]"
-plasma-global init argon_analysis --output work/analysis
-plasma-global run work/analysis/case.yaml --output runs/analysis-001
-```
-
-反応図の画像にはPythonの `graphviz` に加えてGraphviz本体の `dot` が必要です。
-`dot -V` で起動を確認してください。導入方法は
-[Graphviz公式ガイド](https://graphviz.readthedocs.io/en/stable/manual.html#installation)を参照します。
-`format: dot` はPython側のgraphvizだけで出力できます。時系列図にはMatplotlibを使います。
-数値結果は描画より先に保存します。描画依存が不足した場合も `result.h5` と `summary.yaml` を保持し、
-CLIは終了コード3、`artifacts.yaml` は対象の生成失敗と理由を返します。依存を導入した後に保存結果から描画を再実行できます。
-
-上の描画依存を導入した後は、最初の計算の保存結果からも図を作れます。角括弧・コンマを含む系列名は引用符で囲みます。
-
-```bash
+python -m pip install ".[plot]"
 plasma-global plot runs/argon-001/result.h5 "electron_density_m3[plasma]" "electron_temperature_eV[plasma]" --output figures/argon-first
 ```
 
-この操作は保存済みの電子密度・温度を描画します。反応図・組成図や複数系列の詳細は[第13節](#figures)を参照してください。
+図は `figures/argon-first/` に保存されます。組成図や反応図も必要なら[解析例](#analysis-example)へ進みます。
 
 <a id="examples"></a>
 
@@ -238,20 +215,9 @@ plasma-global init --list
 例えば `plasma-global models power experimental.icp` で入力、適用条件、関連例を参照します。
 選んだcaseの保存量と定義できない量は `plasma-global outputs CASE` で計算前に確認できます。
 
-### リポジトリ内で参照する場所
-
-| 所在 | 用途 |
-|---|---|
-| `docs/index.md` | このマニュアル。操作と入力・出力仕様の正本 |
-| `docs/THEORY.md` | 背景、方程式、近似、数値検証と参考文献 |
-| `plasma_global/examples/` | 同梱YAML／CSVの正本。編集用にはinitで取り出す |
-| `benchmarks/references/` | 保存参照・測定図の読取値・係数生成の来歴 |
-| `tools/`、`tests/` | 保守・検証用。通常利用の開始点はCLI／公開API |
-| `pyproject.toml`、`uv.lock` | パッケージ版・依存の定義と開発用の固定環境 |
-
 <a id="worked-example"></a>
 
-## 3. 計算例の読み方と有用性
+## 3. Ar過渡応答の読み方
 
 `argon_analysis` は体積0.01 m³、壁面積0.1 m²、気体温度300 K、初期Ar密度2.0×10²⁰ m⁻³、
 Ar⁺ seed 1.0×10¹⁴ m⁻³、初期平均電子エネルギー3 eVの例です。
@@ -265,10 +231,8 @@ Ar⁺ seed 1.0×10¹⁴ m⁻³、初期平均電子エネルギー3 eVの例で�
 この過渡例の2 msでの値は電子密度がおよそ4.42×10¹³ m⁻³、電子温度が0.0125 eVです。
 これは低温afterglowの終端値です。高電力の定常値や装置で測った値として使いません。
 
-この図は上の `init argon_analysis` → `run` で生成する `plots/plasma/figures/plasma.png` です。
-[第13節](#figures)では同じ計算の組成図・反応図と、別のDC回路例を説明します。
-本書へ収録した図は0.5.0の実計算出力です。
-外観差や計算環境による微小差を許容し、画像の一致を物理的な合否条件にしません。
+この図は[解析例](#analysis-example)で生成する `plots/plasma/figures/plasma.png` です。
+[保存値の抜粋](#result-example)を使うと、切替点の左側値と停止区間の値を読み分けられます。
 
 例えば「停止後のイオン密度を長く維持したい」という問いなら、壁面積・壁輸送・輸送先を
 一度に変更せず、それぞれを変更したcaseで比較します。密度と電子温度、壁への束、
@@ -308,15 +272,9 @@ Cl系、O₂系、炭化水素系などへ展開する場合は、ガス名だ�
 反応や境界を選んだ根拠と、対象装置へ対応する量を `case.description`、反応の `metadata`、
 係数の `provenance` に記録します。出典の注記は適用条件を検証済みにするflagではありません。
 
-基本となる釣り合いは次です。化学量論係数νは生成が正・消費が負、Rは反応進行速度です。
-
-```text
-heavy species:  dn_s/dt = Σ_r ν_rs R_r + 壁・表面の生成消滅 + 流入出・zone間移送
-electron:       dW_e/dt = 電子吸収電力/V - 反応損失 - 壁損失 - 弾性移送 + energy輸送
-```
-
-密度式はm⁻³ s⁻¹、電子energy式はW m⁻³です。各項を担う反応・境界・輸送を設定することでモデルを作ります。
-気体温度固定とlocal-fieldでは、それぞれ対応するenergyの時間積分を行いません。
+反応項は化学量論係数と反応進行速度から決まり、壁と輸送の項は装置の面積や体積にも依存します。
+どのエネルギーを積分するかは電子と気体のモデルで選びます。各項の定義と符号は
+[理論資料の支配方程式](THEORY.md)、計算で使った内訳を保存する方法は[出力設定](#outputs)を参照してください。
 
 <a id="task-guides"></a>
 
@@ -406,8 +364,14 @@ pumps:
 
 #### D. 外部係数を使ってDC回路と放電を結合する
 
-`zdplaskin_example2` を取り出します。電子係数CSVと化学機構も同時にコピーされるので、
-先にそのまま実行し、[DC図](#dc-output)と波形を照合してから対象装置へ変更します。
+`zdplaskin_example2` を取り出すと、電子係数CSVと化学機構もコピーされます。
+まず元の条件で計算し、[DC図の読み方](#dc-output)を使って電圧、電流、換算電場の対応を確かめます。
+
+```bash
+plasma-global init zdplaskin_example2 --output work/dc
+plasma-global validate work/dc/case.yaml
+plasma-global run work/dc/case.yaml --output runs/dc-001
+```
 
 | 変更するもの | 編集場所と確認 |
 |---|---|
@@ -415,8 +379,9 @@ pumps:
 | 係数の計算条件 | `models.electrons.coefficients.file` と `provenance`。E/Nの軸、反応係数、移動度、混合比・密度条件をそろえる |
 | 解析する量 | 同梱ケースは `port_plasma_voltage_V[dc_series_drive]` と `port_current_A[dc_series_drive]` を保存。E/Nと種密度も比較 |
 
-この表は保存参照から再構成した係数であり、任意の圧力・組成・E/Nへ適用する汎用物性表ではありません。
-対象条件の係数を用意する手順は[外部データの準備](#prepare-data)、列と単位は[電子係数表](#electron-table-settings)を参照します。
+同梱の係数表は、参照計算と同じ断面積からBOLSIG+ 07/2024で独立に生成しました。
+背景組成をAr 100%に固定した表で、E/Nの収録範囲は1.5〜85 Tdです。適用する圧力・温度・組成を変えるときは
+係数の生成条件を照合します。 [外部データの準備](#prepare-data) · [電子係数表の列と単位](#electron-table-settings) · [比較条件と出典](THEORY.md#zdplaskin-benchmark)
 計算後は、電源電圧とプラズマ電圧を区別し、抵抗の電圧降下・電流・E/Nを同時に確認します。
 
 #### E. 表面、気体温度、RF・ICP・CCPを含める
@@ -485,6 +450,9 @@ CLIのplotは一つのHDF5を対象とします。複数runの重ね描きは[Py
 通常実行で受け付ける入力は `schema_version: 5` です。
 YAMLとPython辞書は同じ宣言です。構造IDには角括弧・カンマ・前後空白・NUL・改行を使いません。
 Unicodeや化学名のcolon・star・plusは使えます。系列名の角括弧やCSVの元列名は構造IDと別です。
+
+入力検査では `/` を含む構造IDも受理します。HDF5の保存処理は、保存する系列名に `/` が含まれる場合にエラーを返します。
+zoneや気相種など、保存系列名に使うIDには `/` を含めないでください。 [確認した条件と作業記録](DEVELOPMENT.md#change-record)
 
 <a id="variable-reference"></a>
 
@@ -688,7 +656,7 @@ dn_target,s/dt = +(C/V_target) n_source,s
 | `file` | caseから共有する化学機構YAMLのpath。直接定義とは併用しない |
 | `schema_version` | 化学機構内では省略時4。指定する場合は4 |
 | `gas_reactions` | zone内の気相反応のlist、またはCSV |
-| `boundary_reactions` | 壁入射イオンの生成物・分岐のlist、またはCSV |
+| `boundary_reactions` | 壁入射イオンの中性化・吸収を表す境界反応のlist、またはCSV |
 | `surface_reactions` | 被覆率・表面反応のlist、またはCSV |
 | `rate_models` | 共用速度式のID mapping。必要な場合だけ別YAML参照 |
 | `cross_sections` | 断面積ID・CSV・出典等のlist。必要な場合だけ別YAML参照 |
@@ -737,8 +705,8 @@ dn_target,s/dt = +(C/V_target) n_source,s
 
 boundaryの公開入力は、正イオン1個を唯一の反応物とします。例えば `Ar_plus -> Ar` は中性Arの気相への戻り、
 `Ar_plus -> 0` は壁への吸収を指定します。壁への到達頻度はsurfaceの壁輸送モデルが求めます。
-現行YAMLは独立な分岐確率変数を持たず、選択された経路を確率1として扱います。
-同じ面・入射イオンに複数の競合経路を追加して、任意確率で分岐させる設定にはなっていません。
+面と入射イオンの組ごとに一つの境界反応を選び、到達した全イオンに適用します。
+気相へ戻る種と入射イオン1個あたりの生成量は、反応式の生成物とその係数で指定します。
 
 気相反応は `id`、`equation`、`rate` を中心に定義します。速度式は近くへ直接書き、
 共有する場合だけ `rate_models` のIDで参照できます。次は電子係数CSVを使う反応の断片です。
@@ -785,7 +753,7 @@ table専用反応の移送は0の場合も明示します。`gas_heating_eV` は
 |---|---|---|---|
 | 全速度式 | `kind` | 文字列、必須 | 上表の速度式を選択 |
 | electron_impact | `cross_section` | 断面積ID、必須 | 積分する断面積の参照 |
-| electron_impact | `branching_yield` | 非負、必須 | 積分係数に掛ける反応収率。壁反応の分岐確率とは別 |
+| electron_impact | `branching_yield` | 非負、必須 | 断面積から得た速度係数に掛ける反応収率 |
 | electron_table | `rate_id` | 文字列、必須 | 電子CSVの `k:<rate_id>` に対応するID |
 | electron_table | `branching_yield` | 非負、既定1 | CSV係数に掛ける収率 |
 | constant | `value` | 係数単位、必須 | 状態に依存しない速度係数 |
@@ -931,9 +899,10 @@ models:
 energy収支は吸収電力、反応energy移送、壁損失、弾性移送、輸送で構成します。
 電子密度の既定は準中性 `n_e = Σ_s z_s n_s` で、負値をhidden floorで正にしません。
 
-local-fieldは電子energyの緩和時間を解きません。電源・mobility・電子係数の反復は
-E/N、mobility、吸収電力の相対残差1×10⁻⁶、最大12回で判定し、非収束を明示エラーにします。
-最終の係数と電源量は同じ反復状態に対応させます。
+local-fieldの電源連成で反復する場合、E/N（Td）、電子移動度（m² V⁻¹ s⁻¹）、区画内の電源ポートから電子への
+電力の合計（W）を使って収束を判定します。それぞれの変化量の絶対値を、新旧の絶対値と1の最大値で割ります。
+3量の規格化した変化の最大値が既定の1×10⁻⁶以下であれば収束とし、同じ状態で最終の係数と電源量を評価します。
+最大12回で収束しなければエラーです。
 
 <a id="electron-table-settings"></a>
 
@@ -1054,7 +1023,7 @@ Bohm入射束は `Γ_i = h_i n_i sqrt(e T_e/m_i)`、zoneでの損失は `Γ_i A/
 区画全体の拡散損失を一つの拡散長で表す場合は、全壁を代表する一つのsurfaceに割り当てます。
 複数面に割り当てると各面の損失頻度が加算されます。壁面積は体積あたりの損失を面平均束に換算するために使います。 [円筒容器の計算例](THEORY.md#argon-afterglow-benchmark)
 
-同じイオン束を壁への粒子損失、boundary生成物の分岐、表面反応、電子壁損失へ渡します。
+同じイオン束を壁への粒子損失、境界反応による気相への生成、表面反応、電子壁損失の評価に使います。
 活動する入射イオンごとに[boundary反応](#chemistry)を明示し、生成物を元素名から推測しません。
 Bohm輸送で `ion_impact_energy_eV: 0` のときは、イオン入射束と電子熱束の電流収支から浮遊シースを求めます。
 損失頻度指定と両極性拡散では、`ion_impact_energy_eV` の値をそのまま使います。
@@ -1507,7 +1476,7 @@ heavy密度を選べます。zonesを省略すると全zoneです。zonesだけ�
 
 `reaction_rates: true` で活動する全気相・表面・boundary反応の速度、頻度、累積数を保存します。
 反応頻度はspeciesの正味生成速度ではなく、粒子の生成消費数には化学量論係数が掛かります。
-boundary頻度には実際の分岐確率を含みます。
+境界反応の頻度は、その面への入射束に面積を掛けた入射イオン数毎秒です。
 
 図やprobeが必要とする派生量は自動保存します。多数の反応・保存点を選ぶとメモリと容量が増えます。
 状態量と派生量の単位は物理モデルと出力カタログが定め、HDF5に系列ごとに保存します。
@@ -1571,6 +1540,26 @@ RF電圧や供給電力はモデルの停止指令でゼロ、RFキャリア周�
 <a id="figures"></a>
 
 ## 13. 組成・時系列・反応図による解析
+
+<a id="analysis-example"></a>
+
+### 組成図と反応図を作る例
+
+`argon_analysis` は[基本Ar例](#quickstart)にprobe、組成・時系列図、反応図の出力設定を加えたケースです。
+時系列・組成図にはMatplotlibを、反応図の画像出力にはPythonのgraphvizとGraphviz本体の `dot` を使います。
+Graphviz本体を導入した後、次を実行します。 [Graphvizの導入方法](https://graphviz.readthedocs.io/en/stable/manual.html#installation)
+
+```bash
+python -m pip install ".[plot,graph]"
+dot -V
+plasma-global init argon_analysis --output work/analysis
+plasma-global run work/analysis/case.yaml --output runs/analysis-001
+```
+
+`runs/analysis-001/plots/` と `runs/analysis-001/networks/` に依頼した図が保存されます。
+依存の不足などで図を生成できない場合は、`artifacts.yaml` の該当する依頼の状態を確認します。
+保存した数値から後で図を作る方法は[操作一覧](#commands)を参照してください。
+反応図の `format: dot` は描画前のグラフ記述を出力するため、Graphviz本体の実行は不要です。
 
 ### 組成と比較図
 
@@ -1647,8 +1636,9 @@ plasma-global plot runs/analysis-001/result.h5 "n[plasma,Ar_plus]" --output figu
 
 #### DC回路の出力を読む
 
-次図は `zdplaskin_example2` の物理条件に、以下のplotを追加して計算したものです。
-この断片はcaseの `output` 内へ置きます。図が必要とするport系列は自動保存されます。
+次図は `zdplaskin_example2` に描画設定を加え、同梱ケースの保存間隔で得た151点を表示したものです。
+図を計算と一緒に作る場合は、次の断片をcaseの既存の `output` 内へ追加します。
+描画設定の要求から、必要な系列も保存されます。
 
 ```yaml
 plots:
@@ -1662,10 +1652,10 @@ plots:
 
 ![ZDPlasKin由来DC回路例のプラズマ電圧、電流、換算電場。横軸はms](assets/dc-circuit.png)
 
-3つのpanelは上から電圧V、電流A、換算電場Tdです。単位を混ぜて1本の縦軸へ載せません。
-電源端1000 Vのうち、計算終端でプラズマ間隙に約58.50 V、直列抵抗に約941.50 Vが掛かります。
-最終電流は約0.00941503 A、E/Nは約4.54333 Td、比較終端は0.7520833 msです。
-保存間隔で取りこぼした速い過渡やpeakを、この図の保存点だけから厳密に決めることはできません。
+上から、プラズマ間隙の電圧［V］、直列回路の電流［A］、換算電場［Td］です。
+電源端の電圧からプラズマ間隙の電圧を引いた値が直列抵抗の電圧降下です。
+立上りや最大値を定量比較する場合は、比較対象と保存時刻を揃えます。
+参照の303時刻で行った波形比較と終端値は[理論資料のZDPlasKin比較](THEORY.md#zdplaskin-benchmark)に示します。
 
 ### Graphvizの反応機構・イベント図
 
@@ -1803,8 +1793,8 @@ Pythonの `ResultPaths.artifacts` またはCLIのエラーと終了コード3で
 
 ### メタデータの各項目
 
-次表は `/metadata/values_yaml` をYAMLとして読んだmappingの項目です。
-モデル固有の詳細は選択した構成によって変わります。Ar解析例では次の19項目を保存しています。
+次表は `/metadata/values_yaml` をYAMLとして読んだmappingの主な項目です。
+選んだモデル、保存する系列、終了状態に応じて項目が加わります。
 
 | key | 内容・解析での用途 |
 |---|---|
@@ -1824,6 +1814,8 @@ Pythonの `ResultPaths.artifacts` またはCLIのエラーと終了コード3で
 | `event_integration` | イベント積分の方式・領域測度・forcing区間の扱い |
 | `observable_time_convention` | 切替時刻のforcing依存量を左側値として記録する規約 |
 | `run_step_boundaries_s` | 運転step境界の絶対時刻。パルスの全切替時刻数とは別 |
+| `requested_end_s`、`reached_end_s` | 要求した終了時刻と結果が到達した時刻 |
+| `failure_time_s` | 積分失敗時に違反などを検出した時刻 |
 | `sampling_mode` | 保存時刻の選び方。適応積分step幅と区別する |
 | `solver_settings` | 許容差・step制約等の数値設定 |
 | `state_scale` | 状態を無次元化するために用いたscale |
@@ -1898,34 +1890,43 @@ hashから元ファイルを復元できません。再実行には対応する�
 成功した生成物も利用できます。既存のrun・CSV・図ディレクトリは上書きしません。
 HDF5だけを保存するPython利用には `write_result_h5` もあります。
 
-### APIで計算して読む
+### Pythonから設定を編集して計算する
+
+基本Ar例を[初回実行](#quickstart)の場所へ取り出した後、次の操作で通電中の吸収電力を0.08 Wに変えます。
+辞書にした公開宣言から `CaseSpec` を組み立て、読み込んだ入力と実効条件を `PreparedCase` に固定して使います。
 
 ```python
-from plasma_global import load_case, simulate, write_result
+from plasma_global import (
+    case_from_mapping,
+    compile_case,
+    load_case,
+    simulate,
+    write_result,
+)
 from plasma_global.output import read_result_h5
 
-case = load_case("work/argon/case.yaml")
-result = simulate(case)
+original = load_case("work/argon/case.yaml")
+data = original.to_dict()
+data["run"]["steps"][0]["commands"]["power_ports"]["source"]["absorbed_power_W"] = 0.08
+case = case_from_mapping(data, base_directory=original.base_directory)
+
+prepared = compile_case(case)
+result = simulate(prepared)
 paths = write_result(result, "runs/argon-python-001")
 
 saved = read_result_h5(paths.result_h5)
-if saved.status.success is not True:
-    raise RuntimeError(saved.status.message)
-
-time_s = saved.time_s
-ion_index = saved.state_labels.index("n[plasma,Ar_plus]")
-ion_density_m3 = saved.state[:, ion_index]
-electron_temperature_eV = saved.observables["electron_temperature_eV[plasma]"]
+print(saved.status.code, saved.time_s[-1])
+print(paths.artifacts.status)
 ```
 
-公開宣言`CaseSpec`はYAMLとPythonで共通です。`case_from_mapping(data, base_directory=...)`で辞書から作り、
-`compile_case(case)`で入力・係数・条件を固定した`PreparedCase`を得ます。`simulate`は宣言または準備済みケースを受け、ファイルは作成しません。
-準備済みケースの実行では入力ファイルを再読込しません。`case.to_dict()`と`to_yaml(relative_to=...)`は公開語彙だけを返します。
-保存結果の解析・描画では元caseを再コンパイルせず、現在の環境で来歴を付け直しません。
+`case_from_mapping` の `base_directory` はファイル参照の基準です。公開YAMLに書き出すには `case.to_yaml()` を使い、
+別のディレクトリへ保存するなら `relative_to` にそのディレクトリを指定します。
+`simulate(case)` は入力の準備も行い、`simulate(prepared)` は準備済みの入力を再利用します。
+`simulate` が返した数値結果は `write_result` で公開し、`paths.artifacts.requests` で個別の出力成否を確認できます。
 
 #### 保存済みHDF5を読む
 
-第2節で実行した `argon_analysis` の結果を、元caseの再計算なしで読みます。
+[解析例](#analysis-example)で保存した `argon_analysis` のHDF5を読みます。元ケースや係数表は読込に不要です。
 
 ```python
 import numpy as np
@@ -1995,18 +1996,7 @@ dataset名の角括弧・カンマは名前の一部です。状態の列番号�
 通電停止後には電子温度が先に下がり、イオン密度が減少します。最終温度約0.0125 eVは300 Kの熱energy相当より低く、
 冷イオンBohm近似の前提が弱くなる領域です。計算が完了したことと、その終端状態が実装置で妥当なことを分けて判断します。
 
-#### 図とデータ例を再生成する
-
-リポジトリ内では、描画依存とGraphviz本体を導入して次を実行できます。
-
-```bash
-python -m pip install ".[plot,graph]"
-python -m tools.render_manual_examples --output runs/manual-001
-```
-
-このツールは同梱2ケースの入力を指定先へ取り出し、DC例には上記の出力選択だけを追加して再計算します。
-HDF5を再読込して状態・派生量が計算値と一致することを確認し、6図を `docs/assets/` へ更新します。
-指定先の `values.json` に表の保存値とHDF5のdataset構成を記録します。利用者が自分のモデルを計算する際に、この文書用ツールは不要です。
+掲載図と抜粋値を更新する手順は[マニュアル例の再生成](DEVELOPMENT.md#manual-reproduction)を参照してください。
 
 ### CSVと終了状態
 
@@ -2039,90 +2029,60 @@ CLIの引数で指定する相対pathは現在の作業ディレクトリ基準�
 
 | コマンド | 動作・引数の使い方 | 時間積分 |
 |---|---|---|
-| `init [EXAMPLE] --output DIR` | 例題と参照データを取り出す。EXAMPLE省略時はargon_maxwellian。`init --list` は一覧のみ | なし |
+| `init [EXAMPLE] --output DIR` | 例題と計算に必要な入力を取り出す。EXAMPLE省略時はargon_maxwellian。`init --list` は一覧を表示 | なし |
 | `models [CATEGORY] [KIND] [--json]` | 全区分の用途、設定、適用条件、使える例を確認。Pythonのlist_modelsと共通 | なし |
 | `validate CASE` | 入力・外部データ・参照・モデルの組み立てを確認 | なし |
 | `outputs CASE [--json]` | 全区間の系列・単位・定義可否・保存対象と選択誤りを列挙 | なし |
 | `run CASE --output DIR` | 計算し、HDF5・summary・設定したCSV／図を保存 | あり |
-| `inspect RESULT` | 保存系列・単位・領域・設定・来歴を確認 | なし |
-| `audit RESULT` | 保存数値の健全性、指定系列の非負性、`--conservation SERIES=TOL`で明示した残差を検査 | なし |
+| `inspect RESULT [--json]` | 保存系列・単位・領域・設定・来歴を確認 | なし |
+| `audit RESULT` | 保存数値の健全性を検査。`--nonnegative SERIES ...` と `--negative-tolerance TOL` で非負性、`--conservation SERIES=TOL` で指定残差を検査 | なし |
 | `export RESULT --csv FILE` | 保存HDF5から数値CSVのみを出力。series.yamlは単独exportでは生成しない | なし |
 | `plot RESULT [SERIES ...] [--output DIR]` | 保存系列を描画。`--format`、`--dpi` を指定可。出力先省略時は結果の隣のplots | なし |
 | `network RESULT --output DIR` | 保存された反応構造・イベントを描画。`--name`で保存設定を選び、`--mode`、`--measure`、`--time-s`、`--domains`、`--zones`、`--surfaces`、`--species`、`--min-fraction`、`--format` は[反応図設定](#figures)に対応 | なし |
 
-plotの系列を省略すると、保存された描画設定があればそれを使い、なければ描画対象を自動選択します。
-networkの選択を省略した場合の設定再利用と既定値は[第13節](#figures)を参照してください。
-再描画でも出力先を上書きしません。run時にplotsを出した場合は、別の `--output` を指定します。
+`outputs` は、要求した系列を保存対象にできない場合も候補を表示し、標準エラーに `OUTPUT SELECTION ERROR` を出して終了コード0を返します。
+出力選択まで含めた可否は `validate` で確認します。
+`plot` の系列を省略すると、保存された描画設定があればそれを使い、なければ描画対象を自動選択します。
+`network` の保存設定と既定値は[反応図の設定](#figures)を参照してください。
+再描画には未作成のディレクトリを使います。
 
 | 終了コード | 読み方 |
 |---|---|
-| `0` | 指定操作が完了。runでは積分成功、auditではその報告の合格 |
+| `0` | 指定操作が完了。runでは積分と要求した成果物の保存が成功。auditでは指定した検査に合格 |
 | `1` | runの積分失敗、またはauditの不合格。保存された場合はsummaryの理由と到達時刻を確認 |
 | `2` | 引数・入力・読込・数値保存の失敗。標準エラー出力を確認 |
 | `3` | 数値結果は保存済み。CSV・図・反応図の一部が失敗。artifacts.yamlで対象と理由を確認 |
 
-Pythonでは積分失敗に`IntegrationError.partial_result`が付く場合があります。最後の有効な受理点までを保存でき、要求終了時刻と到達時刻は異なります。
-初期入力の不正は積分前の例外です。途中結果の存在を計算成功へ読み替えません。
-数値結果を先に公開し、CSV・図は要求ごとに生成します。`ResultPaths.artifacts`と`artifacts.yaml`に成否を記録します。
-利用者による中断やOSによる停止の途中状態をcheckpointとして保存する機能はありません。
+Pythonでは時間積分の失敗時に `plasma_global.errors.IntegrationError` を受け取ります。
+`error.partial_result` がある場合は `write_result(error.partial_result, 出力先)` で、最後の有効な到達時刻までの結果を保存できます。
+失敗したときは `status` と要求・到達時刻を確認します。利用者の中断やOSの停止に対するcheckpointは提供していません。
 
 <a id="validation"></a>
 
-## 15. 妥当性を判断するための仕様
+## 15. 結果の妥当性を判断する
 
-| 確認 | 意味 | 意味しないこと |
-|---|---|---|
-| `validate` 成功 | 入力・参照・組み立てが成立 | 時間積分成功、実験一致 |
-| `status.success: true` | 要求した積分区間を完了 | 定常到達、装置予測精度 |
-| モデルの適用条件・省略の表示 | 選択した係数源・近似・無効な物理項を確認できる | 装置精度の認定 |
-| 収束試験に合格 | 指定量の数値誤差・保存間隔依存が小さい | 反応機構や物理仮定の正しさ |
-
-構築時と結果に、モデル固有の適用条件と、運動量移行data欠落・表面反応無効化などの省略を示します。
-構成全体をstandard/experimentalの二値で認定しません。実験と比較する量・条件・誤差は別に評価します。
+計算を比較に使う前に、要求した時刻まで到達したかを `summary.yaml` で確認します。
+モデルの適用条件と、運動量移行データの不足や表面機能の無効化などによる省略も読みます。
+保存済みの数値と指定した残差を確認するには `audit` を使います。
 
 ```bash
 plasma-global audit runs/argon-001/result.h5
 ```
 
-auditは保存結果だけを調べ、再積分しません。残差は利用者が保存済み系列と許容差を明示します。
-独立した参照のない自明なゼロ残差を再計算して精度認定する機能は設けていません。
+残差を検査するときは、保存系列と許容差を[操作一覧](#commands)の引数で指定します。
+数値誤差の評価には、関心量が積分の許容差と保存間隔にどれだけ依存するかを調べます。
+定常値が必要なら、終端近傍の変化と計算期間への依存も確認します。
 
-単位・元素／電荷／site、内部輸送の体積積分保存、解析解、独立quadrature、不連続forcing、
-HDF5再読込等で実装を検査しています。別コードとの比較は次の範囲に限定します。
-
-| 参照例 | 比較範囲と回帰許容差 |
-|---|---|
-| CRANE 2反応Ar | 同じ終端0.75 μsの最終Ar⁺密度、相対差5×10⁻⁴以下 |
-| ZDPlasKin由来例 | 元入力に揃えた初期状態から、参照の303時刻で種密度と回路量を比較。終端値と、参照最大値で規格化した波形誤差を記録 |
-
-独立実験の装置検証ではなく、元コードの実行全体の同一性も意味しません。
-終端時刻は出典に記録した参照波形の時刻と一致することを検査します。peakは各データの保存点での最大で、
-初期状態、係数の生成条件、終端と立上りで差が異なる理由は[理論資料のZDPlasKin比較](THEORY.md#zdplaskin-benchmark)で説明します。
-本書のAr図は再現可能な過渡例です。壁拡散が支配する後期残光については、規格化した電子密度を公開測定と比較しました。 [後期残光の結果と範囲](THEORY.md#argon-afterglow-benchmark)
-
-自分のcaseでは観測量、領域、吸収電力の定義を揃えます。許容差と保存間隔を別々に変え、壁面積・輸送・
-速度係数の感度を調べます。校正条件と評価条件を分け、測定誤差や根拠のある入力分布から不確かさを評価します。
-任意の±10%感度は信頼区間ではありません。afterglowの終端値を定常値、局所peakを体積平均、
-発電機の表示電力を吸収電力へ読み替えません。
+装置での予測精度を評価するときは、時刻、測定領域、観測量、電力の基準位置をモデルと対応させます。
+校正とは別の条件で比較し、測定誤差と、根拠のある入力の幅が結果へ与える影響を記録します。
+解析解との誤差、別コード回帰、公開測定との比較はそれぞれ確認対象が異なります。
+採用した比較条件、回帰許容差と解釈は[理論資料の検証方法](THEORY.md#verification)を参照してください。
 
 <a id="benchmark-cases"></a>
 
 ### 同梱検証ケースを実行する
 
-同梱する18の検証ケースは `cases/benchmarks/` にあります。各case YAMLで装置・物理モデル・出力を設定します。
-
-| `init` に渡す名前 | 数 | 確認する内容 |
-|---|---:|---|
-| `benchmarks/analytic-decay` | 1 | 一次反応の指数減衰 |
-| `benchmarks/analytic-transport` | 1 | 異なる体積間の移送と粒子保存 |
-| `benchmarks/argon-rtol-1e-6`、`benchmarks/argon-rtol-1e-7`、`benchmarks/argon-rtol-1e-8` | 3 | ODE許容差に対する波形の収束 |
-| `benchmarks/argon-power-minus10`、`benchmarks/argon-power-plus10` | 2 | 通電電力の±10%感度 |
-| `benchmarks/argon-pressure-minus10`、`benchmarks/argon-pressure-plus10` | 2 | 初期圧力の±10%感度 |
-| `benchmarks/argon-area-minus10`、`benchmarks/argon-area-plus10` | 2 | 壁面積の±10%感度 |
-| `benchmarks/argon-sampling-40us`、`benchmarks/argon-sampling-20us`、`benchmarks/argon-sampling-10us`、`benchmarks/argon-sampling-5us`、`benchmarks/argon-sampling-2.5us`、`benchmarks/argon-sampling-1.25us` | 6 | 保存間隔に対する反応イベント積分の収束 |
-| `benchmarks/argon-afterglow` | 1 | Ar 15 Paにおける後期残光の電子密度減衰と公開測定の比較 |
-
-例えば解析解と比べられる反応ケースは次で動かせます。
+`plasma-global init --list` で検証用の同梱ケースを探せます。例えば、一次反応の指数減衰を確かめるケースは次で計算できます。
 
 ```bash
 plasma-global init benchmarks/analytic-decay --output work/decay
@@ -2130,21 +2090,9 @@ plasma-global validate work/decay/case.yaml
 plasma-global run work/decay/case.yaml --output runs/decay-001
 ```
 
-この実行は時系列とCSVを生成します。解析解・参照値との比較、誤差集計、図を含む一式は、
-上の18ケースとCRANE・ZDPlasKinの2ケースを使います。保存参照と実行ツールを含む
-リポジトリのルートで、次を実行します。
-
-```bash
-python -m pip install ".[plot]"
-python -m tools.benchmarks.theory --output runs/theory-001
-```
-
-`results.json`、`figures/` の11図、`runs/` 配下の20計算結果を作ります。
-JSONの `case_yaml` はリポジトリからの入力path、`result_h5` は今回指定した出力先からの相対pathです。
-版管理した数値記録 `benchmarks/theory/results.json` に、生成結果ファイルそのものは同梱しません。
-保存参照は `benchmarks/references/` にあります。同梱データでオフライン再計算できます。
-個別ケースの計算はインストール済みパッケージだけで実行でき、`argon_analysis` の図には前述の描画依存を使います。
-各問題の設定、比較する量、グラフと数値の解釈は[Theoryのベンチマーク節](THEORY.md#benchmarks)を参照してください。
+この操作で指定したケースのHDF5とCSVが得られます。解析解などとの比較、誤差集計、図の生成をまとめて行う場合は
+[ベンチマークの再現手順](DEVELOPMENT.md#benchmark-reproduction)を参照してください。
+各問題の設定と比較結果は[理論資料のベンチマーク](THEORY.md#benchmarks)にあります。
 
 <a id="troubleshooting"></a>
 
@@ -2159,16 +2107,18 @@ JSONの `case_yaml` はリポジトリからの入力path、`result_h5` は今�
 | numpy・h5py等をimportできない | 使用Pythonとインストール先、エラーのライブラリ名を確認。社内端末の実行制限は管理者の導入手順に従い、別環境へ無差別に再インストールしない |
 | fileが見つからない | YAML内参照は記述元YAML基準、CLI引数は作業ディレクトリ基準。initしたbundleをディレクトリごと保つ |
 | unknown field・重複キーで止まる | 現行の公開変数名と階層を確認。断片例を追記する場合は既存キーを置換する |
+| `validate` は成功するがHDF5の保存で系列名エラーになる | 系列名に入るzone・種などのIDに `/` があれば、参照も含めて置き換える |
 | 出力先が既に存在する | 新しいrun名・図名を選ぶ |
 | pressureとdensityが合わない | p＝heavy密度和×kT。mole fraction指定ならseedの扱いも確認 |
 | 電子係数が範囲外になる | 軸・単位・混合比・生成条件を確認し、必要範囲の表を用意する |
 | Maxwellianのtail検査で止まる | 断面積の収録energy範囲と到達平均energyを確認する |
 | local-fieldの結合が収束しない | 表のμ、回路寸法、電圧、E/Nの整合を確認する |
-| 壁branchが足りない | 活動するイオンとsurfaceについて生成物・分岐を明示する |
+| 壁輸送に対応する境界反応が見つからない | 入射イオンとsurfaceの組を確認し、対応する境界反応と生成物を明示する |
 | 表面反応が効かない | surface kinetics、site、適用surfaceと警告を確認する |
 | 図で必要な系列がない | outputsで候補を調べ、outputへ指定して新しく計算する |
 | networkの時刻が選べない | 保存点との一致を確認し、必要ならsave_at_sで計算する |
 | dotやMatplotlibが見つからない | 描画依存とGraphviz本体のPATHを確認する |
+| MatplotlibがTkの初期化で止まる | ファイルに描画する場合は、実行するシェルで `MPLBACKEND=Agg` を設定してから再実行する。PowerShellでは `$env:MPLBACKEND = 'Agg'` |
 | result.h5だけでCSV・図がない | CSV・図は追加要求。`output` の選択を確認。保存系列があればexport／plotで再解析できる |
 | 通電が続くはずなのに止まる、流量が戻る | 同梱例のrun.stepsと各stepの指令を確認。一定値＋そのstepの上書きで決まり、前stepの上書きは継承されない |
 | successだが値が変わり続ける | successは期間完了。定常状態・周期定常が目的なら期間と終端の変化、同位相の周期差を評価 |
@@ -2182,9 +2132,8 @@ JSONの `case_yaml` はリポジトリからの入力path、`result_h5` は今�
 
 ## 17. 形式と互換方針
 
-公開入力はschema v5、結果HDF5はformat v4を受け付けます。両者のversionは別です。
-入力、係数CSV、結果の意味を一つに定め、旧形式の読込、別名、暗黙の値の補完を通常経路へ持ち込みません。
-現行仕様へ変更したときは、同梱ケース・参照データ・説明・検査も同じ形式へ揃えます。
+case入力はschema v5、化学機構はschema v4、保存結果はHDF5 format v4です。各形式の版は独立です。
+現行の読込はこの組合せに対応します。旧版の入力や保存結果を使う場合は、その形式に対応するパッケージ版で読みます。
 
 再計算には、対応するコード、実効case、係数の生成条件・出典、初期状態、運転時刻を記録します。
 結果の再解析ではHDF5に保存された系列名・領域・単位を使い、保存していない量を推定しません。
